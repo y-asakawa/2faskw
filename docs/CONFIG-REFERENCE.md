@@ -90,7 +90,7 @@ graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.com:5432/gra
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
 | `graphicalmatrix.api.enabled` | boolean | `false` recommended | 管理APIの有効/無効。 | 配布物では無効を推奨。 |
-| `graphicalmatrix.api.allowedCidrs` | CIDR list | `127.0.0.1/32,192.0.2.0/24` | API接続許可CIDR。 | Firewall/LB側でも制限する。 |
+| `graphicalmatrix.api.allowedCidrs` | CIDR list | `127.0.0.1/32,192.168.81.0/24` | API接続許可CIDR。 | Firewall/LB側でも制限する。 |
 | `graphicalmatrix.api.bearerTokenFile` | path | `/opt/shibboleth-idp/credentials/graphicalmatrix-api.token` | Bearer tokenファイル。 | ローテーション手順を用意する。 |
 | `graphicalmatrix.api.authFailureLimit` | integer | `5` | 認証失敗ロックまでの回数。 | token総当たり対策。 |
 | `graphicalmatrix.api.authFailureWindowSeconds` | seconds | `60` | 認証失敗カウント窓。 | 短すぎると攻撃検知が弱くなる。 |

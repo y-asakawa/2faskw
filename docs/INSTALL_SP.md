@@ -3,19 +3,19 @@
 ## 1. 概要
 
 GraphicalMatrix MFAのエンドツーエンド試験用に、SimpleSAMLphp SPを
-`192.0.2.61`へ構築し、IdP `idp.example.com`へ登録した。
+`192.168.81.61`へ構築し、IdP `idp.example.com`へ登録した。
 
 DATE_REDACTED時点の現行設定は以下。
 
 ```text
 IdP:
   Host: idp.example.com
-  IP: 192.0.2.60
+  IP: 192.168.81.60
   EntityID: https://idp.example.com/idp/shibboleth
 
 SP:
   Host: sp.example.com
-  IP: 192.0.2.61
+  IP: 192.168.81.61
   SimpleSAMLphp authsource: 2faskwsp
   EntityID: https://sp.example.com/simplesaml/sp
   Test app: https://sp.example.com/
@@ -30,7 +30,7 @@ SimpleSAMLphpのURL検証で拒否された。そのため、ホスト名とauth
 
 - SP側の現行HTTPS設定は`sp.example.com`で動作している。
 - SP側ApacheのHTTP/80リダイレクトは、確認時点では
-  `https://192.0.2.61/`へ向いている。HTTPSのSP動作には影響しないが、
+  `https://192.168.81.61/`へ向いている。HTTPSのSP動作には影響しないが、
   再構築時は`https://sp.example.com/`へ統一することを推奨する。
 - IdP側のmetadataファイル名は旧名の
   `/opt/shibboleth-idp/metadata/2faskw_sp.xml`のまま。
@@ -43,11 +43,11 @@ SimpleSAMLphpのURL検証で拒否された。そのため、ホスト名とauth
 読み取り専用で確認した結果。
 
 ```bash
-ssh operator@192.0.2.61 'hostnamectl; hostname -f'
-ssh operator@192.0.2.61 'sudo httpd -t'
-ssh operator@192.0.2.61 'systemctl is-active httpd php-fpm'
-ssh operator@192.0.2.61 'systemctl is-enabled httpd php-fpm'
-ssh operator@192.0.2.61 'sudo firewall-cmd --list-services'
+ssh operator@192.168.81.61 'hostnamectl; hostname -f'
+ssh operator@192.168.81.61 'sudo httpd -t'
+ssh operator@192.168.81.61 'systemctl is-active httpd php-fpm'
+ssh operator@192.168.81.61 'systemctl is-enabled httpd php-fpm'
+ssh operator@192.168.81.61 'sudo firewall-cmd --list-services'
 ```
 
 結果。
@@ -91,11 +91,11 @@ Location: https://idp.example.com/idp/profile/SAML2/Redirect/SSO?...SigAlg=...rs
 読み取り専用で確認した結果。
 
 ```bash
-ssh operator@192.0.2.60 'hostnamectl; hostname -f'
-ssh operator@192.0.2.60 'systemctl is-active jetty-idp.service'
-ssh operator@192.0.2.60 \
+ssh operator@192.168.81.60 'hostnamectl; hostname -f'
+ssh operator@192.168.81.60 'systemctl is-active jetty-idp.service'
+ssh operator@192.168.81.60 \
   'sudo grep -n -A5 -B3 SP2faskwTest /opt/shibboleth-idp/conf/metadata-providers.xml'
-ssh operator@192.0.2.60 \
+ssh operator@192.168.81.60 \
   'sudo grep -nE "EntityDescriptor|AssertionConsumerService|2faskwsp" /opt/shibboleth-idp/metadata/2faskw_sp.xml'
 ```
 
@@ -113,7 +113,7 @@ SP ACS in XML: https://sp.example.com/simplesaml/module.php/saml/sp/saml2-acs.ph
 IdP側`/etc/hosts`には以下が入っている。
 
 ```text
-192.0.2.61 sp.example.com
+192.168.81.61 sp.example.com
 ```
 
 DNSが正式に安定して解決できるなら、このhosts固定は不要になる。
@@ -155,7 +155,7 @@ SPサーバのログは`/home/operator/install-sp-01-packages.log`から
   原因はアンダースコア付きFQDNをSimpleSAMLphpが拒否したため。
 
 /home/operator/install-sp-06-canonical-ip.log
-  baseurlpath/entityIDを一時的に https://192.0.2.61/ 系へ変更。
+  baseurlpath/entityIDを一時的に https://192.168.81.61/ 系へ変更。
   SimpleSAMLphp cache clear実行。
   httpd/php-fpm active。
 
@@ -197,9 +197,9 @@ IdPサーバのログ。
 
 ```text
 SP FQDN: sp.example.com
-SP IP: 192.0.2.61
+SP IP: 192.168.81.61
 IdP FQDN: idp.example.com
-IdP IP: 192.0.2.60
+IdP IP: 192.168.81.60
 SP authsource: 2faskwsp
 SP EntityID: https://sp.example.com/simplesaml/sp
 ```
@@ -221,7 +221,7 @@ scp -i ~/.ssh/id_ed25519 \
   SP_test/202606041921132faskwsp/2faskwsp.cert.pem \
   SP_test/202606041921132faskwsp/2faskwsp.key \
   SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
-  operator@192.0.2.61:/home/operator/
+  operator@192.168.81.61:/home/operator/
 ```
 
 SPサーバで実行。
@@ -585,7 +585,7 @@ sudo vi /opt/shibboleth-idp/conf/metadata-providers.xml
 DNSで解決できない場合のみ、IdPサーバで実行。
 
 ```bash
-echo '192.0.2.61 sp.example.com' | sudo tee -a /etc/hosts
+echo '192.168.81.61 sp.example.com' | sudo tee -a /etc/hosts
 ```
 
 現行環境ではこのhostsエントリが入っている。
@@ -764,8 +764,8 @@ sudo systemctl restart jetty-idp.service
 
 ## 12. firewalld SSH接続元制限
 
-DATE_REDACTEDに、SPサーバ `192.0.2.61` のSSH接続元を
-`192.0.2.0/24` のみに制限した。
+DATE_REDACTEDに、SPサーバ `192.168.81.61` のSSH接続元を
+`192.168.81.0/24` のみに制限した。
 
 作業前の確認:
 
@@ -787,7 +787,7 @@ sudo sh -c "firewall-cmd --permanent --list-all > /root/firewalld-before-ssh-res
 
 ```bash
 sudo firewall-cmd --permanent --zone=public \
-  --add-rich-rule='rule family="ipv4" source address="192.0.2.0/24" service name="ssh" accept'
+  --add-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
 
 sudo firewall-cmd --permanent --zone=public --remove-service=ssh
 sudo firewall-cmd --reload
@@ -798,7 +798,7 @@ sudo firewall-cmd --reload
 ```bash
 sudo firewall-cmd --permanent --zone=public --query-service=ssh
 sudo firewall-cmd --permanent --zone=public \
-  --query-rich-rule='rule family="ipv4" source address="192.0.2.0/24" service name="ssh" accept'
+  --query-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
 sudo firewall-cmd --zone=public --list-all
 ```
 
@@ -809,5 +809,5 @@ query-service=ssh: no
 query-rich-rule: yes
 ```
 
-この設定により、SSHは `192.0.2.0/24` からのみ許可される。
+この設定により、SSHは `192.168.81.0/24` からのみ許可される。
 HTTP/HTTPS等の既存公開サービスは変更していない。

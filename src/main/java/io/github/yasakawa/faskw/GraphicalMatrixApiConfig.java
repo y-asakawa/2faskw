@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Properties;
 
 public final class GraphicalMatrixApiConfig {
-    private static final String DEFAULT_ALLOWED_CIDRS = "127.0.0.1/32,192.0.2.0/24";
+    private static final String DEFAULT_ALLOWED_CIDRS = "127.0.0.1/32,192.168.81.0/24";
 
     private final boolean enabled;
     private final String bearerToken;
