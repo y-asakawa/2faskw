@@ -91,10 +91,14 @@ Do not open public GitHub issues for suspected vulnerabilities. Follow
 ## Screenshots
 
 <p>
-  <img src="MFA01.png" alt="2FAS-KW screenshot 1" width="32%">
-  <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="32%">
-  <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="32%">
+  <img src="MFA01.png" alt="2FAS-KW screenshot 1" width="50%">
+  <P>
+  <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="50%">
+  <P>
+  <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="50%">
 </p>
+
+<P><img src="MFA10.png" alt="2FAS-KW screenshot 1" width="50%"></P>
 
 ## Releases
 
