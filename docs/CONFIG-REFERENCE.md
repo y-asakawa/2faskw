@@ -80,7 +80,7 @@ IdP runtime / Admin Tools がMFA DBへ接続するための設定。
 TLS verify-full例:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.ac.jp:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
+graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.com:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
 ```
 
 ## api.properties
@@ -143,7 +143,7 @@ Shibboleth WebAuthn authentication pluginの代表設定。
 
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
-| `idp.authn.webauthn.relyingPartyId` | FQDN | `idp.example.ac.jp` | WebAuthn RP ID。 | パスキーはRP IDに紐づく。IP運用ではなくFQDN/HTTPSが前提。 |
+| `idp.authn.webauthn.relyingPartyId` | FQDN | `idp.example.com` | WebAuthn RP ID。 | パスキーはRP IDに紐づく。IP運用ではなくFQDN/HTTPSが前提。 |
 | `idp.authn.webauthn.relyingPartyName` | string | `Example IdP` | 利用者に見えるRP名。 | 登録画面に表示される。 |
 | `idp.authn.webauthn.supportedPrincipals` | list | MFA principal list | WebAuthnが満たす認証Principal。 | SP側要求と整合させる。 |
 | `idp.authn.webauthn.StorageService` | bean id | `shibboleth.StorageService` | credential保存先StorageService。 | DB永続化する場合に指定。 |

@@ -82,7 +82,7 @@ remote_graphicalmatrix_src/release/
 
 ```bash
 gpg --quick-generate-key \
-  "2FAS-KW Plugin Release <2faskw-release@example.ac.jp>" \
+  "2FAS-KW Plugin Release <2faskw-release@example.com>" \
   rsa4096 sign 3y
 ```
 
@@ -175,13 +175,13 @@ sha256sum -c SHA256SUMS
 公開するmetadata例:
 
 ```properties
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.versions = 1.0.1
+io.github.yasakawa.faskw.authn.graphicalmatrix.versions = 1.0.1
 
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.downloadURL.1.0.1 = https://example.jp/shibboleth/plugins/2faskw/1.0.1/
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.baseName.1.0.1 = 2faskw-idp-plugin-1.0.1
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.idpVersionMin.1.0.1 = 5.2.0
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.idpVersionMax.1.0.1 = 6.0.0
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.supportLevel.1.0.1 = Current
+io.github.yasakawa.faskw.authn.graphicalmatrix.downloadURL.1.0.1 = https://example.com/shibboleth/plugins/2faskw/1.0.1/
+io.github.yasakawa.faskw.authn.graphicalmatrix.baseName.1.0.1 = 2faskw-idp-plugin-1.0.1
+io.github.yasakawa.faskw.authn.graphicalmatrix.idpVersionMin.1.0.1 = 5.2.0
+io.github.yasakawa.faskw.authn.graphicalmatrix.idpVersionMax.1.0.1 = 6.0.0
+io.github.yasakawa.faskw.authn.graphicalmatrix.supportLevel.1.0.1 = Current
 ```
 
 注意:
@@ -198,11 +198,11 @@ io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.supportLevel.1.0.1 = C
 例:
 
 ```properties
-plugin.id = io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix
+plugin.id = io.github.yasakawa.faskw.authn.graphicalmatrix
 plugin.version = 1.0.1
-plugin.license = /jp/ac/example/graphicalmatrix/plugin/LICENSE.txt
+plugin.license = /io/github/yasakawa/faskw/plugin/LICENSE.txt
 plugin.modules.required = idp.authn.Password,idp.authn.MFA
-plugin.url.0 = https://example.jp/shibboleth/plugins/2faskw/plugin.properties
+plugin.url.0 = https://example.com/shibboleth/plugins/2faskw/plugin.properties
 ```
 
 確認すること:
@@ -217,11 +217,11 @@ plugin.url.0 = https://example.jp/shibboleth/plugins/2faskw/plugin.properties
 例:
 
 ```text
-https://example.jp/shibboleth/plugins/2faskw/plugin.properties
-https://example.jp/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz
-https://example.jp/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz.asc
-https://example.jp/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS
-https://example.jp/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS.asc
+https://example.com/shibboleth/plugins/2faskw/plugin.properties
+https://example.com/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz
+https://example.com/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz.asc
+https://example.com/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS
+https://example.com/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS.asc
 ```
 
 公開サーバ要件:
@@ -283,7 +283,7 @@ sudo /opt/shibboleth-idp/bin/plugin.sh \
 
 ```bash
 sudo /opt/shibboleth-idp/bin/plugin.sh -l
-sudo /opt/shibboleth-idp/bin/plugin.sh -cl io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix
+sudo /opt/shibboleth-idp/bin/plugin.sh -cl io.github.yasakawa.faskw.authn.graphicalmatrix
 ```
 
 ## 更新試験
@@ -291,8 +291,8 @@ sudo /opt/shibboleth-idp/bin/plugin.sh -cl io.github.yasakawa.faskw.idp.plugin.a
 更新metadataを公開した状態で確認する。
 
 ```bash
-sudo /opt/shibboleth-idp/bin/plugin.sh -fl io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix
-sudo /opt/shibboleth-idp/bin/plugin.sh -u io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix
+sudo /opt/shibboleth-idp/bin/plugin.sh -fl io.github.yasakawa.faskw.authn.graphicalmatrix
+sudo /opt/shibboleth-idp/bin/plugin.sh -u io.github.yasakawa.faskw.authn.graphicalmatrix
 ```
 
 確認項目:

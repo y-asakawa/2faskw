@@ -87,12 +87,12 @@ make_servlet_block() {
     <!-- BEGIN 2FAS-KW Plugin servlet mappings -->
     <!-- GraphicalMatrix External authentication and management API endpoints. -->
     <listener>
-        <listener-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixDataSourceListener</listener-class>
+        <listener-class>io.github.yasakawa.faskw.GraphicalMatrixDataSourceListener</listener-class>
     </listener>
 
     <servlet>
         <servlet-name>GraphicalMatrixStart</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixStartServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixStartServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixStart</servlet-name>
@@ -101,7 +101,7 @@ make_servlet_block() {
 
     <servlet>
         <servlet-name>GraphicalMatrixVerify</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixVerifyServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixVerifyServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixVerify</servlet-name>
@@ -110,7 +110,7 @@ make_servlet_block() {
 
     <servlet>
         <servlet-name>GraphicalMatrixChange</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixChangeServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixChangeServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixChange</servlet-name>
@@ -119,7 +119,7 @@ make_servlet_block() {
 
     <servlet>
         <servlet-name>GraphicalMatrixGraphical</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixGraphicalServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixGraphicalServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixGraphical</servlet-name>
@@ -128,7 +128,7 @@ make_servlet_block() {
 
     <servlet>
         <servlet-name>GraphicalMatrixAsset</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixAssetServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixAssetServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixAsset</servlet-name>
@@ -137,7 +137,7 @@ make_servlet_block() {
 
     <servlet>
         <servlet-name>GraphicalMatrixAdminApi</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixAdminApiServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixAdminApiServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixAdminApi</servlet-name>
@@ -258,7 +258,7 @@ def harden_session_cookies(value):
     return value[:match.start()] + session + value[match.end():], session != original_session
 
 if begin not in text and end not in text and (
-    "io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixStartServlet" in text
+    "io.github.yasakawa.faskw.GraphicalMatrixStartServlet" in text
     or "/graphicalmatrix/start" in text
     or "/graphicalmatrix-admin/api/v1/*" in text
 ):

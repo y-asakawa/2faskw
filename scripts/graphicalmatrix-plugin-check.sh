@@ -131,7 +131,7 @@ if [[ -f "$PACKAGE_DIR/plugin-metadata/graphicalmatrix-plugin.properties" ]]; th
   package_base="$(basename "$PACKAGE_DIR")"
   package_version="${package_base#2faskw-idp-plugin-}"
   if [[ -n "$package_version" && "$package_version" != "$package_base" ]] \
-      && grep -q "io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.versions[[:space:]]*=[[:space:]]*$package_version" \
+      && grep -q "io.github.yasakawa.faskw.authn.graphicalmatrix.versions[[:space:]]*=[[:space:]]*$package_version" \
       "$PACKAGE_DIR/plugin-metadata/graphicalmatrix-plugin.properties"; then
     ok "plugin metadata version matches package version"
   else

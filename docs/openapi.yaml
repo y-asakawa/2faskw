@@ -10,7 +10,7 @@ info:
     HTTPS, bearer token authentication, source IP restrictions, and firewall or
     load balancer controls.
 servers:
-  - url: https://idp.example.ac.jp/idp/graphicalmatrix-admin/api/v1
+  - url: https://idp.example.com/idp/graphicalmatrix-admin/api/v1
     description: Production example
   - url: http://127.0.0.1:8080/idp/graphicalmatrix-admin/api/v1
     description: Local PoC example

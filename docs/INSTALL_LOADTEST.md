@@ -125,8 +125,8 @@ sysctl net.ipv4.tcp_tw_reuse
 例:
 
 ```text
-IdP: https://example.jp/idp/
-SP:  https://example.jp/
+IdP: https://idp.example.com/idp/
+SP:  https://sp.example.com/
 DB VIP: 192.0.2.64
 ```
 
@@ -212,7 +212,7 @@ export const options = {
 };
 
 export default function () {
-  const res = http.get('https://example.jp/idp/status');
+  const res = http.get('https://idp.example.com/idp/status');
   check(res, {
     'status is 200 or 403': (r) => r.status === 200 || r.status === 403,
   });

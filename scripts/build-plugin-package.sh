@@ -41,7 +41,7 @@ cp THIRD-PARTY-NOTICES.md "$DIST_DIR/THIRD-PARTY-NOTICES.md"
 cp "target/$BASE_NAME.jar" "$DIST_DIR/webapp/WEB-INF/lib/"
 cp target/plugin-lib/*.jar "$DIST_DIR/webapp/WEB-INF/lib/"
 
-cp src/main/resources/jp/ac/example/graphicalmatrix/plugin/plugin.properties \
+cp src/main/resources/io/github/yasakawa/faskw/plugin/plugin.properties \
   "$DIST_DIR/bootstrap/plugin.properties"
 cat > "$DIST_DIR/bootstrap/keys.txt" <<'EOF'
 # PoC placeholder.

@@ -27,6 +27,6 @@
     </util:map>
 
     <bean id="GraphicalMatrixMfaDecisionStrategy"
-          class="io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixMfaDecisionStrategy" />
+          class="io.github.yasakawa.faskw.GraphicalMatrixMfaDecisionStrategy" />
 
 </beans>

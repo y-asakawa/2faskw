@@ -53,12 +53,12 @@
 
     <!-- GraphicalMatrix External authentication endpoints. -->
     <listener>
-        <listener-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixDataSourceListener</listener-class>
+        <listener-class>io.github.yasakawa.faskw.GraphicalMatrixDataSourceListener</listener-class>
     </listener>
 
     <servlet>
         <servlet-name>GraphicalMatrixStart</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixStartServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixStartServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixStart</servlet-name>
@@ -67,7 +67,7 @@
 
     <servlet>
         <servlet-name>GraphicalMatrixVerify</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixVerifyServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixVerifyServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixVerify</servlet-name>
@@ -76,7 +76,7 @@
 
     <servlet>
         <servlet-name>GraphicalMatrixChange</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixChangeServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixChangeServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixChange</servlet-name>
@@ -85,7 +85,7 @@
 
     <servlet>
         <servlet-name>GraphicalMatrixGraphical</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixGraphicalServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixGraphicalServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixGraphical</servlet-name>
@@ -94,7 +94,7 @@
 
     <servlet>
         <servlet-name>GraphicalMatrixAsset</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixAssetServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixAssetServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixAsset</servlet-name>
@@ -103,7 +103,7 @@
 
     <servlet>
         <servlet-name>GraphicalMatrixAdminApi</servlet-name>
-        <servlet-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixAdminApiServlet</servlet-class>
+        <servlet-class>io.github.yasakawa.faskw.GraphicalMatrixAdminApiServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>GraphicalMatrixAdminApi</servlet-name>

@@ -496,7 +496,7 @@ totp_seed_storage_mode() {
   command -v java >/dev/null 2>&1 || die "java is required for TOTP seed storage mode"
   local cp
   cp="$(sequence_tool_classpath)"
-  java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedTool mode "$IDP_HOME"
+  java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedTool mode "$IDP_HOME"
 }
 
 bool_config() {
@@ -554,7 +554,7 @@ sequence_storage_encode() {
   [[ "$(config_prop 'graphicalmatrix.order' '1')" == "1" ]] && ordered="true"
   duplicates="$(bool_config 'graphicalmatrix.allow_duplicates' '0')"
   cp="$(sequence_tool_classpath)"
-  java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixSequenceTool \
+  java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
     encode "$IDP_HOME" "$sequence" "$ordered" "$duplicates"
 }
 
@@ -563,7 +563,7 @@ totp_seed_storage_encode() {
   command -v java >/dev/null 2>&1 || die "java is required for TOTP seed storage"
   local cp
   cp="$(sequence_tool_classpath)"
-  java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedTool \
+  java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedTool \
     encode "$IDP_HOME" "$seed"
 }
 
@@ -575,9 +575,9 @@ totp_seed_storage_migrate() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
-      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedMigrationTool "$1" "$IDP_HOME"' _ "$mode"
+      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedMigrationTool "$1" "$IDP_HOME"' _ "$mode"
   else
-    java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedMigrationTool "$mode" "$IDP_HOME"
+    java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedMigrationTool "$mode" "$IDP_HOME"
   fi
 }
 
@@ -589,9 +589,9 @@ sequence_storage_migrate() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
-      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixSequenceMigrationTool "$1" "$IDP_HOME"' _ "$mode"
+      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixSequenceMigrationTool "$1" "$IDP_HOME"' _ "$mode"
   else
-    java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixSequenceMigrationTool "$mode" "$IDP_HOME"
+    java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceMigrationTool "$mode" "$IDP_HOME"
   fi
 }
 
@@ -602,9 +602,9 @@ csv_export_stream() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
-      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixCsvExportTool "$IDP_HOME"'
+      bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixCsvExportTool "$IDP_HOME"'
   else
-    java -cp "$cp" io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixCsvExportTool "$IDP_HOME"
+    java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixCsvExportTool "$IDP_HOME"
   fi
 }
 

@@ -954,7 +954,7 @@ processed/failed/logsへ結果を保存
 DB1検証環境への配置:
 
 ```text
-server: 192.0.2.62 / example.jp
+server: 192.0.2.62 / db1.example.com
 prefix: /opt/graphicalmatrix-admin
 DB接続先: 192.0.2.64:5432 / DB VIP
 DBユーザー: graphicalmatrix_admin

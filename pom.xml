@@ -4,7 +4,7 @@
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.github.yasakawa.faskw.idp.plugin.2faskw</groupId>
+    <groupId>io.github.yasakawa.faskw</groupId>
     <artifactId>2faskw-idp-plugin</artifactId>
     <version>1.0.1</version>
     <packaging>jar</packaging>
@@ -20,8 +20,8 @@
     </licenses>
 
     <organization>
-        <name>Shinshu University</name>
-        <url>https://example.jp/</url>
+        <name>2FAS-KW Project</name>
+        <url>https://github.com/y-asakawa/2faskw</url>
     </organization>
 
     <properties>
@@ -123,9 +123,6 @@
     </dependencies>
 
     <build>
-        <!-- Current PoC sources are kept flat under remote_graphicalmatrix_src. -->
-        <sourceDirectory>${project.basedir}</sourceDirectory>
-
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -134,10 +131,6 @@
                 <configuration>
                     <release>${maven.compiler.release}</release>
                     <encoding>${project.build.sourceEncoding}</encoding>
-                    <includes>
-                        <include>*.java</include>
-                        <include>src/main/java/**/*.java</include>
-                    </includes>
                 </configuration>
             </plugin>
 
@@ -150,8 +143,8 @@
                         <manifestEntries>
                             <Implementation-Title>${project.name}</Implementation-Title>
                             <Implementation-Version>${project.version}</Implementation-Version>
-                            <Implementation-Vendor>Shinshu University</Implementation-Vendor>
-                            <Automatic-Module-Name>io.github.yasakawa.faskw.graphicalmatrix</Automatic-Module-Name>
+                            <Implementation-Vendor>2FAS-KW Project</Implementation-Vendor>
+                            <Automatic-Module-Name>io.github.yasakawa.faskw</Automatic-Module-Name>
                         </manifestEntries>
                     </archive>
                 </configuration>

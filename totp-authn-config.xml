@@ -13,6 +13,6 @@
 
     <!-- Read TOTP Base32 seeds from the local MFA DB only for users whose mfa_method is TOTP. -->
     <bean id="shibboleth.authn.TOTP.SeedSource"
-          class="io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedSource" />
+          class="io.github.yasakawa.faskw.GraphicalMatrixTotpSeedSource" />
 
 </beans>

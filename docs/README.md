@@ -638,7 +638,7 @@ WebAuthnプラグインを使う場合の代表項目です。
 FQDN/HTTPSが正しく設定されていることが前提です。
 
 ```properties
-idp.authn.webauthn.relyingPartyId = idp.example.ac.jp
+idp.authn.webauthn.relyingPartyId = idp.example.com
 idp.authn.webauthn.relyingPartyName = Example IdP
 idp.authn.webauthn.supportedPrincipals = \
     saml2/http://example.org/ac/classes/mfa, \

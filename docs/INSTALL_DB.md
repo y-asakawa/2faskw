@@ -8,8 +8,8 @@ DB 2台構成で構築した。
 対象:
 
 ```text
-DB1: 192.0.2.62 / example.jp
-DB2: 192.0.2.63 / example.jp
+DB1: 192.0.2.62 / db1.example.com
+DB2: 192.0.2.63 / db2.example.com
 DB VIP: 192.0.2.64
 OS: Rocky Linux 10.2
 CPU: aarch64
@@ -18,8 +18,8 @@ CPU: aarch64
 hostnameは識別しやすいように固定した。
 
 ```bash
-sudo hostnamectl set-hostname example.jp  # DB1
-sudo hostnamectl set-hostname example.jp  # DB2
+sudo hostnamectl set-hostname db1.example.com  # DB1
+sudo hostnamectl set-hostname db2.example.com  # DB2
 ```
 
 構成:
@@ -652,7 +652,7 @@ PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 確認結果:
 
 ```text
-net.shibboleth.idp.plugin.authn.webauthn / test-user001@example-u.ac.jp のcredential 1件を確認。
+net.shibboleth.idp.plugin.authn.webauthn / test-user001@example.com のcredential 1件を確認。
 ```
 
 IdPログにはWebAuthn pluginの以下のINFOが出る。
@@ -679,7 +679,7 @@ GraphicalMatrix側の `GraphicalMatrixTotpSeedSource` を `shibboleth.authn.TOTP
 
 ```xml
 <bean id="shibboleth.authn.TOTP.SeedSource"
-      class="io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixTotpSeedSource" />
+      class="io.github.yasakawa.faskw.GraphicalMatrixTotpSeedSource" />
 ```
 
 `GraphicalMatrixTotpSeedSource` は `/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` を読み、
@@ -1453,7 +1453,7 @@ IdP/Admin ToolsへローカルCA証明書を配置する
 
 ```text
 DB VIP:      192.0.2.64
-DB VIP FQDN: example.jp
+DB VIP FQDN: db-graphicalmatrix.example.com
 ```
 
 `verify-full` では、JDBC URLの接続先と証明書SANが一致する必要がある。
@@ -1461,8 +1461,8 @@ DB VIP FQDN: example.jp
 FQDNで接続する場合:
 
 ```text
-JDBC接続先: example.jp
-証明書SAN: DNS:example.jp
+JDBC接続先: db-graphicalmatrix.example.com
+証明書SAN: DNS:db-graphicalmatrix.example.com
 ```
 
 IPで接続する場合:
@@ -1504,7 +1504,7 @@ db-vip.key         # DB1/DB2へ配置するサーバ秘密鍵
 証明書SAN例:
 
 ```text
-DNS:example.jp
+DNS:db-graphicalmatrix.example.com
 IP Address:192.0.2.64
 ```
 
@@ -1652,7 +1652,7 @@ sudo -u jetty test -r /opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
 FQDN推奨:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://example.jp:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
+graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.com:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
 ```
 
 IP SAN証明書を使う場合:
@@ -1686,7 +1686,7 @@ WebAuthn StorageServiceは `db.properties` ではなく、
 FQDN推奨:
 
 ```xml
-p:url="jdbc:postgresql://example.jp:5432/graphicalmatrix?sslmode=verify-full&amp;sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt"
+p:url="jdbc:postgresql://db-graphicalmatrix.example.com:5432/graphicalmatrix?sslmode=verify-full&amp;sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt"
 ```
 
 XMLでは `&` を `&amp;` として書く。
@@ -1720,7 +1720,7 @@ sudo install -m 0640 db-ca.crt \
 `/opt/graphicalmatrix-admin/conf/graphicalmatrix/db.properties`:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://example.jp:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/graphicalmatrix-admin/credentials/db-ssl/db-ca.crt
+graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.com:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/graphicalmatrix-admin/credentials/db-ssl/db-ca.crt
 ```
 
 ### 17.12 replicationのSSL化
@@ -1759,7 +1759,7 @@ FQDN:
 
 ```bash
 PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
-psql "host=example.jp port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
+psql "host=db-graphicalmatrix.example.com port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
   -c "SELECT current_user, current_database(), ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
 ```
 
@@ -1810,7 +1810,7 @@ SSL接続:
 
 ```bash
 PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
-psql "host=example.jp port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
+psql "host=db-graphicalmatrix.example.com port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
   -c "SELECT 1;"
 ```
 
@@ -2286,18 +2286,18 @@ Jetty thread使用率
 対象:
 
 ```text
-VIP: example.jp  / 192.0.2.64
-DB1: example.jp / 192.0.2.62
-DB2: example.jp / 192.0.2.63
-CA:  iic_example.jp
+VIP: db.example.com  / 192.0.2.64
+DB1: db1.example.com / 192.0.2.62
+DB2: db2.example.com / 192.0.2.63
+CA:  private-ca.example.com
 ```
 
 証明書SAN:
 
 ```text
-2faskwdb:  DNS:example.jp,  IP Address:192.0.2.64
-2faskwdb1: DNS:example.jp, IP Address:192.0.2.62
-2faskwdb2: DNS:example.jp, IP Address:192.0.2.63
+2faskwdb:  DNS:db.example.com,  IP Address:192.0.2.64
+2faskwdb1: DNS:db1.example.com, IP Address:192.0.2.62
+2faskwdb2: DNS:db2.example.com, IP Address:192.0.2.63
 ```
 
 現在のHAProxyはTCP透過であり、TLS終端はPostgreSQL側で行う。

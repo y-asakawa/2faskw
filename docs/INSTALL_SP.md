@@ -3,23 +3,23 @@
 ## 1. 概要
 
 GraphicalMatrix MFAのエンドツーエンド試験用に、SimpleSAMLphp SPを
-`192.0.2.61`へ構築し、IdP `example.jp`へ登録した。
+`192.0.2.61`へ構築し、IdP `idp.example.com`へ登録した。
 
 DATE_REDACTED時点の現行設定は以下。
 
 ```text
 IdP:
-  Host: example.jp
+  Host: idp.example.com
   IP: 192.0.2.60
-  EntityID: https://example.jp/idp/shibboleth
+  EntityID: https://idp.example.com/idp/shibboleth
 
 SP:
-  Host: example.jp
+  Host: sp.example.com
   IP: 192.0.2.61
   SimpleSAMLphp authsource: 2faskwsp
-  EntityID: https://example.jp/simplesaml/sp
-  Test app: https://example.jp/
-  Metadata: https://example.jp/simplesaml/module.php/saml/sp/metadata/2faskwsp
+  EntityID: https://sp.example.com/simplesaml/sp
+  Test app: https://sp.example.com/
+  Metadata: https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 ```
 
 当初は`2faskw_sp`をホスト名として扱ったが、アンダースコアを含むFQDNは
@@ -28,10 +28,10 @@ SimpleSAMLphpのURL検証で拒否された。そのため、ホスト名とauth
 
 注意点:
 
-- SP側の現行HTTPS設定は`example.jp`で動作している。
+- SP側の現行HTTPS設定は`sp.example.com`で動作している。
 - SP側ApacheのHTTP/80リダイレクトは、確認時点では
   `https://192.0.2.61/`へ向いている。HTTPSのSP動作には影響しないが、
-  再構築時は`https://example.jp/`へ統一することを推奨する。
+  再構築時は`https://sp.example.com/`へ統一することを推奨する。
 - IdP側のmetadataファイル名は旧名の
   `/opt/shibboleth-idp/metadata/2faskw_sp.xml`のまま。
   ただしXML内容は`2faskwsp`のEntityID/ACSへ更新済み。
@@ -53,7 +53,7 @@ ssh operator@192.0.2.61 'sudo firewall-cmd --list-services'
 結果。
 
 ```text
-Hostname: example.jp
+Hostname: sp.example.com
 OS: Rocky Linux 10.2 aarch64
 Apache config: Syntax OK
 httpd: active / enabled
@@ -66,15 +66,15 @@ HTTPSエンドポイント。
 ```bash
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w 'root=%{http_code}\n' \
-  https://example.jp/
+  https://sp.example.com/
 
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w 'metadata=%{http_code}\n' \
-  https://example.jp/simplesaml/module.php/saml/sp/metadata/2faskwsp
+  https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -D - -o /dev/null \
-  'https://example.jp/?login=1'
+  'https://sp.example.com/?login=1'
 ```
 
 結果。
@@ -83,7 +83,7 @@ curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
 root=200
 metadata=200
 login start=303
-Location: https://example.jp/idp/profile/SAML2/Redirect/SSO?...SigAlg=...rsa-sha256...
+Location: https://idp.example.com/idp/profile/SAML2/Redirect/SSO?...SigAlg=...rsa-sha256...
 ```
 
 ### IdPサーバ
@@ -102,18 +102,18 @@ ssh operator@192.0.2.60 \
 結果。
 
 ```text
-Hostname: example.jp
+Hostname: idp.example.com
 jetty-idp.service: active
 MetadataProvider id: SP2faskwTest
 metadataFile: %{idp.home}/metadata/2faskw_sp.xml
-SP EntityID in XML: https://example.jp/simplesaml/sp
-SP ACS in XML: https://example.jp/simplesaml/module.php/saml/sp/saml2-acs.php/2faskwsp
+SP EntityID in XML: https://sp.example.com/simplesaml/sp
+SP ACS in XML: https://sp.example.com/simplesaml/module.php/saml/sp/saml2-acs.php/2faskwsp
 ```
 
 IdP側`/etc/hosts`には以下が入っている。
 
 ```text
-192.0.2.61 example.jp
+192.0.2.61 sp.example.com
 ```
 
 DNSが正式に安定して解決できるなら、このhosts固定は不要になる。
@@ -149,7 +149,7 @@ SPサーバのログは`/home/operator/install-sp-01-packages.log`から
   TCP/80, TCP/443待受を確認。
 
 /home/operator/install-sp-05-local-validation.log
-  初回証明書はCN=2faskw_example.jp。
+  初回証明書はCN=2faskw_sp.example.com。
   / はHTTP 200。
   /simplesaml/ と /simplesaml/admin/ はHTTP 500。
   原因はアンダースコア付きFQDNをSimpleSAMLphpが拒否したため。
@@ -196,12 +196,12 @@ IdPサーバのログ。
 ### 4.1 前提
 
 ```text
-SP FQDN: example.jp
+SP FQDN: sp.example.com
 SP IP: 192.0.2.61
-IdP FQDN: example.jp
+IdP FQDN: idp.example.com
 IdP IP: 192.0.2.60
 SP authsource: 2faskwsp
-SP EntityID: https://example.jp/simplesaml/sp
+SP EntityID: https://sp.example.com/simplesaml/sp
 ```
 
 ローカル証明書ファイル。
@@ -316,9 +316,9 @@ sudo chown -R root:root /opt/simplesamlphp-2.5.2
 編集方針。
 
 ```php
-'baseurlpath' => 'https://example.jp/simplesaml/',
+'baseurlpath' => 'https://sp.example.com/simplesaml/',
 'technicalcontact_name' => '2faskw SP Administrator',
-'technicalcontact_email' => 'root@example.jp',
+'technicalcontact_email' => 'root@sp.example.com',
 'secretsalt' => '<random string>',
 'trusted.url.regex' => true,
 'trusted.url.domains' => ['2faskwsp\.example-u\.ac\.jp'],
@@ -361,8 +361,8 @@ $config = [
 
     '2faskwsp' => [
         'saml:SP',
-        'entityID' => 'https://example.jp/simplesaml/sp',
-        'idp' => 'https://example.jp/idp/shibboleth',
+        'entityID' => 'https://sp.example.com/simplesaml/sp',
+        'idp' => 'https://idp.example.com/idp/shibboleth',
         'discoURL' => null,
         'privatekey' => '2faskwsp.key',
         'certificate' => '2faskwsp.cert.pem',
@@ -389,7 +389,7 @@ php -l /opt/simplesamlphp/config/authsources.php
 IdPメタデータを取得し、SimpleSAMLphp形式へ変換して記載する。
 
 ```bash
-curl -o /tmp/idp-metadata.xml https://example.jp/idp/shibboleth
+curl -o /tmp/idp-metadata.xml https://idp.example.com/idp/shibboleth
 ```
 
 SimpleSAMLphp 2.5.2では、`SingleSignOnService`と`SingleLogoutService`を
@@ -398,17 +398,17 @@ SimpleSAMLphp 2.5.2では、`SingleSignOnService`と`SingleLogoutService`を
 ```php
 <?php
 
-$metadata['https://example.jp/idp/shibboleth'] = [
+$metadata['https://idp.example.com/idp/shibboleth'] = [
     'SingleSignOnService' => [
         [
             'Binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
-            'Location' => 'https://example.jp/idp/profile/SAML2/Redirect/SSO',
+            'Location' => 'https://idp.example.com/idp/profile/SAML2/Redirect/SSO',
         ],
     ],
     'SingleLogoutService' => [
         [
             'Binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
-            'Location' => 'https://example.jp/idp/profile/SAML2/Redirect/SLO',
+            'Location' => 'https://idp.example.com/idp/profile/SAML2/Redirect/SLO',
         ],
     ],
     'certData' => '<IdP signing certificate body>',
@@ -434,20 +434,20 @@ php -l /opt/simplesamlphp/metadata/saml20-idp-remote.php
 推奨設定例。
 
 ```apache
-ServerName example.jp
+ServerName sp.example.com
 Listen 443 https
 SSLSessionCache shmcb:/run/httpd/sslcache(512000)
 SSLSessionCacheTimeout 300
 
 <VirtualHost *:80>
-    ServerName example.jp
-    ServerAlias example.jp
-    Redirect permanent / https://example.jp/
+    ServerName sp.example.com
+    ServerAlias sp.example.com
+    Redirect permanent / https://sp.example.com/
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName example.jp
-    ServerAlias example.jp
+    ServerName sp.example.com
+    ServerAlias sp.example.com
     DocumentRoot /var/www/2faskwsp
 
     SSLEngine on
@@ -506,10 +506,10 @@ require_once '/opt/simplesamlphp/src/_autoload.php';
 $auth = new SimpleSAML\Auth\Simple('2faskwsp');
 
 if (isset($_GET['login'])) {
-    $auth->requireAuth(['ReturnTo' => 'https://example.jp/']);
+    $auth->requireAuth(['ReturnTo' => 'https://sp.example.com/']);
 }
 if (isset($_GET['logout'])) {
-    $auth->logout('https://example.jp/');
+    $auth->logout('https://sp.example.com/');
 }
 
 $authenticated = $auth->isAuthenticated();
@@ -541,7 +541,7 @@ IdPサーバで実行。
 
 ```bash
 curl -o /tmp/2faskwsp.xml \
-  https://example.jp/simplesaml/module.php/saml/sp/metadata/2faskwsp
+  https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
 grep -E 'entityID|AssertionConsumerService|SingleLogoutService|X509Certificate' \
   /tmp/2faskwsp.xml
@@ -585,7 +585,7 @@ sudo vi /opt/shibboleth-idp/conf/metadata-providers.xml
 DNSで解決できない場合のみ、IdPサーバで実行。
 
 ```bash
-echo '192.0.2.61 example.jp' | sudo tee -a /etc/hosts
+echo '192.0.2.61 sp.example.com' | sudo tee -a /etc/hosts
 ```
 
 現行環境ではこのhostsエントリが入っている。
@@ -612,15 +612,15 @@ SPサーバまたは作業端末から確認。
 ```bash
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w '%{http_code}\n' \
-  https://example.jp/
+  https://sp.example.com/
 
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w '%{http_code}\n' \
-  https://example.jp/simplesaml/module.php/saml/sp/metadata/2faskwsp
+  https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
 curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
   -D - -o /dev/null \
-  'https://example.jp/?login=1'
+  'https://sp.example.com/?login=1'
 ```
 
 期待結果。
@@ -629,13 +629,13 @@ curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
 / : 200
 /simplesaml/module.php/saml/sp/metadata/2faskwsp : 200
 /?login=1 : 303
-Location: https://example.jp/idp/profile/SAML2/Redirect/SSO
+Location: https://idp.example.com/idp/profile/SAML2/Redirect/SSO
 SigAlg: rsa-sha256
 ```
 
 ブラウザ試験。
 
-1. `https://example.jp/`を開く。
+1. `https://sp.example.com/`を開く。
 2. `Login with 2faskw IdP`を押す。
 3. IdPでLDAP Password + GraphicalMatrix MFAを完了する。
 4. SPへ戻り、SAML attributesが表示されることを確認する。
@@ -694,7 +694,7 @@ SP FQDNを変更した
 
 ```bash
 curl -o /tmp/2faskwsp.xml \
-  https://example.jp/simplesaml/module.php/saml/sp/metadata/2faskwsp
+  https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
 sudo install -o jetty -g jetty -m 0644 /tmp/2faskwsp.xml \
   /opt/shibboleth-idp/metadata/2faskw_sp.xml
