@@ -35,7 +35,7 @@
         <shibboleth.shared.version>9.2.3</shibboleth.shared.version>
         <opensaml.version>5.2.3</opensaml.version>
         <totp.plugin.version>2.3.1</totp.plugin.version>
-        <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
+        <jakarta.servlet.version>6.1.0</jakarta.servlet.version>
         <spring.framework.version>7.0.8</spring.framework.version>
         <httpclient.version>4.5.14</httpclient.version>
         <slf4j.version>2.0.18</slf4j.version>
