@@ -93,6 +93,12 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
+            <groupId>org.opensaml</groupId>
+            <artifactId>opensaml-storage-api</artifactId>
+            <version>${opensaml.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>net.shibboleth</groupId>
             <artifactId>shib-support</artifactId>
             <version>${shibboleth.shared.version}</version>

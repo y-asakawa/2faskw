@@ -158,6 +158,99 @@ graphicalmatrix.change.ldapRateLimit.key = ip-user
 
 `graphicalmatrix.choice` を変更した場合は、既存ユーザーのsequence数も新しい設定に合わせる必要がある。
 
+## 画面のHTMLやCSSを編集するにはどうすればよいか
+
+GraphicalMatrixプラグインの画面テンプレートとCSSは、通常、IdP本体の `views` ではなく次の場所に配置される。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/views
+/opt/shibboleth-idp/conf/graphicalmatrix/assets
+```
+
+IdP本体の `/opt/shibboleth-idp/views` には `login.vm` や `totp.vm` などのShibboleth IdP本体またはIdPプラグイン用テンプレートが配置される。GraphicalMatrixの認証画面や変更画面を編集する場合は、原則として `/opt/shibboleth-idp/conf/graphicalmatrix/views` を編集する。
+
+主な編集対象は次のとおり。
+
+| 目的 | ファイル |
+|---|---|
+| GraphicalMatrix認証画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html` |
+| 変更開始画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-start.html` |
+| 現在のGraphicalMatrix確認画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html` |
+| MFA方式変更メニュー | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-menu.html` |
+| 新しいGraphicalMatrix選択画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html` |
+| MFA方式選択画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-method.html` |
+| 変更完了画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/change-complete.html` |
+| 2FAS-KW側のTOTP QR登録画面 | `/opt/shibboleth-idp/conf/graphicalmatrix/views/totp-register.html` |
+| GraphicalMatrix画面CSS | `/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css` |
+
+設定ファイルでは、次の項目で参照先を確認できる。
+
+```bash
+sudo grep -E 'graphicalmatrix.view.template|graphicalmatrix.view.change|graphicalmatrix.view.css' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+HTMLテンプレートとCSSだけを編集する場合は、通常、WAR再構築とJetty再起動は不要である。保存後、ブラウザを再読み込みして確認する。CSSのキャッシュを避けたい検証環境では、`graphicalmatrix.view.css.cacheSeconds = 0` にしておくと確認しやすい。
+
+設定検査を行う場合は、次のコマンドを実行する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+一方で、選択済み画像リストの動的表示、ボタン押下時のJavaScript生成、Servlet処理など、Javaクラス側で生成している画面要素を変更した場合は、Plugin JARの更新、WAR再構築、Jetty再起動が必要になる。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+### TOTPとWebAuthnの画面を編集する場合
+
+TOTPとWebAuthnは、どの画面を編集したいかで編集場所が異なる。
+
+2FAS-KWが表示するTOTP QR登録画面は、GraphicalMatrix側の外部HTMLテンプレートである。MFA方式をTOTPへ変更した後、初回登録時に表示されるQRコード登録画面を変更する場合は、次のファイルを編集する。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/views/totp-register.html
+```
+
+このテンプレートは `/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css` を使う。通常、WAR再構築とJetty再起動は不要で、保存後の次回表示から反映される。
+
+一方、Shibboleth TOTP Plugin自体が表示するTOTP認証画面は、IdP本体側のVelocityテンプレートである。通常は次のファイルを編集する。
+
+```text
+/opt/shibboleth-idp/views/totp.vm
+/opt/shibboleth-idp/views/totp-error.vm
+```
+
+WebAuthn Pluginの登録画面や認証画面は、Shibboleth WebAuthn Plugin側のテンプレートを編集する。配置は導入済みプラグインのバージョンやインストール方法で変わる可能性があるため、まず実ファイルを確認する。
+
+```bash
+sudo find /opt/shibboleth-idp/views -iname '*webauthn*' -print
+```
+
+例:
+
+```text
+/opt/shibboleth-idp/views/webauthn
+```
+
+`/opt/shibboleth-idp/views/*.vm` や `/opt/shibboleth-idp/views/webauthn/*` を編集した場合は、GraphicalMatrixの外部HTMLとは異なり、Jetty再起動を推奨する。
+
+```bash
+sudo systemctl restart jetty-idp.service
+```
+
+通常、Velocityテンプレートだけを編集した場合はWAR再構築までは不要である。ただし、Plugin JAR、Servlet、IdP認証フロー、`web.xml`、依存ライブラリを変更した場合は、WAR再構築とJetty再起動を行う。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
 ## Jettyの再起動が必要になるのはどのような場合か
 
 変更対象がJavaクラス、Servlet登録、IdP認証フロー、JVM設定に関係する場合は、原則としてJettyを再起動する。

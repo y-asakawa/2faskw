@@ -209,20 +209,30 @@ SELECT COUNT(*) AS enrollment_count FROM graphicalmatrix_enrollment;"
 
 h2_export() {
   [[ -n "$OUTPUT_FILE" ]] || die "--output is required"
-  local output_dir
+  local output_dir temp_dir temp_file old_umask
   output_dir="$(dirname "$OUTPUT_FILE")"
   [[ -d "$output_dir" ]] || die "output directory does not exist: $output_dir"
   [[ -w "$output_dir" ]] || die "output directory is not writable by current user: $output_dir"
+  [[ ! -L "$OUTPUT_FILE" ]] || die "output file must not be a symlink: $OUTPUT_FILE"
 
-  rm -f "$OUTPUT_FILE"
+  old_umask="$(umask)"
+  umask 077
+  temp_dir="$(mktemp -d "$output_dir/.graphicalmatrix-h2-export.XXXXXX")"
+  umask "$old_umask"
+  chmod 0700 "$temp_dir"
+  temp_file="$temp_dir/export.csv"
+  trap 'rm -rf "$temp_dir"' RETURN
   local sql
   sql="$(h2_init_sql)
-CALL CSVWRITE('$(printf "%s" "$OUTPUT_FILE" | sed "s/'/''/g")',
+	CALL CSVWRITE('$(printf "%s" "$temp_file" | sed "s/'/''/g")',
 '$(migration_select | tr '\n' ' ' | sed "s/'/''/g")',
 'charset=UTF-8 fieldSeparator=, fieldDelimiter=\"');"
   run_h2_sql "$sql"
-  [[ -f "$OUTPUT_FILE" ]] || die "CSV export failed: $OUTPUT_FILE"
-  chmod 0600 "$OUTPUT_FILE"
+  [[ -f "$temp_file" ]] || die "CSV export failed: $temp_file"
+  chmod 0600 "$temp_file"
+  mv -f "$temp_file" "$OUTPUT_FILE"
+  rmdir "$temp_dir"
+  trap - RETURN
   echo "exported_csv=$OUTPUT_FILE"
   echo "csv_mode=0600"
   echo "csv_contains_secret_data=yes"

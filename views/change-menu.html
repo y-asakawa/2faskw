@@ -20,12 +20,7 @@
         <input type="hidden" name="csrfToken" value="{{csrfToken}}">
         <button class="primary" type="submit">GraphicalMatrix画像を変更</button>
       </form>
-      <form method="post" action="{{formAction}}">
-        <input type="hidden" name="mode" value="choose-method">
-        <input type="hidden" name="user" value="{{user}}">
-        <input type="hidden" name="csrfToken" value="{{csrfToken}}">
-        <button type="submit">MFA方式を変更</button>
-      </form>
+      {{methodChangeAction}}
     </div>
   </section>
 </main>

@@ -945,7 +945,84 @@ processingへ移動してから処理する
 処理済みCSVは保存期間を決めて削除する
 ```
 
-### 7.2 実装済みプロビジョニング機能
+### 7.2 プロビジョニングCSV形式
+
+DB保存でプロビジョニングを行う場合、CSVは以下の形式にする。
+
+```csv
+action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
+A,user001,GraphicalMatrix,on,"img01,img02,img03,img04","img03,img07,img11,img14"
+M,user001,TOTP,off,"img01,img02,img03,img04","img05,img06,img07,img08"
+D,user001
+```
+
+ユーザーをGraphicalMatrixへ戻し、初期sequenceで再ログインさせ、次回変更を強制するリセット例:
+
+```csv
+M,user001,GraphicalMatrix,on,"img01,img02,img03,img04",
+```
+
+この形式では、`sequence` は空欄ですが、`initial_sequence` から補完される。
+末尾のカンマは6列目の空欄を表すため必要。省略すると5列扱いになり、CSV列数不足として失敗する。
+TOTP seed削除やWebAuthn credential削除までは行わないため、TOTP/WebAuthnも完全にリセットする場合は管理コマンドを併用する。
+
+列:
+
+| 列 | 必須 | 内容 |
+| --- | --- | --- |
+| `action` | 必須 | `A`, `M`, `D` のいずれか。 |
+| `user_id` | 必須 | 対象ユーザーID。 |
+| `mfa_method` | `A` / `M` で必須 | `GraphicalMatrix`, `TOTP`, `WebAuthn`。 |
+| `force_sequence_change` | `A` / `M` で必須 | `on` または `off`。 |
+| `initial_sequence` | `A` で推奨、`M` で任意 | RESET時に戻す初期sequence。空の場合は `sequence` から補完される。 |
+| `sequence` | `A` / `M` で推奨 | 現在のGraphicalMatrix sequence。空の場合は `initial_sequence` から補完される。 |
+
+`sequence` と `initial_sequence` はカンマを含むため、CSVではダブルクォートで囲む。
+画像IDの代わりに、`graphicalmatrix.aliases` で定義した `A B C D` 形式も利用できる。
+`A` / `M` ではCSVとして6列必要で、`initial_sequence` と `sequence` の少なくとも一方に値が必要。
+両方を指定した場合は、`initial_sequence` はRESET用の初期値、`sequence` は現在値として扱う。
+
+`M` で `initial_sequence` を空にした場合、既存DBの `initial_sequence` を維持するのではなく、
+指定された `sequence` から補完して更新する。既存の初期値を維持したい場合は、現在の
+`initial_sequence` と同じ値をCSVへ明示する。
+
+CSVに書く `sequence` は平文の画像IDまたはaliasで指定する。`kw1:`、`aesgcm1:`、`hsp1:` などの
+保存済み形式をCSVへ直接書かない。import時に、現在の `graphicalmatrix.sequence.storage` に従って
+DB保存用の値へ変換される。`initial_sequence` はRESET用の平文初期値として保存される。
+
+actionの意味:
+
+| action | 通常CSV | プロビジョニングCSV |
+| --- | --- | --- |
+| `A` | 新規追加。既存ユーザーがいる場合はエラー。 | 新規追加。既存DISABLEDユーザーは再有効化して更新。 |
+| `M` | 既存ユーザーを更新。 | 既存ユーザーを更新。 |
+| `D` | 物理削除。 | 物理削除せず `status=DISABLED` にする。 |
+
+プロビジョニング用途では `--provisioning` を付けて実行する。
+
+```bash
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh csv users.csv --provisioning
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh csv users.csv --provisioning --apply
+```
+
+または:
+
+```bash
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh provisioning-csv users.csv --apply
+```
+
+処理仕様:
+
+- 1行目のヘッダ行は読み飛ばされる。
+- 空行と `#` で始まる行は無視される。
+- `A` / `M` は `mfa_method`、`force_sequence_change` が必須。
+- `A` / `M` は `initial_sequence` と `sequence` の少なくとも一方が必須。
+- `D` は `action,user_id` だけでよい。
+- `sequence` は `graphicalmatrix.choice` の数と一致する必要がある。
+- import時に、現在の `graphicalmatrix.sequence.storage` に従ってDB保存用の値へ変換される。
+- CSVファイルにはsequenceが含まれるため、秘密情報として扱う。
+
+### 7.3 実装済みプロビジョニング機能
 
 実装済みのCLI:
 

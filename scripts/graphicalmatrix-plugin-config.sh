@@ -306,6 +306,10 @@ install_template "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.i
   "$IDP_HOME/conf/graphicalmatrix/graphicalmatrix.properties"
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/db.properties.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/db.properties"
+install_template "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.idpnew" \
+  "$IDP_HOME/conf/graphicalmatrix/ldap.properties"
+install_template "$PACKAGE_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew" \
+  "$IDP_HOME/conf/graphicalmatrix/webauthn-ldap.properties"
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/api.properties"
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" \

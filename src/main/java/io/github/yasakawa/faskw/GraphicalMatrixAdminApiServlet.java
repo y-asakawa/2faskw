@@ -1,5 +1,6 @@
 package io.github.yasakawa.faskw;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
     private static final Pattern JSON_BOOLEAN = Pattern.compile("\"%s\"\\s*:\\s*(true|false|\"[^\"]*\")", Pattern.CASE_INSENSITIVE);
     private static final Map<String, RateLimitState> AUTH_FAILURES = new ConcurrentHashMap<>();
     private static final AtomicBoolean SCHEMA_INITIALIZED = new AtomicBoolean(false);
+    private static final int MAX_JSON_BODY_BYTES = 64 * 1024;
 
     @Override
     protected void service(final HttpServletRequest request, final HttpServletResponse response)
@@ -106,6 +108,11 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 return;
             }
             if (path.size() >= 2 && "users".equals(path.get(0))) {
+                if (GraphicalMatrixSaveDataConfig.load(GraphicalMatrixRuntime.idpHome()).isLdap()) {
+                    throw new ApiException(501, "LDAP_STORAGE_UNSUPPORTED",
+                        "API_UNSUPPORTED", path.get(1), "UNSUPPORTED",
+                        "admin_users_api_requires_db_storage");
+                }
                 users(request, response, method, path, matrixConfig);
                 return;
             }
@@ -711,7 +718,26 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         }
 
         static JsonBody read(final HttpServletRequest request) throws IOException {
-            return new JsonBody(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+            final int contentLength = request.getContentLength();
+            if (contentLength > MAX_JSON_BODY_BYTES) {
+                throw new ApiException(413, "REQUEST_BODY_TOO_LARGE", "API_REQUEST_REJECTED",
+                    "-", "BAD_REQUEST", "body_too_large");
+            }
+            final ByteArrayOutputStream out =
+                new ByteArrayOutputStream(Math.max(0, Math.min(contentLength, MAX_JSON_BODY_BYTES)));
+            final byte[] buffer = new byte[4096];
+            int total = 0;
+            int read;
+            final var input = request.getInputStream();
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > MAX_JSON_BODY_BYTES) {
+                    throw new ApiException(413, "REQUEST_BODY_TOO_LARGE", "API_REQUEST_REJECTED",
+                        "-", "BAD_REQUEST", "body_too_large");
+                }
+                out.write(buffer, 0, read);
+            }
+            return new JsonBody(out.toString(StandardCharsets.UTF_8));
         }
 
         String string(final String name) {

@@ -3,6 +3,7 @@ package io.github.yasakawa.faskw;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -70,13 +71,13 @@ final class GraphicalMatrixRepositoryStateTest {
         assertFalse(repository.updateSequence("alice", List.of("g2"), 1400L,
             verified.getStateVersion(), true, false));
 
-        assertTrue(repository.updateMfaMethod("alice", "GraphicalMatrix", 1450L));
-        final GraphicalMatrixEnrollment graphicalsRestored = repository.findEnrollment("alice");
+        assertTrue(repository.updateMfaMethod("alice", "WebAuthn", 1450L));
+        final GraphicalMatrixEnrollment webauthnSelected = repository.findEnrollment("alice");
         assertTrue(repository.updateSequence("alice", List.of("g2"), 1500L,
-            graphicalsRestored.getStateVersion(), true, false));
+            webauthnSelected.getStateVersion(), true, false));
         final GraphicalMatrixEnrollment updated = repository.findEnrollment("alice");
         assertEquals("g2", updated.getSequence());
-        assertEquals(graphicalsRestored.getStateVersion() + 1, updated.getStateVersion());
+        assertEquals(webauthnSelected.getStateVersion() + 1, updated.getStateVersion());
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
              PreparedStatement statement = connection.prepareStatement(
@@ -90,6 +91,35 @@ final class GraphicalMatrixRepositoryStateTest {
             updated.getStateVersion(), true, false));
         assertFalse(repository.findEnrollment("alice").isActive());
         assertEquals("g2", updated.getSequence());
+    }
+
+    @Test
+    void updateMfaMethodIfCurrentRequiresExpectedVersionAndUnlockedEnrollment() throws Exception {
+        final GraphicalMatrixEnrollment verified = repository.findEnrollment("alice");
+
+        assertFalse(repository.updateMfaMethodIfCurrent("alice", "TOTP", 1200L,
+            verified.getStateVersion() + 1));
+        assertEquals("GraphicalMatrix", findMethod("alice"));
+
+        lockEnrollment("alice", 5000L);
+        assertFalse(repository.updateMfaMethodIfCurrent("alice", "TOTP", 1300L,
+            verified.getStateVersion()));
+        final GraphicalMatrixEnrollment locked = repository.findEnrollment("alice");
+        assertEquals(5000L, locked.getLockedUntil());
+        assertEquals("GraphicalMatrix", findMethod("alice"));
+    }
+
+    @Test
+    void totpRegistrationDoesNotStartOrActivateWhileLocked() throws Exception {
+        configureTotpPending("alice", 5000L);
+
+        assertNull(repository.prepareTotpRegistration("alice", 1200L));
+
+        final GraphicalMatrixVerifyResult result =
+            repository.verifyAndActivateTotp("alice", "000000", 1200L);
+        assertFalse(result.isSuccess());
+        assertEquals("LOCKED", result.getAuditResult());
+        assertEquals("PENDING", findTotpStatus("alice"));
     }
 
     @Test
@@ -127,6 +157,52 @@ final class GraphicalMatrixRepositoryStateTest {
             statement.setString(2, "g1");
             statement.setString(3, "g1");
             statement.executeUpdate();
+        }
+    }
+
+    private void lockEnrollment(final String user, final long lockedUntil) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE graphicalmatrix_enrollment SET locked_until = ? WHERE user_id = ?")) {
+            statement.setLong(1, lockedUntil);
+            statement.setString(2, user);
+            statement.executeUpdate();
+        }
+    }
+
+    private void configureTotpPending(final String user, final long lockedUntil) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE graphicalmatrix_enrollment "
+                 + "SET mfa_method = 'TOTP', totp_seed = 'INVALID', totp_status = 'PENDING', "
+                 + "locked_until = ? WHERE user_id = ?")) {
+            statement.setLong(1, lockedUntil);
+            statement.setString(2, user);
+            statement.executeUpdate();
+        }
+    }
+
+    private String findMethod(final String user) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT mfa_method FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
+            statement.setString(1, user);
+            try (var rs = statement.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getString("mfa_method");
+            }
+        }
+    }
+
+    private String findTotpStatus(final String user) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT totp_status FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
+            statement.setString(1, user);
+            try (var rs = statement.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getString("totp_status");
+            }
         }
     }
 }

@@ -336,6 +336,9 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             session.setAttribute("graphicalmatrixChange.stateVersion",
                 Long.valueOf(verifiedEnrollment.getStateVersion()));
             session.setAttribute("graphicalmatrixChange.saveCsrfToken", saveCsrfToken);
+            session.setAttribute("graphicalmatrixChange.forceSequenceRequired",
+                Boolean.valueOf(verifiedEnrollment.isForceSequenceChange()));
+            session.setAttribute("graphicalmatrixChange.sequenceChanged", Boolean.FALSE);
             session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
             renderMenu(request, response, config, user, saveCsrfToken, null);
             return;
@@ -446,6 +449,14 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             renderStart(request, response, config, "有効期限が切れています。最初からやり直してください。");
             return;
         }
+        if (!mfaMethodChangeAllowed(session)) {
+            audit.log("CHANGE_CHOOSE_METHOD", user, "BAD_REQUEST", null,
+                "force_sequence_change_required", request);
+            session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
+            renderMenu(request, response, config, user, csrfToken,
+                "GraphicalMatrixの変更が必要です。MFA方式を変更する前に、新しいGraphicalMatrixを登録してください。");
+            return;
+        }
 
         final String currentMethod;
         try {
@@ -550,6 +561,16 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
         audit.log("CHANGE_SAVE", user, "OK", null,
             "sequence_count=" + selected.size() + ",order_mode=ordered_storage", request);
+        if (Boolean.TRUE.equals(session.getAttribute("graphicalmatrixChange.forceSequenceRequired"))) {
+            session.setAttribute("graphicalmatrixChange.forceSequenceRequired", Boolean.FALSE);
+            session.setAttribute("graphicalmatrixChange.sequenceChanged", Boolean.TRUE);
+            session.setAttribute("graphicalmatrixChange.stateVersion", Long.valueOf(stateVersion.longValue() + 1L));
+            session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
+            session.removeAttribute("graphicalmatrixChange.newDisplayOrder");
+            renderMenu(request, response, config, user, csrfToken,
+                "GraphicalMatrixを変更しました。必要に応じてMFA方式を変更してください。");
+            return;
+        }
         clearChange(session);
         renderComplete(request, response, config, user,
             "新しいGraphicalMatrixを登録しました。次回ログインから新しい画像を利用してください。");
@@ -570,6 +591,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         final String csrfToken = (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken");
         final Long expiresAt = (Long) session.getAttribute("graphicalmatrixChange.expiresAt");
         final Boolean verified = (Boolean) session.getAttribute("graphicalmatrixChange.verified");
+        final Long expectedStateVersion = (Long) session.getAttribute("graphicalmatrixChange.stateVersion");
         final Object configObject = session.getAttribute("graphicalmatrixChange.config");
         final GraphicalMatrixConfig config = (configObject instanceof GraphicalMatrixConfig)
             ? (GraphicalMatrixConfig) configObject : requestConfig;
@@ -579,6 +601,20 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             audit.log("CHANGE_METHOD_SAVE", user, "BAD_REQUEST", null, "invalid_or_expired_save", request);
             clearChange(session);
             renderStart(request, response, config, "有効期限が切れています。最初からやり直してください。");
+            return;
+        }
+        if (expectedStateVersion == null) {
+            audit.log("CHANGE_METHOD_SAVE", user, "BAD_REQUEST", null, "state_version_missing", request);
+            clearChange(session);
+            renderStart(request, response, config, "登録状態を確認できません。最初からやり直してください。");
+            return;
+        }
+        if (!mfaMethodChangeAllowed(session)) {
+            audit.log("CHANGE_METHOD_SAVE", user, "BAD_REQUEST", null,
+                "force_sequence_change_required", request);
+            session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
+            renderMenu(request, response, config, user, csrfToken,
+                "GraphicalMatrixの変更が必要です。MFA方式を変更する前に、新しいGraphicalMatrixを登録してください。");
             return;
         }
 
@@ -592,12 +628,13 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         try {
-            if (!repository.updateMfaMethod(user, method, now)) {
-                audit.log("CHANGE_METHOD_SAVE", user, "ENROLL_REQUIRED", null, "missing_enrollment", request);
+            if (!repository.updateMfaMethodIfCurrent(user, method, now, expectedStateVersion.longValue())) {
+                audit.log("CHANGE_METHOD_SAVE", user, "ENROLL_REQUIRED", null,
+                    "state_changed_after_verification", request);
                 clearChange(session);
                 GraphicalMatrixStartServlet.renderUnavailable(request, response,
                     "MFA方式を変更できません。",
-                    "このアカウントの登録情報を確認できません。管理者に連絡してください。");
+                    "登録状態が変更されました。最初からやり直してください。");
                 return;
             }
         } catch (Exception ex) {
@@ -610,9 +647,14 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
         audit.log("CHANGE_METHOD_SAVE", user, "OK", null, "mfa_method=" + method, request);
         clearChange(session);
-        final String message = "TOTP".equals(method)
-            ? "MFA方式をTOTPに変更しました。次回ログイン時にQRコード登録画面が表示されます。"
-            : "MFA方式をGraphicalMatrixに変更しました。次回ログインからGraphicalMatrixを利用します。";
+        final String message;
+        if ("TOTP".equals(method)) {
+            message = "MFA方式をTOTPに変更しました。次回ログイン時にQRコード登録画面が表示されます。";
+        } else if ("WebAuthn".equals(method)) {
+            message = "MFA方式をWebAuthnに変更しました。次回ログインからWebAuthnを利用します。";
+        } else {
+            message = "MFA方式をGraphicalMatrixに変更しました。次回ログインからGraphicalMatrixを利用します。";
+        }
         renderComplete(request, response, config, user, message);
     }
 
@@ -689,8 +731,10 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
     private static void renderMenu(final HttpServletRequest request, final HttpServletResponse response,
             final GraphicalMatrixConfig config, final String user, final String csrfToken,
             final String errorMessage) throws IOException {
+        final HttpSession session = request.getSession(false);
+        final boolean methodChangeAllowed = session == null || mfaMethodChangeAllowed(session);
         if (GraphicalMatrixViewRenderer.renderSequenceChangeMenu(request, response, config, user,
-                csrfToken, errorMessage)) {
+                csrfToken, methodChangeAllowed, errorMessage)) {
             return;
         }
         response.sendError(500, "GraphicalMatrix change menu template is missing.");
@@ -726,6 +770,8 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         session.removeAttribute("graphicalmatrixChange.verified");
         session.removeAttribute("graphicalmatrixChange.stateVersion");
         session.removeAttribute("graphicalmatrixChange.saveCsrfToken");
+        session.removeAttribute("graphicalmatrixChange.forceSequenceRequired");
+        session.removeAttribute("graphicalmatrixChange.sequenceChanged");
     }
 
     private static boolean validVerifiedSession(final String user, final Boolean verified,
@@ -736,6 +782,11 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             && String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
             && expiresAt != null
             && expiresAt.longValue() >= now;
+    }
+
+    private static boolean mfaMethodChangeAllowed(final HttpSession session) {
+        return !Boolean.TRUE.equals(session.getAttribute("graphicalmatrixChange.forceSequenceRequired"))
+            || Boolean.TRUE.equals(session.getAttribute("graphicalmatrixChange.sequenceChanged"));
     }
 
     private static void noStore(final HttpServletResponse response) {

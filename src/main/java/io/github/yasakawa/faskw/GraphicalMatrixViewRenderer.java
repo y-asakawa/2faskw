@@ -199,7 +199,8 @@ public final class GraphicalMatrixViewRenderer {
 
     public static boolean renderSequenceChangeMenu(final HttpServletRequest request,
             final HttpServletResponse response, final GraphicalMatrixConfig config,
-            final String user, final String csrfToken, final String errorMessage) throws IOException {
+            final String user, final String csrfToken, final boolean methodChangeAllowed,
+            final String errorMessage) throws IOException {
         if (!config.isTemplateEnabled()) {
             return false;
         }
@@ -212,6 +213,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
         values.put("user", GraphicalMatrixSupport.html(user));
         values.put("csrfToken", GraphicalMatrixSupport.html(csrfToken));
+        values.put("methodChangeAction", methodChangeAction(context, user, csrfToken, methodChangeAllowed));
         values.put("errorBlock", errorBlock(errorMessage));
         return renderTemplate(response, config.getChangeMenuTemplatePath().toAbsolutePath().normalize(), values);
     }
@@ -383,6 +385,23 @@ public final class GraphicalMatrixViewRenderer {
             + "</form>";
     }
 
+    private static String methodChangeAction(final String contextPath, final String user,
+            final String csrfToken, final boolean allowed) {
+        if (!allowed) {
+            return "<div class=\"form-stack\">\n"
+                + "  <button type=\"button\" disabled>MFA方式を変更</button>\n"
+                + "  <p class=\"muted\">GraphicalMatrixの変更後にMFA方式を変更できます。</p>\n"
+                + "</div>";
+        }
+        return "<form method=\"post\" action=\""
+            + GraphicalMatrixSupport.html(contextPath) + "/graphicalmatrix/change\">\n"
+            + "  <input type=\"hidden\" name=\"mode\" value=\"choose-method\">\n"
+            + "  <input type=\"hidden\" name=\"user\" value=\"" + GraphicalMatrixSupport.html(user) + "\">\n"
+            + "  <input type=\"hidden\" name=\"csrfToken\" value=\"" + GraphicalMatrixSupport.html(csrfToken) + "\">\n"
+            + "  <button type=\"submit\">MFA方式を変更</button>\n"
+            + "</form>";
+    }
+
     private static String tiles(final String contextPath, final List<String> displayOrder) {
         final StringBuilder out = new StringBuilder();
         for (final String id : displayOrder) {
@@ -436,13 +455,9 @@ public final class GraphicalMatrixViewRenderer {
             + "          const source = tile.querySelector('img');\n"
             + "          const graphical = document.createElement('img');\n"
             + "          graphical.src = source.src;\n"
-            + "          graphical.alt = id;\n"
+            + "          graphical.alt = '選択した画像';\n"
             + "          item.appendChild(graphical);\n"
             + "        }\n"
-            + "        const label = document.createElement('span');\n"
-            + "        label.className = 'selected-id';\n"
-            + "        label.textContent = id;\n"
-            + "        item.appendChild(label);\n"
             + "        item.addEventListener('click', function () { selected.splice(index, 1); render(); });\n"
             + "        selectedList.appendChild(item);\n"
             + "      });\n"

@@ -58,6 +58,11 @@ p {
   line-height: 1.6;
 }
 
+.muted {
+  color: #64748b;
+  font-size: 14px;
+}
+
 .error {
   margin: 0 0 14px;
   border: 1px solid #f4b4b4;
@@ -137,7 +142,7 @@ h2 {
 
 .selected-item {
   display: grid;
-  grid-template-columns: 30px 54px 1fr;
+  grid-template-columns: 30px 54px;
   gap: 8px;
   align-items: center;
   min-height: 66px;
@@ -163,12 +168,6 @@ h2 {
   font-weight: 700;
   line-height: 30px;
   text-align: center;
-}
-
-.selected-id {
-  overflow-wrap: anywhere;
-  color: #334155;
-  font-weight: 700;
 }
 
 .sequence-grid {

@@ -153,6 +153,39 @@ EOF
     || fail "untrusted CSV symlink produced a snapshot"
 }
 
+test_csv_preview_displays_initial_and_encoded_sequence() {
+  local home="$TMP/csv-preview-idp"
+  local csv="$TMP/csv-preview.csv"
+  mkdir -p "$home/conf/graphicalmatrix"
+  cat > "$home/conf/graphicalmatrix/graphicalmatrix.properties" <<EOF
+graphicalmatrix.graphicals=img01-04
+graphicalmatrix.choice=4
+graphicalmatrix.sequence.storage=keyword
+graphicalmatrix.sequence.keyword=test-only-keyword
+EOF
+  cat > "$home/conf/graphicalmatrix/db.properties" <<EOF
+graphicalmatrix.db.driver=org.h2.Driver
+graphicalmatrix.db.url=jdbc:h2:mem:csv-preview;MODE=PostgreSQL;DATABASE_TO_UPPER=false
+graphicalmatrix.db.user=sa
+graphicalmatrix.db.password=
+EOF
+  cat > "$csv" <<EOF
+action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
+A,alice,GraphicalMatrix,on,"img01,img02,img03,img04","img01,img02,img03,img04"
+EOF
+
+  local output
+  output="$(GRAPHICALMATRIX_HOME="$home" SEQUENCE_TOOL_CP="$ROOT/target/classes" \
+    PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" --provisioning)"
+  grep -q 'initial_sequence=img01,img02,img03,img04' <<< "$output" \
+    || fail "CSV preview did not display the initial sequence: $output"
+  grep -q 'sequence=kw1:' <<< "$output" \
+    || fail "CSV preview did not display the protected stored sequence: $output"
+  ! grep -q ' sequence=img01,img02,img03,img04' <<< "$output" \
+    || fail "CSV preview displayed the plaintext current sequence: $output"
+}
+
 test_management_reset_restores_plaintext_initial_factor() {
   local home="$TMP/idp"
   local test_bin="$TMP/db-test-bin"
@@ -223,5 +256,6 @@ EOF
 test_token_symlink_replacement
 test_csv_immutable_snapshot
 test_csv_rejects_symlink_source
+test_csv_preview_displays_initial_and_encoded_sequence
 test_management_reset_restores_plaintext_initial_factor
 echo "security regression tests: PASS"

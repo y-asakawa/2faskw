@@ -269,15 +269,6 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         }
 
         try {
-            if (!repository.updateMfaMethod(user, "GraphicalMatrix", now)) {
-                audit.log("TOTP_REGISTER_CANCEL", user, "ENROLL_REQUIRED", null, "missing_enrollment", request);
-                clearTotpRegistration(session);
-                GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                    "GraphicalMatrixに戻せません。",
-                    "このアカウントの登録情報を確認できません。管理者に連絡してください。");
-                return;
-            }
-
             final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
             final GraphicalMatrixEnrollment enrollment = repository.findEnrollment(user);
             if (enrollment == null || !enrollment.isActive()) {
@@ -306,6 +297,17 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                     "locked_until=" + enrollment.getLockedUntil(), request);
                 clearTotpRegistration(session);
                 GraphicalMatrixStartServlet.renderLocked(request, response, enrollment.getLockedUntil());
+                return;
+            }
+
+            if (!repository.updateMfaMethodIfCurrent(user, "GraphicalMatrix", now,
+                    enrollment.getStateVersion())) {
+                audit.log("TOTP_REGISTER_CANCEL", user, "ENROLL_REQUIRED", null,
+                    "state_changed_after_verification", request);
+                clearTotpRegistration(session);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "GraphicalMatrixに戻せません。",
+                    "登録状態が変更されました。サービス画面からログインをやり直してください。");
                 return;
             }
 

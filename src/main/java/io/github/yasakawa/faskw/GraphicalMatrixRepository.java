@@ -15,14 +15,24 @@ public final class GraphicalMatrixRepository {
     private final GraphicalMatrixDbConfig dbConfig;
     private final GraphicalMatrixSequenceStorage sequenceStorage;
     private final GraphicalMatrixTotpSeedStorage totpSeedStorage;
+    private final GraphicalMatrixLdapEnrollmentStore ldapStore;
 
     public GraphicalMatrixRepository(final String idpHome) {
-        this.dbConfig = GraphicalMatrixDbConfig.load(idpHome);
         this.sequenceStorage = GraphicalMatrixSequenceStorage.load(idpHome);
         this.totpSeedStorage = GraphicalMatrixTotpSeedStorage.load(idpHome);
+        if (GraphicalMatrixSaveDataConfig.load(idpHome).isLdap()) {
+            this.dbConfig = null;
+            this.ldapStore = new GraphicalMatrixLdapEnrollmentStore(idpHome, sequenceStorage, totpSeedStorage);
+        } else {
+            this.dbConfig = GraphicalMatrixDbConfig.load(idpHome);
+            this.ldapStore = null;
+        }
     }
 
     public GraphicalMatrixEnrollment findEnrollment(final String user) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.findEnrollment(user);
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
@@ -52,6 +62,9 @@ public final class GraphicalMatrixRepository {
     }
 
     public GraphicalMatrixMfaSettings findMfaSettings(final String user) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.findMfaSettings(user);
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
@@ -74,6 +87,9 @@ public final class GraphicalMatrixRepository {
     }
 
     public String prepareTotpRegistration(final String user, final long now) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.prepareTotpRegistration(user, now);
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
@@ -91,7 +107,7 @@ public final class GraphicalMatrixRepository {
     private String prepareTotpRegistrationInTransaction(final Connection c, final String user,
             final long now) throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT mfa_method, status, totp_seed, totp_status "
+                "SELECT mfa_method, status, locked_until, totp_seed, totp_status "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
@@ -99,6 +115,9 @@ public final class GraphicalMatrixRepository {
                     return null;
                 }
                 if (!"ACTIVE".equals(rs.getString("status"))) {
+                    return null;
+                }
+                if (rs.getLong("locked_until") > now) {
                     return null;
                 }
                 final String method = normalizeMethod(rs.getString("mfa_method"));
@@ -133,6 +152,13 @@ public final class GraphicalMatrixRepository {
 
     public GraphicalMatrixVerifyResult verifyAndActivateTotp(final String user, final String code,
             final long now) {
+        if (ldapStore != null) {
+            try {
+                return ldapStore.verifyAndActivateTotp(user, code, now);
+            } catch (Exception ex) {
+                return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
+            }
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
@@ -152,7 +178,7 @@ public final class GraphicalMatrixRepository {
     private GraphicalMatrixVerifyResult verifyAndActivateTotpInTransaction(final Connection c,
             final String user, final String code, final long now) throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT mfa_method, status, totp_seed, totp_status "
+                "SELECT mfa_method, status, locked_until, totp_seed, totp_status "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
@@ -161,6 +187,9 @@ public final class GraphicalMatrixRepository {
                 }
                 if (!"ACTIVE".equals(rs.getString("status"))) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_enrollment");
+                }
+                if (rs.getLong("locked_until") > now) {
+                    return GraphicalMatrixVerifyResult.locked("locked_until=" + rs.getLong("locked_until"));
                 }
                 if (!"TOTP".equals(normalizeMethod(rs.getString("mfa_method")))) {
                     return GraphicalMatrixVerifyResult.enrollRequired("not_totp_method");
@@ -197,6 +226,14 @@ public final class GraphicalMatrixRepository {
             final List<String> displayOrder, final long now, final int maxFailures,
             final long lockMillis, final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) {
+        if (ldapStore != null) {
+            try {
+                return ldapStore.verify(user, selected, displayOrder, now, maxFailures, lockMillis,
+                    orderedSelectionRequired, duplicateSelectionsAllowed);
+            } catch (Exception ex) {
+                return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
+            }
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
@@ -219,6 +256,14 @@ public final class GraphicalMatrixRepository {
             final List<String> displayOrder, final long now, final int maxFailures,
             final long lockMillis, final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) {
+        if (ldapStore != null) {
+            try {
+                return ldapStore.verifyForSequenceChange(user, selected, displayOrder, now, maxFailures,
+                    lockMillis, orderedSelectionRequired, duplicateSelectionsAllowed);
+            } catch (Exception ex) {
+                return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
+            }
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
@@ -242,6 +287,9 @@ public final class GraphicalMatrixRepository {
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed) throws Exception {
         final String storedSequence = sequenceStorage.encode(
             sequence, orderedSelectionRequired, duplicateSelectionsAllowed);
+        if (ldapStore != null) {
+            return ldapStore.updateSequence(user, storedSequence, now, expectedStateVersion);
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
@@ -249,7 +297,7 @@ public final class GraphicalMatrixRepository {
                     + "SET sequence = ?, force_sequence_change = 0, updated_at = ?, "
                     + "state_version = state_version + 1 "
                     + "WHERE user_id = ? AND status = 'ACTIVE' "
-                    + "AND mfa_method = 'GraphicalMatrix' AND locked_until <= ? "
+                    + "AND locked_until <= ? "
                     + "AND state_version = ?")) {
                 ps.setString(1, storedSequence);
                 ps.setLong(2, now);
@@ -262,14 +310,31 @@ public final class GraphicalMatrixRepository {
     }
 
     public boolean updateMfaMethod(final String user, final String method, final long now) throws Exception {
+        return updateMfaMethod(user, method, now, null);
+    }
+
+    public boolean updateMfaMethodIfCurrent(final String user, final String method, final long now,
+            final long expectedStateVersion) throws Exception {
+        return updateMfaMethod(user, method, now, Long.valueOf(expectedStateVersion));
+    }
+
+    private boolean updateMfaMethod(final String user, final String method, final long now,
+            final Long expectedStateVersion) throws Exception {
         final String normalized = normalizeMethod(method);
         if (!"GRAPHICALMATRIX".equals(normalized) && !"TOTP".equals(normalized)
                 && !"WEBAUTHN".equals(normalized)) {
             throw new IllegalArgumentException("Unsupported MFA method: " + method);
         }
 
+        if (ldapStore != null) {
+            return expectedStateVersion == null
+                ? ldapStore.updateMfaMethod(user, method, now)
+                : ldapStore.updateMfaMethodIfCurrent(user, method, now, expectedStateVersion.longValue());
+        }
+
         try (Connection c = db()) {
             initDbIfEnabled(c);
+            final String statePredicate = expectedStateVersion == null ? "" : " AND state_version = ?";
             if ("TOTP".equals(normalized)) {
                 try (PreparedStatement ps = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
@@ -277,9 +342,14 @@ public final class GraphicalMatrixRepository {
                         + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
                         + "failed_count = 0, locked_until = 0, "
                         + "state_version = state_version + 1, updated_at = ? "
-                        + "WHERE user_id = ?")) {
+                        + "WHERE user_id = ? AND status = 'ACTIVE' "
+                        + "AND locked_until <= ?" + statePredicate)) {
                     ps.setLong(1, now);
                     ps.setString(2, user);
+                    ps.setLong(3, now);
+                    if (expectedStateVersion != null) {
+                        ps.setLong(4, expectedStateVersion.longValue());
+                    }
                     return ps.executeUpdate() == 1;
                 }
             }
@@ -289,10 +359,15 @@ public final class GraphicalMatrixRepository {
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET mfa_method = ?, failed_count = 0, locked_until = 0, "
                         + "state_version = state_version + 1, updated_at = ? "
-                        + "WHERE user_id = ?")) {
+                        + "WHERE user_id = ? AND status = 'ACTIVE' "
+                        + "AND locked_until <= ?" + statePredicate)) {
                     ps.setString(1, "WebAuthn");
                     ps.setLong(2, now);
                     ps.setString(3, user);
+                    ps.setLong(4, now);
+                    if (expectedStateVersion != null) {
+                        ps.setLong(5, expectedStateVersion.longValue());
+                    }
                     return ps.executeUpdate() == 1;
                 }
             }
@@ -301,15 +376,23 @@ public final class GraphicalMatrixRepository {
                     "UPDATE graphicalmatrix_enrollment "
                     + "SET mfa_method = 'GraphicalMatrix', failed_count = 0, locked_until = 0, "
                     + "state_version = state_version + 1, updated_at = ? "
-                    + "WHERE user_id = ?")) {
+                    + "WHERE user_id = ? AND status = 'ACTIVE' "
+                    + "AND locked_until <= ?" + statePredicate)) {
                 ps.setLong(1, now);
                 ps.setString(2, user);
+                ps.setLong(3, now);
+                if (expectedStateVersion != null) {
+                    ps.setLong(4, expectedStateVersion.longValue());
+                }
                 return ps.executeUpdate() == 1;
             }
         }
     }
 
     public boolean isForceSequenceChangeRequired(final String user) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.isForceSequenceChangeRequired(user);
+        }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
@@ -320,6 +403,29 @@ public final class GraphicalMatrixRepository {
                 }
             }
         }
+    }
+
+    public String findActiveTotpSeed(final String user) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.findActiveTotpSeed(user);
+        }
+        try (Connection c = db()) {
+            initDbIfEnabled(c);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT totp_seed FROM graphicalmatrix_enrollment "
+                    + "WHERE user_id = ? AND status = 'ACTIVE' "
+                    + "AND UPPER(mfa_method) IN ('TOTP', 'MFA:TOTP') "
+                    + "AND totp_status = 'ACTIVE' "
+                    + "AND totp_seed IS NOT NULL AND totp_seed <> ''")) {
+                ps.setString(1, user);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return totpSeedStorage.decode(rs.getString("totp_seed"));
+                    }
+                }
+            }
+        }
+        return "";
     }
 
     public boolean sequenceUsable(final String sequence, final GraphicalMatrixConfig config) {

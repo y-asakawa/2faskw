@@ -86,6 +86,7 @@ public final class GraphicalMatrixConfigCheckTool {
 
         checkGraphicalFiles(config);
         checkViewFiles(config);
+        checkSaveData(idpHome, properties);
         checkStorage(idpHome, config, properties);
 
         summary();
@@ -155,6 +156,7 @@ public final class GraphicalMatrixConfigCheckTool {
 
     private void checkStorage(final String idpHome, final GraphicalMatrixConfig config,
             final Properties properties) {
+        final boolean ldapSaveData = ldapSaveData(properties);
         try {
             final GraphicalMatrixSequenceStorage storage = GraphicalMatrixSequenceStorage.load(idpHome);
             storage.encode(sampleSequence(config),
@@ -173,8 +175,13 @@ public final class GraphicalMatrixConfigCheckTool {
         try {
             final GraphicalMatrixTotpSeedStorage storage = GraphicalMatrixTotpSeedStorage.load(idpHome);
             if ("unconfigured-hash".equals(storage.mode())) {
-                warn("TOTP seed storage is not configured for hash sequence storage; "
-                    + "set graphicalmatrix.totp.seed.storage to aes-gcm or keyword before using TOTP");
+                final String message = "TOTP seed storage is not configured for hash sequence storage; "
+                    + "set graphicalmatrix.totp.seed.storage to aes-gcm or keyword before using TOTP";
+                if (ldapSaveData) {
+                    fail(message);
+                } else {
+                    warn(message);
+                }
                 return;
             }
             storage.encode("JBSWY3DPEHPK3PXP");
@@ -185,6 +192,37 @@ public final class GraphicalMatrixConfigCheckTool {
             }
         } catch (Exception ex) {
             fail("TOTP seed storage invalid: " + rootMessage(ex));
+        }
+    }
+
+    private void checkSaveData(final String idpHome, final Properties properties) {
+        final String mode;
+        try {
+            mode = GraphicalMatrixSaveDataConfig.normalize(
+                properties.getProperty("graphicalmatrix.savedata", "db"));
+            ok("save data backend valid: mode=" + mode);
+        } catch (Exception ex) {
+            fail("save data backend invalid: " + rootMessage(ex));
+            return;
+        }
+
+        if (!"ldap".equals(mode)) {
+            return;
+        }
+
+        final Path ldapProperties = GraphicalMatrixLdapConfig.ldapPropertiesPath(idpHome);
+        if (Files.isRegularFile(ldapProperties) && Files.isReadable(ldapProperties)) {
+            ok("LDAP storage config readable: " + ldapProperties);
+        } else {
+            fail("LDAP storage config missing or unreadable: " + ldapProperties);
+            return;
+        }
+
+        try {
+            GraphicalMatrixLdapConfig.load(idpHome);
+            ok("LDAP storage config valid");
+        } catch (Exception ex) {
+            fail("LDAP storage config invalid: " + rootMessage(ex));
         }
     }
 
@@ -222,6 +260,15 @@ public final class GraphicalMatrixConfigCheckTool {
         final String value = properties.getProperty("graphicalmatrix.productionMode", "false")
             .trim().toLowerCase(Locale.ROOT);
         return "true".equals(value) || "1".equals(value) || "yes".equals(value) || "on".equals(value);
+    }
+
+    private static boolean ldapSaveData(final Properties properties) {
+        try {
+            return "ldap".equals(GraphicalMatrixSaveDataConfig.normalize(
+                properties.getProperty("graphicalmatrix.savedata", "db")));
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private static Path propertiesPath(final String idpHome) {

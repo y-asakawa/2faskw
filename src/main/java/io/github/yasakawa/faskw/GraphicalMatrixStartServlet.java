@@ -62,9 +62,16 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
                 return;
             }
 
+            final long now = System.currentTimeMillis();
+            if (enrollment.getLockedUntil() > now) {
+                audit.log("START", user, "LOCKED", null,
+                    "locked_until=" + enrollment.getLockedUntil(), request);
+                renderLocked(request, response, enrollment.getLockedUntil());
+                return;
+            }
+
             final GraphicalMatrixMfaSettings settings = repository.findMfaSettings(user);
             if (settings != null && "TOTP".equalsIgnoreCase(normalizeMethod(settings.getMethod()))) {
-                final long now = System.currentTimeMillis();
                 final String seed = repository.prepareTotpRegistration(user, now);
                 if (seed == null || seed.isEmpty()) {
                     audit.log("TOTP_REGISTER_START", user, "ENROLL_REQUIRED", null,
@@ -104,14 +111,6 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
                 renderUnavailable(request, response,
                     "追加認証の登録情報が現在の設定と一致していません。",
                     "このアカウントではログインを完了できません。管理者に連絡してください。");
-                return;
-            }
-
-            final long now = System.currentTimeMillis();
-            if (enrollment.getLockedUntil() > now) {
-                audit.log("START", user, "LOCKED", null,
-                    "locked_until=" + enrollment.getLockedUntil(), request);
-                renderLocked(request, response, enrollment.getLockedUntil());
                 return;
             }
 

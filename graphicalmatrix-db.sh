@@ -272,6 +272,7 @@ validate_user() {
 
 graphical_id_lines() {
   local value="${1:-}"
+  [[ -n "$value" ]] || return 0
   local old_ifs="$IFS"
   IFS=','
   local items=($value)
@@ -337,6 +338,7 @@ line_contains() {
 alias_pairs() {
   local value raw pair alias graphical old_ifs
   value="$(config_prop 'graphicalmatrix.aliases' '')"
+  [[ -n "$value" ]] || return 0
   old_ifs="$IFS"
   IFS=','
   local items=($value)
@@ -1180,7 +1182,7 @@ PY
     local force_value="${4:-}"
     local initial_sequence="${5:-}"
     local sequence="${6:-}"
-    local normalized_initial_sequence resolved_sequence stored_sequence
+    local normalized_initial_sequence resolved_sequence stored_sequence preview_sequence
     local user_q sequence_q initial_sequence_q method_q force_sql
 
     action="$(normalize_csv_action "$action")"
@@ -1228,12 +1230,16 @@ PY
     resolved_sequence="$(resolve_sequence_to_graphicals "$sequence")"
     validate_sequence "$resolved_sequence"
     stored_sequence="$(sequence_storage_encode "$resolved_sequence")"
+    preview_sequence="$stored_sequence"
+    if [[ "$(sequence_storage_mode)" == "plaintext" ]]; then
+      preview_sequence="[plaintext-not-shown]"
+    fi
 
     sequence_q="$(sql_quote "$stored_sequence")"
     initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$normalized_initial_sequence")")"
     method_q="$(sql_quote "$method")"
     printf "line=%s action=%s user_id=%s mfa_method=%s force_sequence_change=%s initial_sequence=%s sequence=%s\n" \
-      "$line_no" "$action" "$user" "$method" "$force_value" "$normalized_initial_sequence" "$resolved_sequence" >> "$preview_file"
+      "$line_no" "$action" "$user" "$method" "$force_value" "$normalized_initial_sequence" "$preview_sequence" >> "$preview_file"
     if [[ "$action" == "A" ]]; then
       add_count=$((add_count + 1))
     else
@@ -1304,7 +1310,7 @@ PY
 
   (( imported > 0 )) || die "CSV file has no import rows: $csv_file"
   echo "COMMIT;" >> "$sql_file"
-  chmod 0644 "$sql_file"
+  chmod 0600 "$sql_file"
 
   echo "CSV import plan:"
   echo "  file: $csv_file"

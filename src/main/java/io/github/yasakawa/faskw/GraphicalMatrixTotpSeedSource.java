@@ -1,9 +1,5 @@
 package io.github.yasakawa.faskw;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-
 import net.shibboleth.idp.plugin.authn.totp.context.TOTPContext;
 import net.shibboleth.idp.plugin.authn.totp.impl.AbstractSeedSource;
 import net.shibboleth.shared.codec.Base32Support;
@@ -15,11 +11,9 @@ public final class GraphicalMatrixTotpSeedSource extends AbstractSeedSource {
     private static final Logger LOG = LoggerFactory.getLogger(GraphicalMatrixTotpSeedSource.class);
 
     private final String idpHome;
-    private final GraphicalMatrixTotpSeedStorage seedStorage;
 
     public GraphicalMatrixTotpSeedSource() {
         this.idpHome = System.getProperty("idp.home", "/opt/shibboleth-idp");
-        this.seedStorage = GraphicalMatrixTotpSeedStorage.load(idpHome);
     }
 
     @Override
@@ -53,22 +47,9 @@ public final class GraphicalMatrixTotpSeedSource extends AbstractSeedSource {
 
     private String findSeed(final String user) {
         try {
-            try (Connection c = GraphicalMatrixDataSource.getConnection(idpHome);
-                    PreparedStatement ps = c.prepareStatement(
-                        "SELECT totp_seed FROM graphicalmatrix_enrollment "
-                        + "WHERE user_id = ? AND status = 'ACTIVE' "
-                        + "AND UPPER(mfa_method) IN ('TOTP', 'MFA:TOTP') "
-                        + "AND totp_status = 'ACTIVE' "
-                        + "AND totp_seed IS NOT NULL AND totp_seed <> ''")) {
-                ps.setString(1, user);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return seedStorage.decode(rs.getString("totp_seed"));
-                    }
-                }
-            }
+            return new GraphicalMatrixRepository(idpHome).findActiveTotpSeed(user);
         } catch (Exception ex) {
-            LOG.warn("TOTP seed DB lookup failed for user={}: {}", user, ex.toString());
+            LOG.warn("TOTP seed lookup failed for user={}: {}", user, ex.toString());
         }
         return "";
     }

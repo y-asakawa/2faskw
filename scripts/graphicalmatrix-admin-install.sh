@@ -122,6 +122,16 @@ if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/db.properties.adminnew" ]]; then
   fi
 fi
 
+if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.adminnew" ]]; then
+  if [[ -f "$PREFIX/conf/graphicalmatrix/ldap.properties" ]]; then
+    install -m 0640 "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.adminnew" \
+      "$PREFIX/conf/graphicalmatrix/ldap.properties.adminnew.${timestamp}"
+  else
+    install -m 0640 "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.adminnew" \
+      "$PREFIX/conf/graphicalmatrix/ldap.properties"
+  fi
+fi
+
 if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.adminnew" ]]; then
   if [[ -f "$PREFIX/conf/graphicalmatrix/graphicalmatrix.properties" ]]; then
     install -m 0644 "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.adminnew" \

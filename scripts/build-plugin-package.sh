@@ -154,6 +154,7 @@ rm -rf "$DIST_DIR" "$ZIP_FILE" "$ADMIN_DIST_DIR" "$ADMIN_ZIP_FILE"
 mkdir -p \
   "$DIST_DIR/webapp/WEB-INF/lib" \
   "$DIST_DIR/bootstrap" \
+  "$DIST_DIR/conf/authn" \
   "$DIST_DIR/conf/graphicalmatrix/assets" \
   "$DIST_DIR/conf/graphicalmatrix/views" \
   "$DIST_DIR/conf/graphicalmatrix/graphicals" \
@@ -180,12 +181,17 @@ EOF
 
 cp graphicalmatrix.properties "$DIST_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
 cp db.properties "$DIST_DIR/conf/graphicalmatrix/db.properties.idpnew"
+cp ldap.properties "$DIST_DIR/conf/graphicalmatrix/ldap.properties.idpnew"
+cp webauthn-ldap.properties "$DIST_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew"
 cp admin.properties "$DIST_DIR/conf/graphicalmatrix/admin.properties.idpnew"
 sed \
   -e 's/^[[:space:]]*graphicalmatrix[.]api[.]enabled[[:space:]]*=.*/graphicalmatrix.api.enabled = false/' \
   api.properties > "$DIST_DIR/conf/graphicalmatrix/api.properties.idpnew"
 cp mfa-policy.properties "$DIST_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
 cp postgresql-schema.sql "$DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
+cp webauthn.properties "$DIST_DIR/conf/authn/webauthn.properties.idpnew"
+cp webauthn-registration.properties "$DIST_DIR/conf/authn/webauthn-registration.properties.idpnew"
+cp webauthn-metadata.properties "$DIST_DIR/conf/authn/webauthn-metadata.properties.idpnew"
 cp assets/graphicalmatrix.css "$DIST_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
 cp views/*.html "$DIST_DIR/conf/graphicalmatrix/views/"
 for file in "$DIST_DIR"/conf/graphicalmatrix/views/*.html; do
@@ -218,6 +224,7 @@ cp mfa-authn-config.xml "$DIST_DIR/examples/mfa-authn-config.xml"
 cp totp-authn-config.xml "$DIST_DIR/examples/totp-authn-config.xml"
 cp webauthn-management-config.xml "$DIST_DIR/examples/webauthn-management-config.xml"
 cp webauthn-registration-config.xml "$DIST_DIR/examples/webauthn-registration-config.xml"
+cp webauthn-ldap-storage-config.xml "$DIST_DIR/examples/webauthn-ldap-storage-config.xml"
 cp access-control.xml "$DIST_DIR/examples/access-control.xml"
 cp attribute-resolver.xml "$DIST_DIR/examples/attribute-resolver.xml"
 cp examples/logrotate/graphicalmatrix-audit "$DIST_DIR/examples/logrotate/graphicalmatrix-audit"
@@ -229,6 +236,7 @@ render_template plugin-metadata/README.md.in "$DIST_DIR/plugin-metadata/README.m
 copy_versioned docs/README.md "$DIST_DIR/docs/README.md"
 copy_versioned docs/build.md "$DIST_DIR/docs/build.md"
 copy_versioned docs/INSTALL.md "$DIST_DIR/docs/INSTALL.md"
+copy_versioned docs/INSTALL_LDAP.md "$DIST_DIR/docs/INSTALL_LDAP.md"
 copy_versioned docs/SECURITY.md "$DIST_DIR/docs/SECURITY.md"
 copy_versioned docs/SECURITY-CHECKLIST.md "$DIST_DIR/docs/SECURITY-CHECKLIST.md"
 copy_versioned docs/API-TOKEN-ROTATION.md "$DIST_DIR/docs/API-TOKEN-ROTATION.md"
@@ -304,6 +312,7 @@ chmod 0755 \
   "$ADMIN_DIST_DIR/bin/graphicalmatrix-csv-import-runner.sh"
 
 cp db.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/db.properties.adminnew"
+cp ldap.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/ldap.properties.adminnew"
 cp graphicalmatrix.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/graphicalmatrix.properties.adminnew"
 cp admin.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/admin.properties.adminnew"
 cp postgresql-schema.sql "$ADMIN_DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"

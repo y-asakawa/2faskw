@@ -96,6 +96,7 @@ Firewall設定を環境に合わせて読み替えてください。
     totp-authn-config.xml
     webauthn-management-config.xml
     webauthn-registration-config.xml
+    webauthn-ldap-storage-config.xml
     access-control.xml
     attribute-resolver.xml
     logrotate/
@@ -529,23 +530,42 @@ docs/CONFIG-REFERENCE.md
 /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 ```
 
-### 導入時に決めるDB保存方式
+LDAP保存オプションを使う場合のみ、以下も確認します。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties
+```
+
+WebAuthn credentialをLDAP StorageServiceへ保存する場合のみ、以下も確認します。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/webauthn-ldap.properties
+```
+
+### 導入時に決める保存先と保存方式
 
 以下は初回ユーザー登録前に決めてください。
 運用開始後に変更する場合は、既存データの移行、復号可否、再登録要否を確認する必要があります。
 特に `sequence.storage = hash` は復号できないため、別方式へ戻せません。
 
 2FAS-KWは、ユーザー登録情報、失敗回数、ロック状態、MFA方式、TOTP seedを
-`graphicalmatrix_enrollment` テーブルに保存します。
+デフォルトでは `graphicalmatrix_enrollment` テーブルに保存します。
+推奨構成はDB保存です。v1.2.0以降は、既存LDAP運用に合わせるためのオプションとしてLDAPユーザー属性保存も選択できます。
 
-導入時の選択肢:
+保存先の選択肢:
 
-| 用途 |  推奨 | 変更時の注意 |
+| 保存先 | 推奨/用途 | 変更時の注意 |
 | --- | --- | --- |
-| DB | PostgreSQL | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う |
-| GraphicalMatrix sequence | `hash` | `auto` は `hash` として扱う。`hash` は復号不可。後戻りには再登録が必要 |
-| TOTP seed | `aes-gcm` | TOTP seedは認証時に復号が必要なため `hash` は使えない |
-| WebAuthn credential | JDBC StorageService | 詳細はWebAuthn / StorageService設定に従う |
+| `db` | 推奨。PostgreSQLを使う。 | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う。 |
+| `ldap` | LDAP属性運用に寄せたい場合の選択肢。LDAPS + 専用service accountを使う。 | LDAP属性スキーマ、ACL、既存データ移行を先に設計する。 |
+
+秘密情報の保護方式の選択肢:
+
+| 対象 | 推奨 | 変更時の注意 |
+| --- | --- | --- |
+| GraphicalMatrix sequence | `hash` | `auto` は `hash` として扱う。`hash` は復号不可。後戻りには再登録が必要。 |
+| TOTP seed | `aes-gcm` | TOTP seedは認証時に復号が必要なため `hash` は使えない。 |
+| WebAuthn credential | JDBC StorageService | DB/JDBC保存を推奨。GraphicalMatrix/TOTPの保存先とは別に、WebAuthn / StorageService設定で制御する。LDAP StorageServiceは選択時オプション。 |
 
 編集対象ファイル:
 
@@ -556,6 +576,16 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
 
 `graphicalmatrix.properties` では、GraphicalMatrix sequence と TOTP seed の保存方式を選択します。
 以下のどれを採用するかを導入時に決めてください。
+
+### 推奨: DB保存を使う
+
+既定値は `db` です。通常構成ではDB保存を使います。
+DB保存では、GraphicalMatrix / TOTP / MFA方式選択を `graphicalmatrix_enrollment` に保存します。
+保存先は導入時に選択でき、DB保存を基本としつつ、LDAPユーザー属性への保存も利用できます。
+
+```properties
+graphicalmatrix.savedata = db
+```
 
 ### 本番推奨: sequenceはhash、TOTP seedはAES-GCM
 
@@ -849,6 +879,70 @@ graphicalmatrix.totp.seed.storage = auto
 
 既存ユーザー登録後に `graphicalmatrix.sequence.storage` を変更する場合は、
 `docs/SEQUENCE-STORAGE-MIGRATION.md` を確認してください。
+
+### LDAPを選択した場合: LDAPユーザー属性へ保存する
+
+推奨はDB保存です。
+LDAP保存は、既存LDAPの属性運用にGraphicalMatrix / TOTP / MFA方式選択を寄せたい場合に選択できます。
+DB保存より先に選ぶ前提ではありません。
+
+LDAP保存に切り替える場合は、LDAP属性スキーマ、ACL、既存データ移行を事前に設計してください。
+
+```properties
+graphicalmatrix.savedata = ldap
+```
+
+LDAP保存を使う場合のみ、`ldap.properties` も設定します。
+
+```text
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties
+```
+
+最小例:
+
+```properties
+graphicalmatrix.ldap.url = ldaps://ldap.example.jp:636
+graphicalmatrix.ldap.baseDN = OU=people,DC=example,DC=jp
+graphicalmatrix.ldap.userFilter = (cn={user})
+graphicalmatrix.ldap.subtreeSearch = true
+
+graphicalmatrix.ldap.bindDN = CN=graphicalmatrix-writer,OU=system,DC=example,DC=jp
+graphicalmatrix.ldap.bindCredentialFile = /opt/shibboleth-idp/credentials/graphicalmatrix-ldap-bind.secret
+
+graphicalmatrix.ldap.attr.sequence = ldap_sequence
+graphicalmatrix.ldap.attr.status = ldap_status
+graphicalmatrix.ldap.attr.failed_count = ldap_failed_count
+graphicalmatrix.ldap.attr.locked_until = ldap_locked_until
+graphicalmatrix.ldap.attr.mfa_method = ldap_mfa_method
+graphicalmatrix.ldap.attr.totp_seed = ldap_totp_seed
+graphicalmatrix.ldap.attr.totp_status = ldap_totp_status
+graphicalmatrix.ldap.attr.totp_registered_at = ldap_totp_registered_at
+graphicalmatrix.ldap.attr.last_success_at = ldap_last_success_at
+graphicalmatrix.ldap.attr.force_sequence_change = ldap_force_sequence_change
+graphicalmatrix.ldap.attr.state_version = ldap_state_version
+graphicalmatrix.ldap.attr.updated_at = ldap_updated_at
+```
+
+bind credentialを作成します。
+
+```bash
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-ldap-bind.secret
+
+sudo vi /opt/shibboleth-idp/credentials/graphicalmatrix-ldap-bind.secret
+sudo chown root:jetty /opt/shibboleth-idp/credentials/graphicalmatrix-ldap-bind.secret
+sudo chmod 0640 /opt/shibboleth-idp/credentials/graphicalmatrix-ldap-bind.secret
+```
+
+LDAP保存でも、sequenceとTOTP seedの暗号化/ハッシュ化は `graphicalmatrix.properties` の設定を使います。
+本番では、sequenceは `hash`、TOTP seedは `aes-gcm` または `keyword` を使ってください。
+`graphicalmatrix.totp.seed.storage=auto` が `hash` を継承する状態では、TOTP seedを復号できないためConfig Checkで失敗します。
+
+注意:
+
+- LDAP保存はGraphicalMatrix / TOTP / MFA方式選択の保存先を切り替える機能です。
+- WebAuthn credentialの保存先は `idp.authn.webauthn.StorageService` で別に制御します。
+- v1.2.0フェーズ1では、Admin users APIはLDAP保存ユーザーの作成・更新に未対応です。
 
 ### 管理APIは初期状態で無効にしてください。
 
@@ -1410,6 +1504,19 @@ idp.authn.webauthn.StorageService.jdbcAccelerator.defaultType = QUERY
 idp.authn.webauthn.2fa.enabled = true
 idp.authn.webauthn.2fa.allowedPreviousFactors = authn/Password
 ```
+
+WebAuthn credentialはDB/JDBC StorageService保存を推奨します。
+LDAPへ保存する場合は `examples/webauthn-ldap-storage-config.xml` をIdP側の読み込み対象に追加し、
+`/opt/shibboleth-idp/conf/graphicalmatrix/webauthn-ldap.properties` で保存レイアウトを設定したうえで、
+`webauthn.properties` のStorageServiceを切り替えます。
+
+```properties
+idp.authn.webauthn.StorageService = GraphicalMatrixLDAPStorageService
+```
+
+LDAP保存レイアウトは、専用subtreeへ `context + id` の1レコードを1エントリとして保存する `subtree` を推奨します。
+ユーザーエントリ属性へ保存する `user-entry` も選択できますが、1ユーザー1レコード前提となるため、
+複数context/複数recordが必要な運用では `subtree` を使います。
 
 ### enrollments.properties
 

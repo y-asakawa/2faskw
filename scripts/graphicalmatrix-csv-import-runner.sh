@@ -47,6 +47,8 @@ sha256_file() {
 LOG_FILE="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.logFile' "$BASE/logs/csv-import.log")"
 LOCK_FILE="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.lockFile' "$BASE/logs/csv-import.lock")"
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$LOCK_FILE")"
+: >> "$LOG_FILE"
+chmod 0600 "$LOG_FILE"
 
 log() {
   printf 'ts=%s %s\n' "$(timestamp)" "$*" >> "$LOG_FILE"
