@@ -340,6 +340,7 @@ check_package() {
   need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-audit"
   need_file "$PACKAGE_DIR/docs/README.md"
   need_file "$PACKAGE_DIR/docs/INSTALL.md"
+  need_file "$PACKAGE_DIR/docs/INSTALL_Manual_Installation.md"
   need_file "$PACKAGE_DIR/docs/INSTALL_LDAP.md"
   need_file "$PACKAGE_DIR/docs/SECURITY.md"
   need_file "$PACKAGE_DIR/docs/SECURITY-CHECKLIST.md"

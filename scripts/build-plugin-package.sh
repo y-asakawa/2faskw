@@ -236,6 +236,7 @@ render_template plugin-metadata/README.md.in "$DIST_DIR/plugin-metadata/README.m
 copy_versioned docs/README.md "$DIST_DIR/docs/README.md"
 copy_versioned docs/build.md "$DIST_DIR/docs/build.md"
 copy_versioned docs/INSTALL.md "$DIST_DIR/docs/INSTALL.md"
+copy_versioned docs/INSTALL_Manual_Installation.md "$DIST_DIR/docs/INSTALL_Manual_Installation.md"
 copy_versioned docs/INSTALL_LDAP.md "$DIST_DIR/docs/INSTALL_LDAP.md"
 copy_versioned docs/SECURITY.md "$DIST_DIR/docs/SECURITY.md"
 copy_versioned docs/SECURITY-CHECKLIST.md "$DIST_DIR/docs/SECURITY-CHECKLIST.md"
