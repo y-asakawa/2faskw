@@ -327,7 +327,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             final String errorMessage) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
         final String context = GraphicalMatrixSupport.html(request.getContextPath());
-        final String issuer = "ShinshuIDP";
+        final String issuer = "2FAS-KW";
         final String otpauth = GraphicalMatrixTotpSupport.otpauthUrl(issuer, user, seed);
         final String qrDataUri;
         try {

@@ -8,7 +8,7 @@
 対象サーバ:
 
 ```text
-SSH: user@192.168.81.60
+SSH: user@192.168.0.60
 FQDN: idp.example.com
 OS: Rocky Linux 10.2
 CPU: aarch64
@@ -39,7 +39,7 @@ PostgreSQLはRocky Linux標準リポジトリの18.3ではなく、PGDG公式リ
 実行コマンド:
 
 ```bash
-ssh user@192.168.81.60
+ssh user@192.168.0.60
 
 cat /etc/os-release
 uname -m
@@ -296,8 +296,8 @@ sudo -E ./bin/install.sh \
   --noPrompt \
   --propertyFile /tmp/idp-install.properties \
   --targetDir /opt/shibboleth-idp \
-  --hostName 192.168.81.60 \
-  --entityID https://192.168.81.60/idp/shibboleth \
+  --hostName 192.168.0.60 \
+  --entityID https://192.168.0.60/idp/shibboleth \
   --keystorePassword "$KS" \
   --sealerPassword "$SEALER"
 
@@ -552,7 +552,7 @@ PostgreSQL 18.4、HTTPSの`/idp/`とループバック経由の`/idp/status`のH
 
 ```text
 FQDN: idp.example.com
-IP: 192.168.81.60
+IP: 192.168.0.60
 HTTPS URL: https://idp.example.com/idp/
 ```
 
@@ -561,7 +561,7 @@ HTTPS URL: https://idp.example.com/idp/
 ```text
 Subject: C=JP, ST=Nagano, L=Nagano, O=Example Organization, OU=IIC, CN=idp.example.com
 Issuer: CN=private-ca.example.com
-SAN: DNS:idp.example.com, IP:192.168.81.60
+SAN: DNS:idp.example.com, IP:192.168.0.60
 notBefore: <timestamp>
 notAfter: <timestamp>
 SHA-256: E8:B2:F7:59:11:41:CA:64:F0:1F:C3:B6:8C:52:E7:F2:10:3C:63:3A:B4:41:38:B1:BE:C9:00:F4:D6:72:9C:37
@@ -796,7 +796,7 @@ SSL certificate problem: self signed certificate in certificate chain
 
 ## 13. LDAP認証設定
 
-既存PoCサーバー`192.168.81.174`のLDAP Password認証設定を
+既存PoCサーバー`192.168.0.174`のLDAP Password認証設定を
 `2faskw`へ移植した。
 
 ### 13.1 バックアップ
@@ -813,7 +813,7 @@ LDAP接続設定:
 
 ```properties
 idp.authn.LDAP.authenticator = bindSearchAuthenticator
-idp.authn.LDAP.ldapURL = ldap://192.168.245.38:389
+idp.authn.LDAP.ldapURL = ldap://192.168.0.38:389
 idp.authn.LDAP.useStartTLS = false
 idp.authn.LDAP.baseDN = ou=People,dc=example,dc=com
 idp.authn.LDAP.subtreeSearch = false
@@ -829,7 +829,7 @@ idp.authn.LDAP.bindDN = cn=Checker,dc=example,dc=com
 ```
 
 `secrets.properties`はファイル全体を上書きせず、以下のLDAP資格情報2項目だけを
-`192.168.81.174`から移植した。値は作業ログおよび本書には記録していない。
+`192.168.0.174`から移植した。値は作業ログおよび本書には記録していない。
 
 ```properties
 idp.authn.LDAP.bindDNCredential
@@ -850,7 +850,7 @@ LDAP anonymous rootDSE query: OK
 LDAP Checker bind: FAIL - Invalid credentials (49)
 ```
 
-`2faskw`へ移植した資格情報は、`192.168.81.174`上の値と文字数・SHA-256が一致している。
+`2faskw`へ移植した資格情報は、`192.168.0.174`上の値と文字数・SHA-256が一致している。
 そのため転送不備ではなく、保存済みChecker資格情報の失効・変更、またはLDAP側ポリシーを
 確認する必要がある。LDAP実ユーザーのログイン試験は、有効なCheckerパスワードへ更新後に行う。
 
@@ -866,13 +866,13 @@ LocalSPTest MetadataProvider: 削除
 relying-party.xmlのPoC用Assertion暗号化無効化: 追加前へ復元
 ```
 
-`192.168.81.174`のSimpleSAMLphp設定も、`2faskw`登録前の状態へ復元した。
+`192.168.0.174`のSimpleSAMLphp設定も、`2faskw`登録前の状態へ復元した。
 
 取り消し前バックアップ:
 
 ```text
 2faskw: /opt/backups/pre-sp-removal-<timestamp>
-192.168.81.174: /opt/backups/pre-2faskw-sp-removal-<timestamp>
+192.168.0.174: /opt/backups/pre-2faskw-sp-removal-<timestamp>
 ```
 
 ### 13.4 再構築・検証結果
@@ -896,7 +896,7 @@ HTTPS /idp/: HTTP 200
 HTTPS /idp/status from loopback: HTTP 200
 LocalSPTest MetadataProvider count: 0
 /opt/shibboleth-idp/metadata/sp-test.xml: removed
-LDAP URL: ldap://192.168.245.38:389
+LDAP URL: ldap://192.168.0.38:389
 LDAP authenticator: bindSearchAuthenticator
 LDAP credential properties: 2
 LDAP real-user login: not tested because Checker bind is rejected
@@ -1188,7 +1188,7 @@ GraphicalMatrixJDBCStorageService bean created
 GraphicalMatrixStorageDataSource bean created
 ```
 
-`/idp/status`はサーバ自身の送信元IPが`192.168.81.60`として扱われ、
+`/idp/status`はサーバ自身の送信元IPが`192.168.0.60`として扱われ、
 `AccessByIPAddress`でHTTP 403になった。これは管理エンドポイントのアクセス制御であり、
 WebAuthn DB保存設定の起動エラーではない。
 
@@ -2194,7 +2194,7 @@ IdPサーバはDNSで`sp.example.com`を解決できないため、
 IdPの`/etc/hosts`に静的エントリを追加した。
 
 ```bash
-echo "192.168.81.61 sp.example.com" | sudo tee -a /etc/hosts
+echo "192.168.0.61 sp.example.com" | sudo tee -a /etc/hosts
 ```
 
 ### 16-2. SP metadata ファイルの作成
@@ -2316,14 +2316,14 @@ sudo vi /opt/shibboleth-idp/conf/logback.xml
 
 - PostgreSQL監視/HA構成のDB1/DB2構築
   - 詳細: `INSTALL_DB.md`
-  - DB1: `192.168.81.62`
-  - DB2: `192.168.81.63`
-  - DB VIP: `192.168.81.64`
+  - DB1: `192.168.0.62`
+  - DB2: `192.168.0.63`
+  - DB VIP: `192.168.0.64`
   - 構成: PostgreSQL Streaming Replication + HAProxy + Keepalived
   - 注意: 2台構成のため自動昇格は行わず、DB2昇格は手動運用とする
-- IdP `192.168.81.60` の `db.properties` をDB VIPへ切替済み
+- IdP `192.168.0.60` の `db.properties` をDB VIPへ切替済み
   - 変更前: `jdbc:postgresql://127.0.0.1:5432/graphicalmatrix`
-  - 変更後: `jdbc:postgresql://192.168.81.64:5432/graphicalmatrix`
+  - 変更後: `jdbc:postgresql://192.168.0.64:5432/graphicalmatrix`
   - Jetty IdP再起動後、管理CLIでDB VIP経由の参照成功
 
 HA-DB構成：
@@ -2347,8 +2347,8 @@ graphicalmatrix.db.url = jdbc:postgresql://xxx.xx.xx.xx:5432/graphicalmatrix
 
 ## 18. firewalld SSH接続元制限
 
-IdP/APサーバ `192.168.81.60` のSSH接続元を
-`192.168.81.0/24` のみに制限した。
+IdP/APサーバ `192.168.0.60` のSSH接続元を
+`192.168.0.0/24` のみに制限した。
 
 作業前の確認:
 
@@ -2370,7 +2370,7 @@ sudo sh -c "firewall-cmd --permanent --list-all > /root/firewalld-before-ssh-res
 
 ```bash
 sudo firewall-cmd --permanent --zone=public \
-  --add-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
+  --add-rich-rule='rule family="ipv4" source address="192.168.0.0/24" service name="ssh" accept'
 
 sudo firewall-cmd --permanent --zone=public --remove-service=ssh
 sudo firewall-cmd --reload
@@ -2381,7 +2381,7 @@ sudo firewall-cmd --reload
 ```bash
 sudo firewall-cmd --permanent --zone=public --query-service=ssh
 sudo firewall-cmd --permanent --zone=public \
-  --query-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
+  --query-rich-rule='rule family="ipv4" source address="192.168.0.0/24" service name="ssh" accept'
 sudo firewall-cmd --zone=public --list-all
 ```
 
@@ -2392,7 +2392,7 @@ query-service=ssh: no
 query-rich-rule: yes
 ```
 
-この設定により、SSHは `192.168.81.0/24` からのみ許可される。
+この設定により、SSHは `192.168.0.0/24` からのみ許可される。
 HTTPS等の既存公開サービスは変更していない。
 
 ## 19. IdP/APパフォーマンスチューニング設定例
@@ -2564,7 +2564,7 @@ WebAuthn StorageServiceは `global.xml` のDataSourceを参照する。
 DB接続先:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix
+graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
 ```
 
 SSL化後:
@@ -2737,7 +2737,7 @@ IdP/APサーバで公開するポートを最小化する。
 ```text
 443/tcp: IdP HTTPS
 8080/tcp: localhostのみ
-22/tcp: 192.168.81.0/24のみ
+22/tcp: 192.168.0.0/24のみ
 ```
 
 確認:
@@ -2855,7 +2855,7 @@ GraphicalMatrix audit件数
 最初からthreadやheapを大きくしすぎない。
 DB、LDAP、Jetty thread、JVM heapのどれが詰まっているかを見ながら調整する。
 
-## 20. GraphicalMatrix Plugin 1.0.1 / HikariCP適用に、IdP/APサーバ `192.168.81.60`
+## 20. GraphicalMatrix Plugin 1.0.1 / HikariCP適用に、IdP/APサーバ `192.168.0.60`
 （`idp.example.com`）へ GraphicalMatrix Plugin `1.0.1` を適用した。
 
 目的:
@@ -2870,7 +2870,7 @@ HikariCP接続プール経由にする。
 
 ```bash
 scp graphicalmatrix-plugin-local-dist/2faskw-idp-plugin-1.0.1.zip \
-  user@192.168.81.60:/tmp/2faskw-idp-plugin-1.0.1.zip
+  user@192.168.0.60:/tmp/2faskw-idp-plugin-1.0.1.zip
 ```
 
 サーバ上の配置:
@@ -3035,5 +3035,5 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh list
 結果:
 
 ```text
-DB VIP 192.168.81.64 経由で4ユーザーを参照できた。
+DB VIP 192.168.0.64 経由で4ユーザーを参照できた。
 ```

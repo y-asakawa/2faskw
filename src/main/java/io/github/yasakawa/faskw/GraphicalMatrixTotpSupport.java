@@ -32,7 +32,7 @@ public final class GraphicalMatrixTotpSupport {
     }
 
     public static String otpauthUrl(final String issuer, final String account, final String seed) {
-        final String safeIssuer = issuer != null && !issuer.isBlank() ? issuer : "ShinshuIDP";
+        final String safeIssuer = issuer != null && !issuer.isBlank() ? issuer : "2FAS-KW";
         final String label = safeIssuer + ":" + account;
         return "otpauth://totp/" + url(label)
             + "?secret=" + url(seed)

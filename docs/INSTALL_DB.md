@@ -8,9 +8,9 @@ DB 2台構成で構築した。
 対象:
 
 ```text
-DB1: 192.168.81.62 / db1.example.com
-DB2: 192.168.81.63 / db2.example.com
-DB VIP: 192.168.81.64
+DB1: 192.168.0.62 / db1.example.com
+DB2: 192.168.0.63 / db2.example.com
+DB VIP: 192.168.0.64
 OS: Rocky Linux 10.2
 CPU: aarch64
 ```
@@ -43,13 +43,13 @@ DB VIPがDB2へ移動する。
 DB VIPは以下を使用した。
 
 ```text
-192.168.81.64
+192.168.0.64
 ```
 
 事前確認:
 
 ```bash
-sudo arping -D -I enp0s1 -c 3 192.168.81.64
+sudo arping -D -I enp0s1 -c 3 192.168.0.64
 ```
 
 確認結果:
@@ -73,7 +73,7 @@ FROM pg_stat_replication;
 
 ```text
 application_name | walreceiver
-client_addr      | 192.168.81.63
+client_addr      | 192.168.0.63
 state            | streaming
 sync_state       | async
 ```
@@ -137,7 +137,7 @@ sudo /usr/pgsql-18/bin/postgresql-18-setup initdb
 DB1:
 
 ```conf
-listen_addresses = '127.0.0.1,192.168.81.62'
+listen_addresses = '127.0.0.1,192.168.0.62'
 port = 5432
 wal_level = replica
 max_wal_senders = 10
@@ -150,7 +150,7 @@ password_encryption = 'scram-sha-256'
 DB2はbasebackup後に以下へ変更した。
 
 ```conf
-listen_addresses = '127.0.0.1,192.168.81.63'
+listen_addresses = '127.0.0.1,192.168.0.63'
 ```
 
 ### 4.3 pg_hba.conf
@@ -161,8 +161,8 @@ DB1/DB2共通:
 local   all          all                                 peer
 host    all          all              127.0.0.1/32       scram-sha-256
 host    all          all              ::1/128            scram-sha-256
-host    replication  replicator       192.168.81.62/32   scram-sha-256
-host    replication  replicator       192.168.81.63/32   scram-sha-256
+host    replication  replicator       192.168.0.62/32   scram-sha-256
+host    replication  replicator       192.168.0.63/32   scram-sha-256
 ```
 
 ### 4.4 DB / ロール作成
@@ -181,7 +181,7 @@ CREATE DATABASE graphicalmatrix OWNER graphicalmatrix_app;
 
 ### 4.5 既存DB dump投入
 
-既存IdPサーバ `192.168.81.60` からdumpを取得した。
+既存IdPサーバ `192.168.0.60` からdumpを取得した。
 
 ```bash
 sudo -u postgres pg_dump \
@@ -222,8 +222,8 @@ sudo chmod 0700 /var/lib/pgsql/18/data
 replication用 `.pgpass`:
 
 ```text
-192.168.81.62:5432:*:replicator:<replication password>
-192.168.81.63:5432:*:replicator:<replication password>
+192.168.0.62:5432:*:replicator:<replication password>
+192.168.0.63:5432:*:replicator:<replication password>
 ```
 
 basebackup:
@@ -231,7 +231,7 @@ basebackup:
 ```bash
 sudo -u postgres env PGPASSWORD='<replication password>' \
   /usr/pgsql-18/bin/pg_basebackup \
-  -h 192.168.81.62 \
+  -h 192.168.0.62 \
   -U replicator \
   -D /var/lib/pgsql/18/data \
   -Fp -Xs -P -R
@@ -302,7 +302,7 @@ defaults
     timeout server  60s
 
 listen postgres_write
-    bind 192.168.81.64:5432
+    bind 192.168.0.64:5432
     mode tcp
     option tcp-check
     default-server inter 2s fall 3 rise 2 on-marked-down shutdown-sessions
@@ -412,9 +412,9 @@ vrrp_instance VI_GRAPHICALMATRIX_DB {
     advert_int 1
     nopreempt
 
-    unicast_src_ip 192.168.81.62
+    unicast_src_ip 192.168.0.62
     unicast_peer {
-        192.168.81.63
+        192.168.0.63
     }
 
     authentication {
@@ -423,7 +423,7 @@ vrrp_instance VI_GRAPHICALMATRIX_DB {
     }
 
     virtual_ipaddress {
-        192.168.81.64/24 dev enp0s1
+        192.168.0.64/24 dev enp0s1
     }
 
     track_script {
@@ -436,9 +436,9 @@ DB2は以下だけ変更。
 
 ```conf
 priority 100
-unicast_src_ip 192.168.81.63
+unicast_src_ip 192.168.0.63
 unicast_peer {
-    192.168.81.62
+    192.168.0.62
 }
 ```
 
@@ -476,24 +476,24 @@ active
 DB1:
 
 ```text
-enp0s1 UP 192.168.81.62/24 192.168.81.64/24
+enp0s1 UP 192.168.0.62/24 192.168.0.64/24
 ```
 
 DB2:
 
 ```text
-enp0s1 UP 192.168.81.63/24
+enp0s1 UP 192.168.0.63/24
 ```
 
 DB1がPrimaryであるため、VIPはDB1にある。
 
 ### 9.3 VIP経由接続
 
-DB1、DB2、IdPサーバ `192.168.81.60` から確認。
+DB1、DB2、IdPサーバ `192.168.0.60` から確認。
 
 ```bash
 PGPASSWORD='<GraphicalMatrix DB password>' \
-  psql -h 192.168.81.64 \
+  psql -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -Atqc 'SELECT count(*) FROM graphicalmatrix_enrollment;'
@@ -518,7 +518,7 @@ FROM pg_stat_replication;
 
 ```text
 application_name | walreceiver
-client_addr      | 192.168.81.63
+client_addr      | 192.168.0.63
 state            | streaming
 sync_state       | async
 ```
@@ -535,12 +535,12 @@ FROM pg_stat_wal_receiver;
 ```text
 pg_is_in_recovery | t
 status            | streaming
-sender_host       | 192.168.81.62
+sender_host       | 192.168.0.62
 ```
 
 ## 10. IdP側切替
 
-IdP `192.168.81.60` の `db.properties` をDB VIPへ切り替えた。
+IdP `192.168.0.60` の `db.properties` をDB VIPへ切り替えた。
 
 変更前:
 
@@ -551,7 +551,7 @@ graphicalmatrix.db.url=jdbc:postgresql://127.0.0.1:5432/graphicalmatrix
 変更後:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix
+graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
 graphicalmatrix.db.user=graphicalmatrix_app
 graphicalmatrix.db.passwordFile=/opt/shibboleth-idp/credentials/graphicalmatrix-db.password
 ```
@@ -564,7 +564,7 @@ sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/db.properties \
   /opt/shibboleth-idp/conf/graphicalmatrix/db.properties.local-postgresql.bak.$TS
 
 sudo sed -i \
-  's#^graphicalmatrix.db.url=.*#graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix#' \
+  's#^graphicalmatrix.db.url=.*#graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix#' \
   /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
 
 sudo chown root:jetty /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
@@ -619,7 +619,7 @@ p:url="jdbc:postgresql://127.0.0.1:5432/graphicalmatrix"
 変更後:
 
 ```xml
-p:url="jdbc:postgresql://192.168.81.64:5432/graphicalmatrix"
+p:url="jdbc:postgresql://192.168.0.64:5432/graphicalmatrix"
 ```
 
 バックアップ:
@@ -642,7 +642,7 @@ WebAuthnJDBCAccelerator
 sudo -u jetty /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list
 
 PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password) \
-  psql -h 192.168.81.64 \
+  psql -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -Atqc "SELECT context, id, value IS NOT NULL FROM storagerecords ORDER BY context, id;"
@@ -691,7 +691,7 @@ GraphicalMatrix側の `GraphicalMatrixTotpSeedSource` を `shibboleth.authn.TOTP
 sudo -u jetty /opt/shibboleth-idp/bin/graphicalmatrix-db.sh list
 
 PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password) \
-  psql -h 192.168.81.64 \
+  psql -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -Atqc "SELECT user_id, mfa_method, totp_status, totp_seed IS NOT NULL
@@ -738,7 +738,7 @@ ip -4 -br addr show enp0s1
 
 ```text
 pg_is_in_recovery = f
-DB2に 192.168.81.64/24 が付与される
+DB2に 192.168.0.64/24 が付与される
 ```
 
 旧PrimaryのDB1は、そのままPrimaryとして戻さない。
@@ -995,17 +995,17 @@ ERROR:  ... 構文エラー
 
 ## 14. SQLによるDB確認手順
 
-DB上のデータをSQLで確認する場合は、原則としてDB VIP `192.168.81.64` 経由で確認する。
+DB上のデータをSQLで確認する場合は、原則としてDB VIP `192.168.0.64` 経由で確認する。
 これにより、IdPが実際に参照する経路と同じ経路で確認できる。
 
 ### 14.1 IdPサーバから確認する
 
-IdPサーバ `192.168.81.60` で実行する。
+IdPサーバ `192.168.0.60` で実行する。
 
 ```bash
 PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password) \
   psql \
-  -h 192.168.81.64 \
+  -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix
 ```
@@ -1015,7 +1015,7 @@ PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 ```bash
 PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password) \
   psql \
-  -h 192.168.81.64 \
+  -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -c 'SELECT current_database(), current_user, inet_server_addr(), inet_server_port();'
@@ -1023,7 +1023,7 @@ PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 
 ### 14.2 DB1 Primary上で確認する
 
-DB1 `192.168.81.62` で実行する。
+DB1 `192.168.0.62` で実行する。
 
 ```bash
 sudo -u postgres /usr/pgsql-18/bin/psql -d graphicalmatrix
@@ -1043,7 +1043,7 @@ f
 
 ### 14.3 DB2 Standby上で確認する
 
-DB2 `192.168.81.63` で実行する。
+DB2 `192.168.0.63` で実行する。
 
 ```bash
 sudo -u postgres /usr/pgsql-18/bin/psql -d graphicalmatrix
@@ -1328,7 +1328,7 @@ SELECT
 通常時の期待値:
 
 ```text
-connected_server_ip   = 127.0.0.1 または 192.168.81.64 経由のHAProxy接続先
+connected_server_ip   = 127.0.0.1 または 192.168.0.64 経由のHAProxy接続先
 connected_server_port = 5432
 connected_to_standby  = f
 ```
@@ -1347,17 +1347,17 @@ HAProxyはVIPを保持しているノード上のローカルPostgreSQLへ接続
 
 ## 16. firewalld SSH接続元制限
 
-DB1/DB2のSSH接続元を `192.168.81.0/24` のみに制限した。
+DB1/DB2のSSH接続元を `192.168.0.0/24` のみに制限した。
 
 対象:
 
 ```text
-DB1: 192.168.81.62
-DB2: 192.168.81.63
-DB VIP: 192.168.81.64
+DB1: 192.168.0.62
+DB2: 192.168.0.63
+DB VIP: 192.168.0.64
 ```
 
-DB VIP `192.168.81.64` はKeepalivedによりDB1またはDB2へ付与されるため、
+DB VIP `192.168.0.64` はKeepalivedによりDB1またはDB2へ付与されるため、
 SSH制限はDB1/DB2それぞれのfirewalldへ設定する。
 
 作業前の確認:
@@ -1380,7 +1380,7 @@ sudo sh -c "firewall-cmd --permanent --list-all > /root/firewalld-before-ssh-res
 
 ```bash
 sudo firewall-cmd --permanent --zone=public \
-  --add-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
+  --add-rich-rule='rule family="ipv4" source address="192.168.0.0/24" service name="ssh" accept'
 
 sudo firewall-cmd --permanent --zone=public --remove-service=ssh
 sudo firewall-cmd --reload
@@ -1391,7 +1391,7 @@ sudo firewall-cmd --reload
 ```bash
 sudo firewall-cmd --permanent --zone=public --query-service=ssh
 sudo firewall-cmd --permanent --zone=public \
-  --query-rich-rule='rule family="ipv4" source address="192.168.81.0/24" service name="ssh" accept'
+  --query-rich-rule='rule family="ipv4" source address="192.168.0.0/24" service name="ssh" accept'
 sudo firewall-cmd --zone=public --list-all
 ```
 
@@ -1403,7 +1403,7 @@ query-rich-rule: yes
 ```
 
 DB1/DB2では、PostgreSQL用の `5432/tcp` とVRRP用の `vrrp` は変更していない。
-この設定により、SSHのみ `192.168.81.0/24` からの接続に限定される。
+この設定により、SSHのみ `192.168.0.0/24` からの接続に限定される。
 
 ## 17. PostgreSQL 5432/tcp SSL化手順
 
@@ -1430,7 +1430,7 @@ ssl = off
 IdP側JDBC URL:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix
+graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
 ```
 
 このため、現在の `IdP -> DB VIP:5432 -> HAProxy -> PostgreSQL` は平文接続。
@@ -1451,7 +1451,7 @@ IdP/Admin ToolsへローカルCA証明書を配置する
 例:
 
 ```text
-DB VIP:      192.168.81.64
+DB VIP:      192.168.0.64
 DB VIP FQDN: db-graphicalmatrix.example.com
 ```
 
@@ -1467,8 +1467,8 @@ JDBC接続先: db-graphicalmatrix.example.com
 IPで接続する場合:
 
 ```text
-JDBC接続先: 192.168.81.64
-証明書SAN: IP Address:192.168.81.64
+JDBC接続先: 192.168.0.64
+証明書SAN: IP Address:192.168.0.64
 ```
 
 FQDNを用意できない場合は、IP SAN付き証明書でも `verify-full` は可能。
@@ -1504,7 +1504,7 @@ db-vip.key         # DB1/DB2へ配置するサーバ秘密鍵
 
 ```text
 DNS:db-graphicalmatrix.example.com
-IP Address:192.168.81.64
+IP Address:192.168.0.64
 ```
 
 FQDN運用だけならDNS SANだけでもよい。
@@ -1605,15 +1605,15 @@ sudo cp -a /var/lib/pgsql/18/data/pg_hba.conf \
 
 ```conf
 # GraphicalMatrix IdP/Admin connections over SSL
-hostssl graphicalmatrix graphicalmatrix_app   192.168.81.60/32 scram-sha-256
-hostssl graphicalmatrix graphicalmatrix_admin 192.168.81.0/24  scram-sha-256
+hostssl graphicalmatrix graphicalmatrix_app   192.168.0.60/32 scram-sha-256
+hostssl graphicalmatrix graphicalmatrix_admin 192.168.0.0/24  scram-sha-256
 
 # HA monitor from local HAProxy/Keepalived scripts
 host    postgres    graphicalmatrix_ha_monitor 127.0.0.1/32 scram-sha-256
 
 # Replication. Use hostssl if replication SSL is configured.
-hostssl replication replicator 192.168.81.62/32 scram-sha-256
-hostssl replication replicator 192.168.81.63/32 scram-sha-256
+hostssl replication replicator 192.168.0.62/32 scram-sha-256
+hostssl replication replicator 192.168.0.63/32 scram-sha-256
 ```
 
 注意:
@@ -1631,7 +1631,7 @@ sudo systemctl reload postgresql-18
 
 ### 17.8 IdP側CA証明書配置
 
-IdP `192.168.81.60` で実行する。
+IdP `192.168.0.60` で実行する。
 
 ```bash
 sudo install -d -m 0750 -o root -g jetty /opt/shibboleth-idp/credentials/db-ssl
@@ -1657,7 +1657,7 @@ graphicalmatrix.db.url=jdbc:postgresql://db-graphicalmatrix.example.com:5432/gra
 IP SAN証明書を使う場合:
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
+graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
 ```
 
 変更前バックアップ:
@@ -1732,7 +1732,7 @@ DB2 Standby例:
 ```bash
 sudo -u postgres /usr/pgsql-18/bin/psql -Atqc \
   "ALTER SYSTEM SET primary_conninfo =
-   'host=192.168.81.62 port=5432 user=replicator password=<replication password> application_name=db2 sslmode=verify-ca sslrootcert=/var/lib/pgsql/18/data/certs/db-ca.crt';" postgres
+   'host=192.168.0.62 port=5432 user=replicator password=<replication password> application_name=db2 sslmode=verify-ca sslrootcert=/var/lib/pgsql/18/data/certs/db-ca.crt';" postgres
 ```
 
 反映にはStandbyのrestartを推奨する。
@@ -1766,7 +1766,7 @@ IP SAN:
 
 ```bash
 PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
-psql "host=192.168.81.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
+psql "host=192.168.0.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
   -c "SELECT current_user, current_database(), ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
 ```
 
@@ -1795,7 +1795,7 @@ SSL接続確認後、`pg_hba.conf` を `hostssl` に絞った場合、
 
 ```bash
 PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
-psql "host=192.168.81.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=disable" \
+psql "host=192.168.0.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=disable" \
   -c "SELECT 1;"
 ```
 
@@ -2052,7 +2052,7 @@ defaults
     timeout server  60s
 
 frontend pgsql
-    bind 192.168.81.64:5432
+    bind 192.168.0.64:5432
     maxconn 500
     default_backend pgsql_primary
 
@@ -2066,7 +2066,7 @@ PgBouncerを使う場合:
 
 ```haproxy
 frontend pgbouncer
-    bind 192.168.81.64:6432
+    bind 192.168.0.64:6432
     maxconn 500
     default_backend pgbouncer_primary
 
@@ -2285,22 +2285,22 @@ Jetty thread使用率
 対象:
 
 ```text
-VIP: db.example.com  / 192.168.81.64
-DB1: db1.example.com / 192.168.81.62
-DB2: db2.example.com / 192.168.81.63
+VIP: db.example.com  / 192.168.0.64
+DB1: db1.example.com / 192.168.0.62
+DB2: db2.example.com / 192.168.0.63
 CA:  private-ca.example.com
 ```
 
 証明書SAN:
 
 ```text
-2faskwdb:  DNS:db.example.com,  IP Address:192.168.81.64
-2faskwdb1: DNS:db1.example.com, IP Address:192.168.81.62
-2faskwdb2: DNS:db2.example.com, IP Address:192.168.81.63
+2faskwdb:  DNS:db.example.com,  IP Address:192.168.0.64
+2faskwdb1: DNS:db1.example.com, IP Address:192.168.0.62
+2faskwdb2: DNS:db2.example.com, IP Address:192.168.0.63
 ```
 
 現在のHAProxyはTCP透過であり、TLS終端はPostgreSQL側で行う。
-IdPはDB VIP `192.168.81.64` へ接続するため、PostgreSQLで実際に使用する
+IdPはDB VIP `192.168.0.64` へ接続するため、PostgreSQLで実際に使用する
 サーバ証明書はDB VIP用証明書とした。
 
 DB1/DB2個別証明書は各ノードへ配置済みだが、直近のVIP経由接続では使用しない。
@@ -2379,7 +2379,7 @@ IdPからDB VIPへのSSL接続試験:
 ```bash
 sudo -u jetty env PGPASSWORD="<graphicalmatrix_app password>" \
   /usr/pgsql-18/bin/psql \
-  "host=192.168.81.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
+  "host=192.168.0.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=verify-full sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt" \
   -Atqc "SELECT current_user, current_database(), ssl, version
          FROM pg_stat_ssl
          WHERE pid = pg_backend_pid();"
@@ -2394,13 +2394,13 @@ graphicalmatrix_app|graphicalmatrix|t|TLSv1.3
 IdPの `/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` を更新した。
 
 ```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.81.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
+graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt
 ```
 
 WebAuthn StorageService用の `/opt/shibboleth-idp/conf/global.xml` も同じ接続先へ更新した。
 
 ```xml
-p:url="jdbc:postgresql://192.168.81.64:5432/graphicalmatrix?sslmode=verify-full&amp;sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt"
+p:url="jdbc:postgresql://192.168.0.64:5432/graphicalmatrix?sslmode=verify-full&amp;sslrootcert=/opt/shibboleth-idp/credentials/db-ssl/db-ca.crt"
 ```
 
 IdP再起動:
@@ -2428,8 +2428,8 @@ HAProxyはDB VIPのTCP透過で `127.0.0.1:5432` へ接続するため、`127.0.
 local      all          all                                 peer
 hostssl    all          all              127.0.0.1/32       scram-sha-256
 hostssl    all          all              ::1/128            scram-sha-256
-hostssl    replication  replicator       192.168.81.62/32   scram-sha-256
-hostssl    replication  replicator       192.168.81.63/32   scram-sha-256
+hostssl    replication  replicator       192.168.0.62/32   scram-sha-256
+hostssl    replication  replicator       192.168.0.63/32   scram-sha-256
 ```
 
 非SSL接続拒否確認:
@@ -2437,7 +2437,7 @@ hostssl    replication  replicator       192.168.81.63/32   scram-sha-256
 ```bash
 sudo -u jetty env PGPASSWORD="<graphicalmatrix_app password>" \
   /usr/pgsql-18/bin/psql \
-  "host=192.168.81.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=disable" \
+  "host=192.168.0.64 port=5432 dbname=graphicalmatrix user=graphicalmatrix_app sslmode=disable" \
   -Atqc "SELECT 1;"
 ```
 
@@ -2472,7 +2472,7 @@ ORDER BY a.usename, a.client_addr;
 結果:
 
 ```text
-replicator | 192.168.81.63 | t | TLSv1.3 | 1
+replicator | 192.168.0.63 | t | TLSv1.3 | 1
 ```
 
 Keepalived確認:

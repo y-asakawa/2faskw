@@ -127,7 +127,7 @@ sysctl net.ipv4.tcp_tw_reuse
 ```text
 IdP: https://idp.example.com/idp/
 SP:  https://sp.example.com/
-DB VIP: 192.168.81.64
+DB VIP: 192.168.0.64
 ```
 
 ## 7. k6 インストール手順

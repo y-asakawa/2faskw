@@ -526,7 +526,7 @@ IdPを複数台構成にする場合は、`maximumPoolSize * IdP台数` がPostg
 
 ```properties
 graphicalmatrix.api.enabled = false
-graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.168.81.0/24
+graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.168.0.0/24
 graphicalmatrix.api.bearerTokenFile = /opt/shibboleth-idp/credentials/graphicalmatrix-api.token
 graphicalmatrix.api.authFailureLimit = 5
 graphicalmatrix.api.authFailureWindowSeconds = 60
