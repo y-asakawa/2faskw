@@ -77,6 +77,19 @@ ldapadd -x -H ldap://127.0.0.1:389 \
   -f /tmp/2faskw-base.ldif
 ```
 
+この時点のLDAPツリー構造:
+
+```text
+dc=example,dc=test
+└── ou=People
+    └── uid=test01
+        ├── objectClass: inetOrgPerson
+        ├── uid: test01
+        ├── cn: Test User
+        ├── mail: test01@example.test
+        └── userPassword: <LDAP password>
+```
+
 本番では平文LDAPではなくLDAPSまたはStartTLSを使用してください。
 
 ### 2FAS-KW用service account作成
@@ -98,6 +111,22 @@ EOF
 ldapadd -x -H ldap://127.0.0.1:389 \
   -D 'cn=Directory Manager' -W \
   -f /tmp/2faskw-service.ldif
+```
+
+service account追加後のLDAPツリー構造:
+
+```text
+dc=example,dc=test
+├── cn=graphicalmatrix-writer
+│   ├── objectClass: person
+│   ├── cn: graphicalmatrix-writer
+│   └── userPassword: <bind password>
+└── ou=People
+    └── uid=test01
+        ├── objectClass: inetOrgPerson
+        ├── uid: test01
+        ├── cn: Test User
+        └── mail: test01@example.test
 ```
 
 ## アトリビュートの設定
@@ -234,6 +263,26 @@ ldap_created_at: 0
 -
 replace: ldap_updated_at
 ldap_updated_at: 0
+```
+
+2FAS-KW属性追加後のユーザーエントリ:
+
+```text
+dc=example,dc=test
+├── cn=graphicalmatrix-writer
+└── ou=People
+    └── uid=test01
+        ├── objectClass: inetOrgPerson
+        ├── objectClass: graphicalMatrixEnrollment
+        ├── uid: test01
+        ├── cn: Test User
+        ├── ldap_sequence: <protected or plaintext sequence>
+        ├── ldap_initial_sequence: img01,img02,img03,img04
+        ├── ldap_status: ACTIVE
+        ├── ldap_mfa_method: GraphicalMatrix
+        ├── ldap_totp_status: UNREGISTERED
+        ├── ldap_force_sequence_change: 1
+        └── ldap_state_version: 0
 ```
 
 本番では `ldap_sequence` は `graphicalmatrix.sequence.storage` の保存方式に従って保護された値になります。
@@ -400,6 +449,31 @@ objectClass: top
 objectClass: organizationalUnit
 ou: WebAuthnStorage
 ```
+
+WebAuthn subtreeを使う場合のLDAPツリー構造:
+
+```text
+dc=example,dc=test
+├── cn=graphicalmatrix-writer
+├── ou=People
+│   └── uid=test01
+│       ├── objectClass: inetOrgPerson
+│       ├── objectClass: graphicalMatrixEnrollment
+│       ├── ldap_mfa_method: WebAuthn
+│       └── ldap_status: ACTIVE
+└── ou=WebAuthnStorage
+    └── cn=<generated-record-rdn>
+        ├── objectClass: extensibleObject
+        ├── gmStorageContext: <StorageService context>
+        ├── gmStorageId: test01
+        ├── gmStorageExpires: <epoch milliseconds or 0>
+        ├── gmStorageValue: <credential JSON>
+        └── gmStorageVersion: <version>
+```
+
+`ou=People` はGraphicalMatrix / TOTP / MFA方式選択の保存先です。
+`ou=WebAuthnStorage` はWebAuthn credential recordの保存先です。
+`gmStorageId` は、ユーザーエントリ側のログインIDと同じ体系に統一してください。
 
 ACI例:
 
