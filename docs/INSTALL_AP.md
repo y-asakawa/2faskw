@@ -1200,15 +1200,15 @@ WebAuthn DB保存設定の起動エラーではない。
 - 起動ログにはWebAuthn Plugin由来の`non-clustered storage service`注意ログが残る。credential保存先はJDBCへ切替済みだが、WebAuthnのロックアウト/補助状態の扱いは追加検証対象とする。
 
 #### WebAuthn DB保存後の実ログイン確認
-`test-user001@example.com`でWebAuthn credential登録と
+`user001@example.com`でWebAuthn credential登録と
 WebAuthn認証によるSPログイン成功を確認した。
 
 確認ログ:
 
 ```text
 ValidateAuthenticatorAttestationResponse: Public key registration was valid
-StorePublicKeyCredential: Added public key credential registration for user 'test-user001@example.com'
-ValidateWebAuthnAssertion: WebAuthn authentication succeeded for 'test-user001@example.com'
+StorePublicKeyCredential: Added public key credential registration for user 'user001@example.com'
+ValidateWebAuthnAssertion: WebAuthn authentication succeeded for 'user001@example.com'
 Shibboleth-Audit.SSO: ... https://sp.example.com/simplesaml/sp ... Success
 Shibboleth-Audit.Logout: ... Success
 ```
@@ -1225,7 +1225,7 @@ ORDER BY context, id;
 
 ```text
 context: net.shibboleth.idp.plugin.authn.webauthn
-id: test-user001@example.com
+id: user001@example.com
 version: 1
 value_length: 699
 ```
@@ -1295,7 +1295,7 @@ JDBCAccelerator有効化後のWebAuthnログイン再試験:
 
 ```text
 <timestamp> method decision: method=WEBAUTHN, flow=authn/WebAuthn
-<timestamp> ValidateWebAuthnAssertion: WebAuthn authentication succeeded for 'test-user001@example.com'
+<timestamp> ValidateWebAuthnAssertion: WebAuthn authentication succeeded for 'user001@example.com'
 <timestamp> Shibboleth-Audit.SSO: ... https://sp.example.com/simplesaml/sp ... Success
 <timestamp> Shibboleth-Audit.Logout: ... Success
 ```
@@ -1305,7 +1305,7 @@ JDBCAccelerator有効化後のWebAuthnログイン再試験:
 ```text
 jetty-idp.service: active
 storagerecords: 1 row
-id: test-user001@example.com
+id: user001@example.com
 value_length: 699
 ```
 
@@ -1600,7 +1600,7 @@ RESET / DELETE ロジック:
 
 ```text
 webauthn-list:
-  既存の test-user001@example.com credentialを表示できることを確認。
+  既存の user001@example.com credentialを表示できることを確認。
 
 webauthn-reset USER:
   dry-runで対象credentialを表示し、DB変更しないことを確認。
@@ -1733,7 +1733,7 @@ COMMIT;
 - `StorageRecords.value`が必ずJSON配列である前提を置かず、dry-runで形式チェックする。
 - JSON parse不可の行は削除対象にせず、エラーとして表示する。
 - `USER`一致は完全一致を基本とする。部分一致やLIKEは使わない。
-- `test-user001`と`test-user001@example.com`は別ユーザーとして扱う。
+- `user001`と`user001@example.com`は別ユーザーとして扱う。
 - 必要なら`--alias USER2`を追加し、複数IDを同時に削除できるようにする。
 - `webauthn-reset`は値を空にするだけで、GraphicalMatrix管理ユーザーは削除しない。
 - `webauthn-reset`後の再登録導線は、WebAuthn登録URLまたはMFA方式変更画面から行う。
@@ -2297,7 +2297,7 @@ sudo vi /opt/shibboleth-idp/conf/logback.xml
 
 ### 16-6. 動作確認結果
 
-- **SSO**: `Principal: test-user001`にてLDAP Password → GraphicalMatrix MFA完了。
+- **SSO**: `Principal: user001`にてLDAP Password → GraphicalMatrix MFA完了。
   `schacHomeOrganization`属性を取得。
 - **SLO**: IdP監査ログで`||Success||`を確認。
   Binding: HTTP-Redirect / HTTP-Redirect。

@@ -65,8 +65,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh migrate-sequence-storage --dr
 出力例:
 
 ```text
-PLAN user=test01 from=plaintext to=hash count=4
-OK user=test-user001 storage=hash
+PLAN user=user001 from=plaintext to=hash count=4
+OK user=user001 storage=hash
 SKIP user=old01 from=hash to=aes-gcm reason=not_recoverable
 summary.mode=dry-run
 summary.target_storage=hash

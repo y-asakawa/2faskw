@@ -651,7 +651,7 @@ PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 確認結果:
 
 ```text
-net.shibboleth.idp.plugin.authn.webauthn / test-user001@example.com のcredential 1件を確認。
+net.shibboleth.idp.plugin.authn.webauthn / user001@example.com のcredential 1件を確認。
 ```
 
 IdPログにはWebAuthn pluginの以下のINFOが出る。
@@ -703,7 +703,7 @@ PGPASSWORD=$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 確認結果:
 
 ```text
-000askw002 | TOTP | PENDING | t
+user002 | TOTP | PENDING | t
 ```
 
 つまり、TOTP seedはDB VIP上の `graphicalmatrix_enrollment.totp_seed` に保存され、
@@ -1171,7 +1171,7 @@ ORDER BY user_id;
 ```sql
 SELECT *
 FROM graphicalmatrix_enrollment
-WHERE user_id = 'test-user001';
+WHERE user_id = 'user001';
 ```
 
 ### 14.8 TOTP確認

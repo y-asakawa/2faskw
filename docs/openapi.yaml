@@ -189,7 +189,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeleteResponse"
               example:
-                userId: test01
+                userId: user001
                 deleted: true
         "400":
           $ref: "#/components/responses/BadRequest"

@@ -658,9 +658,9 @@ FIDO Metadata Serviceを使う場合は `webauthn-metadata.properties` を参照
 現在のDB運用では利用せず、互換確認用のレガシーファイルとして扱います。
 
 ```properties
-test01.sequence=img03,img07,img11,img14
-test01.failedCount=0
-test01.lockedUntil=0
+user001.sequence=img03,img07,img11,img14
+user001.failedCount=0
+user001.lockedUntil=0
 ```
 
 本番/DB構成では、ユーザー登録、失敗回数、ロック状態は
@@ -681,7 +681,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-curl-test.sh \
   --base-url http://127.0.0.1:8080/idp/graphicalmatrix-admin/api/v1 \
   --token-file /opt/shibboleth-idp/credentials/graphicalmatrix-api.token \
   --write \
-  --user api-test01
+  --user api-user001
 ```
 
 ### 管理CLI
@@ -689,21 +689,21 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-curl-test.sh \
 ユーザー追加:
 
 ```bash
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh add test01 A B C D
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh add user001 A B C D
 ```
 
 MFA方式変更:
 
 ```bash
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method test01 TOTP
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method test01 GraphicalMatrix
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method test01 WebAuthn
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method user001 TOTP
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method user001 GraphicalMatrix
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method user001 WebAuthn
 ```
 
 RESET:
 
 ```bash
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh test01 RESET
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh user001 RESET
 ```
 
 CSV一括登録:
@@ -716,9 +716,9 @@ CSV形式:
 
 ```csv
 action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
-A,test01,GraphicalMatrix,on,"A,B,C,D","J,Z,W,P"
-M,test01,TOTP,off,"A,B,C,D","img05,img06,img07,img08"
-D,test01
+A,user001,GraphicalMatrix,on,"A,B,C,D","J,Z,W,P"
+M,user001,TOTP,off,"A,B,C,D","img05,img06,img07,img08"
+D,user001
 ```
 
 CSVエクスポート:

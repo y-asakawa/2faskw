@@ -8,7 +8,7 @@ CSV形式:
 
 ```text
 action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
-A,test01,GraphicalMatrix,off,"img01,img02,img03,img04","img03,img07,img11,img14"
+A,user001,GraphicalMatrix,off,"img01,img02,img03,img04","img03,img07,img11,img14"
 ```
 
 出力されるactionは、全ユーザーを新規登録できるように `A` です。

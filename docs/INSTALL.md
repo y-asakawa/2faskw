@@ -300,7 +300,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-curl-test.sh \
   --base-url http://127.0.0.1:8080/idp/graphicalmatrix-admin/api/v1 \
   --token-file /opt/shibboleth-idp/credentials/graphicalmatrix-api.token \
   --write \
-  --user api-test01
+  --user api-user001
 ```
 
 ## 14. ログ確認

@@ -132,13 +132,13 @@ curl -sS -X PUT \
     "sequence": ["img03", "img07", "img11", "img14"],
     "status": "ACTIVE"
   }' \
-  "$BASE_URL/users/api-test01"
+  "$BASE_URL/users/api-user001"
 ```
 
 期待値:
 
 - HTTP 200
-- `userId` が `api-test01`
+- `userId` が `api-user001`
 - `mfaMethod` が `GraphicalMatrix`
 - `forceSequenceChange` が `true`
 
@@ -147,7 +147,7 @@ curl -sS -X PUT \
 ```bash
 curl -sS \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01"
+  "$BASE_URL/users/api-user001"
 ```
 
 期待値:
@@ -166,7 +166,7 @@ curl -sS -X PATCH \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"mfaMethod":"TOTP"}' \
-  "$BASE_URL/users/api-test01/method"
+  "$BASE_URL/users/api-user001/method"
 ```
 
 GraphicalMatrix:
@@ -176,7 +176,7 @@ curl -sS -X PATCH \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"mfaMethod":"GraphicalMatrix"}' \
-  "$BASE_URL/users/api-test01/method"
+  "$BASE_URL/users/api-user001/method"
 ```
 
 WebAuthn:
@@ -186,7 +186,7 @@ curl -sS -X PATCH \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"mfaMethod":"WebAuthn"}' \
-  "$BASE_URL/users/api-test01/method"
+  "$BASE_URL/users/api-user001/method"
 ```
 
 ## 9. action API
@@ -196,7 +196,7 @@ RESET:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01/reset"
+  "$BASE_URL/users/api-user001/reset"
 ```
 
 unlock:
@@ -204,7 +204,7 @@ unlock:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01/unlock"
+  "$BASE_URL/users/api-user001/unlock"
 ```
 
 disable:
@@ -212,7 +212,7 @@ disable:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01/disable"
+  "$BASE_URL/users/api-user001/disable"
 ```
 
 enable:
@@ -220,7 +220,7 @@ enable:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01/enable"
+  "$BASE_URL/users/api-user001/enable"
 ```
 
 TOTP reset:
@@ -228,7 +228,7 @@ TOTP reset:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01/totp-reset"
+  "$BASE_URL/users/api-user001/totp-reset"
 ```
 
 ## 10. user削除
@@ -236,13 +236,13 @@ curl -sS -X POST \
 ```bash
 curl -sS -X DELETE \
   -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/users/api-test01"
+  "$BASE_URL/users/api-user001"
 ```
 
 期待値:
 
 ```json
-{"userId":"api-test01","deleted":true}
+{"userId":"api-user001","deleted":true}
 ```
 
 ## 11. 補助スクリプト
@@ -262,7 +262,7 @@ curl -sS -X DELETE \
   --base-url "$BASE_URL" \
   --token-file /opt/shibboleth-idp/credentials/graphicalmatrix-api.token \
   --write \
-  --user api-test01
+  --user api-user001
 ```
 
 書き込みテストは以下を実行します。
@@ -285,7 +285,7 @@ curl -sS -X DELETE \
   --token-file /opt/shibboleth-idp/credentials/graphicalmatrix-api.token \
   --write \
   --keep-user \
-  --user api-test01
+  --user api-user001
 ```
 
 ## 12. 監査ログ確認

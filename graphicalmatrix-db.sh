@@ -187,9 +187,9 @@ Environment:
 
 CSV format:
   action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
-  A,test01,GraphicalMatrix,on,"img01,img02,img03,img04","img03,img07,img11,img14"
-  M,test01,TOTP,off,"img01,img02,img03,img04","img05,img06,img07,img08"
-  D,test01
+  A,user001,GraphicalMatrix,on,"img01,img02,img03,img04","img03,img07,img11,img14"
+  M,user001,TOTP,off,"img01,img02,img03,img04","img05,img06,img07,img08"
+  D,user001
 EOF
 }
 

@@ -198,9 +198,9 @@ FIDO Metadata Service / AAGUID補足メタデータの設定。
 レガシー例:
 
 ```properties
-test01.sequence=img03,img07,img11,img14
-test01.failedCount=0
-test01.lockedUntil=0
+user001.sequence=img03,img07,img11,img14
+user001.failedCount=0
+user001.lockedUntil=0
 ```
 
 | Property | Type | Default / Example | Description | Notes |

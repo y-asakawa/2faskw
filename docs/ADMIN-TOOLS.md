@@ -301,7 +301,7 @@ export GRAPHICALMATRIX_HOME=/opt/graphicalmatrix-admin
 `GRAPHICALMATRIX_HOME` 相当として扱う。
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh show test-user001
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh show user001
 ```
 
 設定項目のHELP:
@@ -384,19 +384,19 @@ ERROR: plaintext sequence storage is not allowed in production mode.
 ユーザー登録:
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh add test-user001 A B C D --apply
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh add user001 A B C D --apply
 ```
 
 MFA方式変更:
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh set-method test-user001 TOTP --apply
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh set-method user001 TOTP --apply
 ```
 
 RESET:
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh test-user001 RESET --apply
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh user001 RESET --apply
 ```
 
 CSV import:
@@ -453,7 +453,7 @@ migrate-sequence
 ```text
 DRY-RUN:
   action: MODIFY
-  user_id: test-user001
+  user_id: user001
   mfa_method: GraphicalMatrix -> TOTP
   force_sequence_change: 0 -> 1
 
@@ -520,7 +520,7 @@ detail
 例:
 
 ```text
-ts=<timestamp> event=ADMIN_CLI action=set-method target_user=test-user001 result=OK os_user=admin01 host=db-admin01 dry_run=false rows=1 detail=mfa_method=TOTP
+ts=<timestamp> event=ADMIN_CLI action=set-method target_user=user001 result=OK os_user=admin01 host=db-admin01 dry_run=false rows=1 detail=mfa_method=TOTP
 ```
 
 ログには以下を出さない。
@@ -826,7 +826,7 @@ graphicalmatrix.admin.csv.modifyDisabled = keep-disabled
 退職者データの保存期間満了後など、管理者が明示的に実行する。
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh purge test-user001 --apply
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh purge user001 --apply
 ```
 
 物理削除時は、関連するTOTP seed、WebAuthn credential、GraphicalMatrix登録情報を削除対象にできる。
