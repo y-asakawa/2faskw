@@ -1594,7 +1594,7 @@ sudo vi /opt/shibboleth-idp/conf/global.xml
       destroy-method="close"
       lazy-init="true"
       p:driverClassName="org.postgresql.Driver"
-      p:url="jdbc:postgresql://127.0.0.1:5432/graphicalmatrix"
+      p:url="jdbc:postgresql://192.168.0.64:5432/graphicalmatrix"
       p:username="graphicalmatrix_app"
       p:password="#{T(java.nio.file.Files).readString(T(java.nio.file.Path).of('/opt/shibboleth-idp/credentials/graphicalmatrix-db.password')).trim()}" />
 
@@ -1605,6 +1605,20 @@ sudo vi /opt/shibboleth-idp/conf/global.xml
       p:transactionIsolation="4"
       p:retryableErrors="40001" />
 <!-- END GraphicalMatrix WebAuthn JDBC StorageService -->
+```
+`p:url`はIdPサーバ自身ではなく、DB VIPまたはPostgreSQL接続先を指定する。
+IdPサーバ上でPostgreSQLを動かしていない構成では、`127.0.0.1:5432`を指定すると
+JDBC StorageServiceの初期化に失敗し、IdPがHTTP 503を返す。
+
+IdPサーバからDBへ接続できることを確認する。
+
+```bash
+PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
+  /usr/pgsql-18/bin/psql \
+  -h 192.168.0.64 \
+  -U graphicalmatrix_app \
+  -d graphicalmatrix \
+  -Atqc 'SELECT 1;'
 ```
 以下、webauthnの保存先を設定ファイルに追加した。
 （デフォルトだとメモリに保存）
@@ -2811,11 +2825,53 @@ graphicalmatrix.db.pool.validationTimeoutMillis=5000
 ```bash
 sudo grep -nE 'graphicalmatrix.db.(url|user|pool)' \
   /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+sudo grep -nE 'graphicalmatrix.db.(url|user|passwordFile|autoInit|pool)' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+sudo ls -l /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+sudo -u jetty test -r /opt/shibboleth-idp/credentials/graphicalmatrix-db.password \
+  && echo db_password_readable_by_jetty
 sudo ls -l /opt/shibboleth-idp/edit-webapp/WEB-INF/lib | \
   grep -E 'graphicalmatrix|HikariCP|postgresql|core-'
 sudo grep -nE 'GraphicalMatrixDataSourceListener|GraphicalMatrixStart|GraphicalMatrixAdminApi' \
   /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
 ```
+
+ログイン後に以下のエラーが出る場合は、GraphicalMatrix runtimeが使う
+`db.properties` の接続先、DBパスワード、またはDB側の接続許可に問題がある。
+
+```text
+Login Failure: Pool is empty and connection creation failed
+```
+
+まずIdPサーバから、`jetty` が読むものと同じパスワードファイルでDB接続を確認する。
+
+```bash
+PGPASSWORD="$(sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-db.password)" \
+  /usr/pgsql-18/bin/psql \
+  -h 192.168.0.64 \
+  -U graphicalmatrix_app \
+  -d graphicalmatrix \
+  -Atqc 'SELECT 1;'
+```
+
+`1` が返らない場合は、以下を確認する。
+
+```bash
+sudo grep -nE 'graphicalmatrix.db.(url|user|passwordFile|autoInit|pool)' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+sudo -u jetty test -r /opt/shibboleth-idp/credentials/graphicalmatrix-db.password \
+  && echo OK
+sudo tail -n 200 /opt/shibboleth-idp/logs/idp-process.log | grep -iE \
+  'graphicalmatrix|Hikari|Pool is empty|connection|postgres|password|permission|FATAL|SQLException'
+```
+
+典型原因:
+
+- `graphicalmatrix.db.url` がDB VIPではなく `127.0.0.1:5432` を向いている
+- `/opt/shibboleth-idp/credentials/graphicalmatrix-db.password` を `jetty` が読めない
+- パスワードファイルの内容が `graphicalmatrix_app` のDBパスワードと一致していない
+- DB側の `pg_hba.conf` またはfirewalldでIdPサーバからの接続を許可していない
+- DB VIP/HAProxy/Keepalivedが停止している
 
 WAR再ビルド時に、既存TOTP/WebAuthn/JDBC StorageServiceプラグインのJARが
 `root:root 0640` で配置されていたため、`jetty` ユーザーで読めず失敗した。

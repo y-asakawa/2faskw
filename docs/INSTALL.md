@@ -166,8 +166,8 @@ MFA連携:
 - DB接続先へのfirewalld許可
 
 ## 1. 事前確認
-[対象ソフトウェアを先にインストールしてください。インストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)
-
+[対象ソフトウェアを先にインストールしてください。インストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)<BR>
+[DBソフトウェアをインストールしてください。インストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
 - Shibboleth IdP 5.2系
 - Java 21
 - Jetty 12
@@ -860,13 +860,92 @@ sudo ./bin/graphicalmatrix-plugin-webxml.sh \
 /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml.bak.TIMESTAMP
 ```
 
-## 11. IdP rebuild
+## 11. MFA / External flow設定
+
+2FAS-KWはShibboleth IdPの `authn/MFA` flow内で動作する。
+Password認証だけでSPへ戻る場合は、`authn/MFA` が選択されていない。
+
+### mfa-authn-config.xml
+
+配布物のMFA設定例をIdPへ配置する。
+
+```bash
+sudo cp -a /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml.bak.$(date +%Y%m%d-%H%M%S)
+
+sudo install -o root -g jetty -m 0640 \
+  ./examples/mfa-authn-config.xml \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
+```
+
+確認:
+
+```bash
+sudo grep -nE 'TransitionMap|authn/Password|GraphicalMatrixMfaDecisionStrategy|authn/External|authn/TOTP|authn/WebAuthn' \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
+```
+
+`GraphicalMatrixMfaDecisionStrategy` が表示されることを確認する。
+
+### authn.properties
+
+IdPが `authn/MFA` を選択するように設定する。
+
+```bash
+sudo cp -a /opt/shibboleth-idp/conf/authn/authn.properties \
+  /opt/shibboleth-idp/conf/authn/authn.properties.bak.$(date +%Y%m%d-%H%M%S)
+
+sudo vi /opt/shibboleth-idp/conf/authn/authn.properties
+```
+
+設定:
+
+```properties
+idp.authn.flows = MFA
+```
+
+External認証の遷移先を、Shibbolethのデフォルト `/external.jsp` ではなく
+2FAS-KWのServletへ変更する。
+
+```properties
+idp.authn.External.externalAuthnPath = contextRelative:/graphicalmatrix/start
+idp.authn.External.nonBrowserSupported = false
+idp.authn.External.passiveAuthenticationSupported = false
+idp.authn.External.forcedAuthenticationSupported = false
+```
+
+確認:
+
+```bash
+sudo grep -nE '^idp.authn.flows|idp.authn.External.externalAuthnPath|external.jsp|/graphicalmatrix/start' \
+  /opt/shibboleth-idp/conf/authn/authn.properties \
+  /opt/shibboleth-idp/conf/idp.properties
+```
+
+`idp.authn.External.externalAuthnPath` が `/external.jsp` のままだと、
+Password成功後に以下の404になる。
+
+```text
+HTTP ERROR 404 JSP file [/external.jsp] not found
+```
+
+2FAS-KWのServlet mappingも確認する。
+
+```bash
+sudo grep -nE 'GraphicalMatrixStart|/graphicalmatrix/start|GraphicalMatrixVerify|/graphicalmatrix/verify' \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
+```
+
+`/idp/graphicalmatrix/start` への直接アクセスは、External認証のconversation keyが無いため
+HTTP 500になる場合がある。直接確認では404でないことを確認する。
+
+## 12. IdP rebuild
 
 ```bash
 sudo /opt/shibboleth-idp/bin/build.sh
 ```
 
-## 12. Jetty restart
+## 13. Jetty restart
 
 systemd例:
 
@@ -877,7 +956,7 @@ sudo systemctl restart jetty-idp.service
 
 環境固有の起動方式がある場合は、その手順に従ってください。
 
-## 13. 動作確認
+## 14. 動作確認
 
 変更画面:
 
@@ -929,7 +1008,17 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-curl-test.sh \
   --user api-user001
 ```
 
-## 14. ログ確認
+MFA flow確認:
+
+```bash
+sudo tail -n 300 /opt/shibboleth-idp/logs/idp-process.log | grep -iE \
+  'MFA default decision|MFA method decision|GraphicalMatrixMfaDecisionStrategy|authn/MFA|authn/External|authn/TOTP|authn/WebAuthn|bypassed'
+```
+
+`MFA default decision` または `MFA method decision` が出れば、
+2FAS-KWのMFA分岐に入っている。
+
+## 15. ログ確認
 
 ```bash
 sudo tail /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
@@ -942,7 +1031,7 @@ docs/LOGROTATE.md
 examples/logrotate/graphicalmatrix-audit
 ```
 
-## 15. Admin Tools単体インストール
+## 16. Admin Tools単体インストール
 
 管理CLIだけをDBサーバまたは管理端末へ導入する場合は、
 `2faskw-admin-tools-1.0.1.zip` を利用する。
@@ -988,7 +1077,7 @@ DB接続設定:
 docs/ADMIN-TOOLS.md
 ```
 
-## 16. 主要設定例
+## 17. 主要設定例
 
 全設定項目の意味、型、既定値、注意点は `docs/CONFIG-REFERENCE.md` を参照してください。
 Admin Toolsでは以下でも確認できます。
@@ -1245,7 +1334,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export /secure/path/graph
 
 詳細は `docs/ADMIN-TOOLS.md` と `docs/CSV-EXPORT.md` を参照してください。
 
-## 17. 運用補足
+## 18. 運用補足
 
 ### アンインストール
 
@@ -1333,7 +1422,7 @@ logrotateはOS側の設定です。
 - Jetty restartは自動実行しません
 - sequence保存方式は設定で切替できますが、既存データの一括再保存は `docs/SEQUENCE-STORAGE-MIGRATION.md` の手順で行います
 
-## 18. rollback
+## 19. rollback
 
 1. Jettyを停止する
 2. `graphicalmatrix-plugin-webxml.sh --remove --apply` を実行する
@@ -1377,7 +1466,7 @@ sudo ./bin/graphicalmatrix-plugin-uninstall.sh \
   --remove-runtime-deps
 ```
 
-## 19. install記録テンプレート
+## 20. install記録テンプレート
 
 ```text
 作業日:
