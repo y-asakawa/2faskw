@@ -258,11 +258,13 @@ paths:
     post:
       tags:
         - Actions
-      summary: Reset the user to initial GraphicalMatrix state
+      summary: Reset the user to the initial GraphicalMatrix sequence
       description: |
-        Copies initialSequence to sequence after resolving aliases, sets
-        mfaMethod to GraphicalMatrix, status to ACTIVE, clears lock and TOTP seed,
-        and enables forceSequenceChange.
+        Resolves the administrator-visible initialSequence, stores it in
+        sequence using the configured GraphicalMatrix sequence storage mode,
+        sets mfaMethod to GraphicalMatrix, keeps status ACTIVE, clears lock
+        and TOTP state, and enables forceSequenceChange so the user must
+        change the sequence at the next login.
       operationId: resetUser
       responses:
         "200":
@@ -585,7 +587,9 @@ components:
           type: array
           items:
             type: string
-          description: Initial sequence tokens. Alias values can be preserved here.
+          description: |
+            Administrator-visible initial password tokens used by reset.
+            Empty when graphicalmatrix.api.response.excludeSequences is true.
         sequence:
           type: array
           items:
@@ -665,7 +669,9 @@ components:
       description: |
         `initialSequence` and `sequence` can be arrays or comma-separated strings.
         If sequence is omitted but initialSequence is present, sequence is resolved
-        from initialSequence. New users must end with both values present.
+        from initialSequence for request compatibility. `initialSequence` is retained
+        as the administrator-visible initial password used by reset. New users must
+        end with a usable `sequence`.
 
     MethodChangeRequest:
       type: object

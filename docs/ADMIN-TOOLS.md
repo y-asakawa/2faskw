@@ -367,6 +367,7 @@ list
 show
 csv-export
 sequence-mode
+security-status
 webauthn-list
 ```
 
@@ -377,7 +378,6 @@ add
 modify
 delete
 set-method
-set-initial-sequence
 reset
 unlock
 csv
@@ -842,7 +842,11 @@ last_success_at
 残す理由:
 
 ```text
-誤停止から復旧しやすい
+`initial_sequence` は `USER RESET` 用の初期値として平文で保持する。
+管理CLIの `list` / `show` では `initial_sequence` を表示し、現在の `sequence` は
+DBに保存されたraw値を表示する。保護方式では `kw1:`、`aesgcm1:`、`hsp1:` などの
+prefix付き値になる。
+RESET時に初期値を現在の保存方式でsequenceへ戻し、次回ログインで変更を強制できる
 監査・問い合わせ対応で過去状態を確認できる
 再雇用・再登録時に復旧ポリシーを選べる
 プロビジョニング誤配信で即時データ消失しない
@@ -854,6 +858,7 @@ last_success_at
 Aで既存DISABLEDユーザーが来た場合:
   status=ACTIVEへ戻す
   CSVのmfa_method, force_sequence_change, initial_sequence, sequenceで更新する
+  initial_sequenceが空の場合はsequenceから初期値を補完する
 
 Mで既存DISABLEDユーザーが来た場合:
   標準ではstatusはDISABLEDのまま属性だけ更新する
@@ -975,9 +980,10 @@ admin.propertiesでAdmin Tools/provisioningが有効か確認
 実行ホスト確認
 client certificate必須設定の場合は証明書ファイル確認
 productionModeでplaintext sequence拒否を有効化可能
-incoming/*.csv を processing へ移動
+incoming/*.csv を権限0700のprocessingへコピーして管理者所有snapshotを作成
+snapshotのSHA-256を監査ログへ記録
 dry-runを必ず実行
-ポリシーを満たす場合のみ --apply
+同じsnapshotに対してポリシーを確認し、条件を満たす場合のみ --apply
 processed/failed/logsへ結果を保存
 ```
 

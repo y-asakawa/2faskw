@@ -85,6 +85,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-token.sh rotate --apply --print
 注意:
 
 - `--print-token` は必要な場合だけ使ってください
+- tokenディレクトリはroot管理かつgroup/world書き込み不可にしてください
+- 新tokenとバックアップは同一ファイルシステム上の専用一時ディレクトリで作成され、原子的に配置されます
 - terminal history、作業ログ、チャット、チケットへtokenを残さないでください
 - `--print-token` を使わない場合、token値は画面に表示されません
 

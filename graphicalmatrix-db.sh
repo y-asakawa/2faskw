@@ -49,8 +49,7 @@ User registration / update:
 
   set-initial-sequence USER img03,img07,img11,img14
   set-initial-sequence USER A B C D
-      Update the user's initial sequence.
-      USER RESET copies initial_sequence back to sequence.
+      Update the plaintext initial sequence used by USER RESET.
 
   set-method USER GraphicalMatrix|TOTP|WebAuthn
       Change the MFA method selected for the user.
@@ -59,9 +58,8 @@ User registration / update:
       Enable or disable forced GraphicalMatrix sequence change after login.
 
   USER RESET
-      Reset the user to the initial state:
-      copy initial_sequence to sequence, set mfa_method=GraphicalMatrix,
-      reset failure/lock state, and require sequence change when configured.
+      Copy the plaintext initial sequence into the protected current sequence,
+      set status=ACTIVE, clear the lock state, and require sequence change.
 
 Account status / lock:
   enable USER
@@ -142,6 +140,9 @@ WebAuthn:
 Sequence storage:
   sequence-mode
       Show the configured sequence storage mode.
+
+  security-status
+      Show machine-readable security migration readiness counters.
 
   migrate-sequence-storage
       Dry-run sequence storage migration.
@@ -493,6 +494,71 @@ sequence_storage_mode() {
   esac
 }
 
+sequence_storage_sql_predicate() {
+  local column="${1:-sequence}"
+  case "$(sequence_storage_mode)" in
+    plaintext)
+      printf "%s" "$column NOT LIKE 'kw1:%%' AND $column NOT LIKE 'aesgcm1:%%' AND $column NOT LIKE 'hsp1:%%'"
+      ;;
+    keyword)
+      printf "%s" "$column LIKE 'kw1:%%'"
+      ;;
+    aes-gcm)
+      printf "%s" "$column LIKE 'aesgcm1:%%'"
+      ;;
+    hash)
+      printf "%s" "$column LIKE 'hsp1:%%'"
+      ;;
+  esac
+}
+
+security_status() {
+  local mode predicate state_column total initial_nonempty initial_incompatible initial_empty
+  local incompatible active_empty active_incompatible
+  mode="$(sequence_storage_mode)"
+  predicate="$(sequence_storage_sql_predicate)"
+  state_column="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE LOWER(TABLE_NAME) = 'graphicalmatrix_enrollment'
+  AND LOWER(COLUMN_NAME) = 'state_version';" | tail -n 1 | trim)"
+  [[ "$state_column" == "1" ]] \
+    || die "state_version column is missing; apply conf/graphicalmatrix/postgresql-schema.sql first"
+
+  total="$(run_scalar "SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment;" | tail -n 1 | trim)"
+  initial_nonempty="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE initial_sequence IS NOT NULL AND initial_sequence <> '';" | tail -n 1 | trim)"
+  initial_incompatible="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE initial_sequence IS NOT NULL AND initial_sequence <> ''
+  AND (initial_sequence LIKE 'kw1:%'
+    OR initial_sequence LIKE 'aesgcm1:%'
+    OR initial_sequence LIKE 'hsp1:%');" | tail -n 1 | trim)"
+  initial_empty="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE initial_sequence IS NULL OR initial_sequence = '';" | tail -n 1 | trim)"
+  incompatible="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE sequence IS NOT NULL AND sequence <> '' AND NOT ($predicate);" | tail -n 1 | trim)"
+  active_empty="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE status = 'ACTIVE' AND (sequence IS NULL OR sequence = '');" | tail -n 1 | trim)"
+  active_incompatible="$(run_scalar "
+SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE status = 'ACTIVE' AND sequence IS NOT NULL AND sequence <> ''
+  AND NOT ($predicate);" | tail -n 1 | trim)"
+
+  echo "security.target_storage=$mode"
+  echo "security.total_rows=$total"
+  echo "security.initial_sequence_nonempty=$initial_nonempty"
+  echo "security.initial_sequence_empty_rows=$initial_empty"
+  echo "security.initial_sequence_incompatible_rows=$initial_incompatible"
+  echo "security.incompatible_sequence_rows=$incompatible"
+  echo "security.active_empty_sequence_rows=$active_empty"
+  echo "security.active_incompatible_sequence_rows=$active_incompatible"
+}
+
 totp_seed_storage_mode() {
   command -v java >/dev/null 2>&1 || die "java is required for TOTP seed storage mode"
   local cp
@@ -557,6 +623,34 @@ sequence_storage_encode() {
   cp="$(sequence_tool_classpath)"
   java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
     encode "$IDP_HOME" "$sequence" "$ordered" "$duplicates"
+}
+
+initial_sequence_plaintext() {
+  local sequence="$1"
+  normalize_initial_sequence "$sequence"
+}
+
+sequence_storage_display() {
+  local stored="$1"
+  [[ -n "$stored" ]] || return 0
+  local cp
+  cp="$(sequence_tool_classpath)"
+  java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
+    display "$IDP_HOME" "$stored"
+}
+
+enrollment_list() {
+  local user="${1:-}"
+  if [[ -n "$user" ]]; then
+    local user_q
+    user_q="$(sql_quote "$user")"
+    run_sql "$select_public_columns
+WHERE user_id = '$user_q'
+ORDER BY user_id;"
+  else
+    run_sql "$select_public_columns
+ORDER BY user_id;"
+  fi
 }
 
 totp_seed_storage_encode() {
@@ -828,6 +922,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INT NOT NULL DEFAULT 0,
+  state_version BIGINT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
@@ -847,9 +942,8 @@ ALTER TABLE graphicalmatrix_enrollment
 init_sql="$init_sql
 ALTER TABLE graphicalmatrix_enrollment
   ADD COLUMN IF NOT EXISTS initial_sequence VARCHAR(1024) NOT NULL DEFAULT '';
-UPDATE graphicalmatrix_enrollment
-SET initial_sequence = sequence
-WHERE initial_sequence IS NULL OR initial_sequence = '';"
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;"
 
 case "$db_auto_init" in
   1|true|yes|on) ;;
@@ -918,7 +1012,8 @@ upsert_sequence_sql() {
     cat <<SQL
 INSERT INTO graphicalmatrix_enrollment
   (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method, totp_seed,
-   totp_status, totp_registered_at, last_success_at, force_sequence_change, created_at, updated_at)
+   totp_status, totp_registered_at, last_success_at, force_sequence_change, state_version,
+   created_at, updated_at)
 VALUES
   ('$user_q', '$sequence_q', '$initial_sequence_q', 'ACTIVE', 0, 0,
    COALESCE((SELECT mfa_method FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), 'GraphicalMatrix'),
@@ -927,6 +1022,7 @@ VALUES
    COALESCE((SELECT totp_registered_at FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), 0),
    COALESCE((SELECT last_success_at FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), 0),
    COALESCE((SELECT force_sequence_change FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), 0),
+   COALESCE((SELECT state_version FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), 0) + 1,
    COALESCE((SELECT created_at FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'), $now_expr),
    $now_expr)
 ON CONFLICT (user_id) DO UPDATE
@@ -940,13 +1036,15 @@ SET sequence = EXCLUDED.sequence,
     status = 'ACTIVE',
     failed_count = 0,
     locked_until = 0,
+    state_version = graphicalmatrix_enrollment.state_version + 1,
     updated_at = $now_expr;
 SQL
   else
     cat <<SQL
 MERGE INTO graphicalmatrix_enrollment
   (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method, totp_seed,
-   totp_status, totp_registered_at, last_success_at, force_sequence_change, created_at, updated_at)
+   totp_status, totp_registered_at, last_success_at, force_sequence_change, state_version,
+   created_at, updated_at)
 KEY(user_id)
 VALUES
   ('$user_q', '$sequence_q',
@@ -971,6 +1069,9 @@ VALUES
    CASEWHEN((SELECT force_sequence_change FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') IS NULL,
      0,
      (SELECT force_sequence_change FROM graphicalmatrix_enrollment WHERE user_id = '$user_q')),
+   CASEWHEN((SELECT state_version FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') IS NULL,
+     1,
+     (SELECT state_version FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') + 1),
    CASEWHEN((SELECT created_at FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') IS NULL,
      $now_expr,
      (SELECT created_at FROM graphicalmatrix_enrollment WHERE user_id = '$user_q')),
@@ -1100,6 +1201,7 @@ PY
           echo "SET status = 'DISABLED',"
           echo "    failed_count = 0,"
           echo "    locked_until = 0,"
+          echo "    state_version = state_version + 1,"
           echo "    updated_at = $now_expr"
           echo "WHERE user_id = '$user_q';"
         else
@@ -1111,20 +1213,24 @@ PY
 
     [[ -n "$method" ]] || die "CSV line $line_no has empty mfa_method for action $action"
     [[ -n "$force_value" ]] || die "CSV line $line_no has empty force_sequence_change for action $action"
-    [[ -n "$initial_sequence" ]] || die "CSV line $line_no has empty initial_sequence for action $action"
+    if [[ -z "$sequence" && -n "$initial_sequence" ]]; then
+      sequence="$initial_sequence"
+    fi
     [[ -n "$sequence" ]] || die "CSV line $line_no has empty sequence for action $action"
     method="$(normalize_method "$method")"
     force_sql="$(normalize_force_value "$force_value")"
-    validate_sequence "$initial_sequence"
     validate_sequence "$sequence"
-    normalized_initial_sequence="$(normalize_initial_sequence "$initial_sequence")"
+    if [[ -z "$initial_sequence" ]]; then
+      initial_sequence="$sequence"
+    fi
+    validate_sequence "$initial_sequence"
+    normalized_initial_sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
     resolved_sequence="$(resolve_sequence_to_graphicals "$sequence")"
-    validate_sequence "$normalized_initial_sequence"
     validate_sequence "$resolved_sequence"
     stored_sequence="$(sequence_storage_encode "$resolved_sequence")"
 
     sequence_q="$(sql_quote "$stored_sequence")"
-    initial_sequence_q="$(sql_quote "$normalized_initial_sequence")"
+    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$normalized_initial_sequence")")"
     method_q="$(sql_quote "$method")"
     printf "line=%s action=%s user_id=%s mfa_method=%s force_sequence_change=%s initial_sequence=%s sequence=%s\n" \
       "$line_no" "$action" "$user" "$method" "$force_value" "$normalized_initial_sequence" "$resolved_sequence" >> "$preview_file"
@@ -1146,6 +1252,7 @@ PY
         echo "    status = 'ACTIVE',"
         echo "    failed_count = 0,"
         echo "    locked_until = 0,"
+        echo "    state_version = state_version + 1,"
         echo "    updated_at = $now_expr"
         echo "WHERE user_id = '$user_q';"
       else
@@ -1155,6 +1262,7 @@ PY
         echo "    initial_sequence = '$initial_sequence_q',"
         echo "    mfa_method = '$method_q',"
         echo "    force_sequence_change = $force_sql,"
+        echo "    state_version = state_version + 1,"
         echo "    updated_at = $now_expr"
         echo "WHERE user_id = '$user_q';"
       fi
@@ -1324,7 +1432,8 @@ webauthn_reset() {
     [[ "$set_method" == "GraphicalMatrix" ]] || die "webauthn-reset --set-method currently supports GraphicalMatrix only"
     method_sql="
 UPDATE graphicalmatrix_enrollment
-SET mfa_method = 'GraphicalMatrix', updated_at = $now_expr
+SET mfa_method = 'GraphicalMatrix', state_version = state_version + 1,
+    updated_at = $now_expr
 WHERE user_id = '$user_q';"
   fi
 
@@ -1545,6 +1654,10 @@ case "$cmd" in
     echo
     ;;
 
+  security-status)
+    security_status
+    ;;
+
   totp-seed-mode)
     totp_seed_storage_mode
     echo
@@ -1592,31 +1705,26 @@ case "$cmd" in
     ;;
 
   list)
-    run_sql "$init_sql
-$select_public_columns
-ORDER BY user_id;"
+    [[ -z "$init_sql" ]] || run_sql "$init_sql" >/dev/null
+    enrollment_list
     ;;
 
   show)
     user="${2:-}"
     validate_user "$user"
-    user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-$select_public_columns
-WHERE user_id = '$user_q';"
+    [[ -z "$init_sql" ]] || run_sql "$init_sql" >/dev/null
+    enrollment_list "$user"
     ;;
 
   add|set-sequence)
     user="${2:-}"
     sequence="$(sequence_from_args "${@:3}")"
-    initial_sequence="$(normalize_initial_sequence "$sequence")"
     sequence="$(resolve_sequence_to_graphicals "$sequence")"
     validate_user "$user"
-    validate_sequence "$initial_sequence"
     validate_sequence "$sequence"
     user_q="$(sql_quote "$user")"
     sequence_q="$(sql_quote "$(sequence_storage_encode "$sequence")")"
-    initial_sequence_q="$(sql_quote "$initial_sequence")"
+    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$sequence")")"
     run_sql "$init_sql
 $(upsert_sequence_sql "$user_q" "$sequence_q" "$initial_sequence_q")
 $select_public_columns
@@ -1653,14 +1761,16 @@ WHERE user_id = '$user_q';"
   set-initial-sequence)
     user="${2:-}"
     sequence="$(sequence_from_args "${@:3}")"
-    sequence="$(normalize_initial_sequence "$sequence")"
+    sequence="$(resolve_sequence_to_graphicals "$sequence")"
     validate_user "$user"
     validate_sequence "$sequence"
     user_q="$(sql_quote "$user")"
-    sequence_q="$(sql_quote "$sequence")"
+    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$sequence")")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET initial_sequence = '$sequence_q', updated_at = $now_expr
+SET initial_sequence = '$initial_sequence_q',
+    state_version = state_version + 1,
+    updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1674,7 +1784,7 @@ WHERE user_id = '$user_q';"
     method_q="$(sql_quote "$method")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET mfa_method = '$method_q', updated_at = $now_expr
+SET mfa_method = '$method_q', state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1703,7 +1813,8 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET totp_seed = NULL, totp_status = 'UNREGISTERED', totp_registered_at = 0, updated_at = $now_expr
+SET totp_seed = NULL, totp_status = 'UNREGISTERED', totp_registered_at = 0,
+    state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1782,7 +1893,7 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET force_sequence_change = $force_value, updated_at = $now_expr
+SET force_sequence_change = $force_value, state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1792,12 +1903,13 @@ WHERE user_id = '$user_q';"
     user="${2:-}"
     validate_user "$user"
     user_q="$(sql_quote "$user")"
-    initial_sequence="$(run_scalar "$init_sql
-SELECT initial_sequence FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';" | tail -n 1 | trim)"
-    [[ -n "$initial_sequence" ]] || die "user not found or initial_sequence is empty: $user"
-    sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
+    initial_sequence="$(run_scalar "
+SELECT initial_sequence AS initial_sequence
+FROM graphicalmatrix_enrollment
+WHERE user_id = '$user_q';" | tail -n 1 | trim)"
+    [[ -n "$initial_sequence" ]] || die "initial_sequence is empty for user: $user"
     validate_sequence "$initial_sequence"
-    validate_sequence "$sequence"
+    sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
     sequence_q="$(sql_quote "$(sequence_storage_encode "$sequence")")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
@@ -1810,6 +1922,7 @@ SET mfa_method = 'GraphicalMatrix',
     totp_seed = NULL,
     totp_status = 'UNREGISTERED',
     totp_registered_at = 0,
+    state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
@@ -1822,7 +1935,7 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET status = 'ACTIVE', updated_at = $now_expr
+SET status = 'ACTIVE', state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1834,7 +1947,7 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET status = 'DISABLED', updated_at = $now_expr
+SET status = 'DISABLED', state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1846,7 +1959,8 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET failed_count = 0, locked_until = 0, updated_at = $now_expr
+SET failed_count = 0, locked_until = 0,
+    state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1861,6 +1975,7 @@ WHERE user_id = '$user_q';"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
 SET locked_until = $now_expr + ($minutes * 60 * 1000),
+    state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns

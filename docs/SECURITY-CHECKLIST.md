@@ -61,6 +61,7 @@ IdPとDBを単体構成で運用する場合の最低限の確認項目です。
 - [ ] `plugin-metadata/PACKAGE-MANIFEST.sha256` を確認した
 - [ ] `graphicalmatrix-plugin-webxml.sh --install` のdry-run結果を確認した
 - [ ] `graphicalmatrix-plugin-check.sh` の結果を確認した
+- [ ] `graphicalmatrix-plugin-check.sh --config-only --strict` で設定変更後の整合性を確認した
 
 ### DB
 

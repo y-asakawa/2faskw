@@ -309,8 +309,32 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         audit.log("CHANGE_VERIFY", user, result.getAuditResult(), challengeId, result.getAuditDetail(), request);
 
         if (result.isSuccess()) {
+            final GraphicalMatrixEnrollment verifiedEnrollment;
+            try {
+                verifiedEnrollment = repository.findEnrollment(user);
+            } catch (Exception ex) {
+                audit.log("CHANGE_VERIFY", user, "DB_ERROR", challengeId,
+                    ex.getClass().getSimpleName(), request);
+                clearChange(session);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "登録情報を確認できません。",
+                    "時間をおいて再度試すか、管理者に連絡してください。");
+                return;
+            }
+            if (verifiedEnrollment == null || !verifiedEnrollment.isActive()
+                    || verifiedEnrollment.getLockedUntil() > now) {
+                audit.log("CHANGE_VERIFY", user, "ENROLL_REQUIRED", challengeId,
+                    "state_changed_after_verification", request);
+                clearChange(session);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "GraphicalMatrixを変更できません。",
+                    "登録状態が変更されました。最初からやり直してください。");
+                return;
+            }
             final String saveCsrfToken = GraphicalMatrixSupport.token();
             session.setAttribute("graphicalmatrixChange.verified", Boolean.TRUE);
+            session.setAttribute("graphicalmatrixChange.stateVersion",
+                Long.valueOf(verifiedEnrollment.getStateVersion()));
             session.setAttribute("graphicalmatrixChange.saveCsrfToken", saveCsrfToken);
             session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
             renderMenu(request, response, config, user, saveCsrfToken, null);
@@ -453,6 +477,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         final String csrfToken = (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken");
         final Long expiresAt = (Long) session.getAttribute("graphicalmatrixChange.expiresAt");
         final Boolean verified = (Boolean) session.getAttribute("graphicalmatrixChange.verified");
+        final Long stateVersion = (Long) session.getAttribute("graphicalmatrixChange.stateVersion");
         final Object displayOrderObject = session.getAttribute("graphicalmatrixChange.newDisplayOrder");
         final Object configObject = session.getAttribute("graphicalmatrixChange.config");
 
@@ -466,6 +491,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         if (user == null
                 || !user.equals(trim(request.getParameter("user")))
                 || !Boolean.TRUE.equals(verified)
+                || stateVersion == null
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
                 || expiresAt.longValue() < now) {
@@ -504,9 +530,10 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
                 return;
             }
 
-            if (!repository.updateSequence(user, selected, now,
+            if (!repository.updateSequence(user, selected, now, stateVersion.longValue(),
                     config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed())) {
-                audit.log("CHANGE_SAVE", user, "ENROLL_REQUIRED", null, "missing_enrollment", request);
+                audit.log("CHANGE_SAVE", user, "ENROLL_REQUIRED", null,
+                    "enrollment_state_changed", request);
                 clearChange(session);
                 GraphicalMatrixStartServlet.renderUnavailable(request, response,
                     "GraphicalMatrixを変更できません。",
@@ -697,6 +724,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         session.removeAttribute("graphicalmatrixChange.config");
         session.removeAttribute("graphicalmatrixChange.used");
         session.removeAttribute("graphicalmatrixChange.verified");
+        session.removeAttribute("graphicalmatrixChange.stateVersion");
         session.removeAttribute("graphicalmatrixChange.saveCsrfToken");
     }
 

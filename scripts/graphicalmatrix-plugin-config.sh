@@ -31,7 +31,7 @@ Options:
 This installer:
   - copies all packaged jars into edit-webapp/WEB-INF/lib
   - copies configuration templates without overwriting existing configs
-  - copies views, CSS, graphical assets, graphicalmatrix-db.sh, graphicalmatrix-db-migration.sh, graphicalmatrix-api-token.sh, and graphicalmatrix-api-curl-test.sh
+  - copies views, CSS, graphical assets, DB/migration tools, the v1.1.0 security upgrade tool, and API tools
   - keeps the management API disabled by default
   - does not edit web.xml yet
   - does not rebuild the IdP war or restart Jetty
@@ -329,6 +329,7 @@ done
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-db.sh" "$IDP_HOME/bin/graphicalmatrix-db.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh" "$IDP_HOME/bin/graphicalmatrix-db-migration.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-api-token.sh" "$IDP_HOME/bin/graphicalmatrix-api-token.sh"
+install_executable "$PACKAGE_DIR/bin/graphicalmatrix-security-upgrade.sh" "$IDP_HOME/bin/graphicalmatrix-security-upgrade.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-api-curl-test.sh" "$IDP_HOME/bin/graphicalmatrix-api-curl-test.sh"
 
 print_summary_and_exit

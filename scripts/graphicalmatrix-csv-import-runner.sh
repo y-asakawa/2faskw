@@ -33,7 +33,15 @@ bool_true() {
 }
 
 timestamp() {
-  date -Is
+  date -Is 2>/dev/null || date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+    return
+  fi
+  shasum -a 256 "$1" | awk '{print $1}'
 }
 
 LOG_FILE="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.logFile' "$BASE/logs/csv-import.log")"
@@ -161,29 +169,42 @@ should_apply_csv() {
 
 process_file() {
   local src="$1"
-  local name ts work rows disables max_rows max_disables apply_args
+  local name ts work snapshot rows disables max_rows max_disables digest
 
   name="$(basename "$src")"
   [[ "$name" =~ ^[A-Za-z0-9._-]+[.]csv$ ]] || {
     log "event=CSV_IMPORT_SKIP file=$(printf "%q" "$name") detail=invalid_filename"
     return 0
   }
+  [[ -f "$src" && ! -L "$src" ]] || {
+    log "event=CSV_IMPORT_SKIP file=$(printf "%q" "$name") detail=non_regular_source"
+    return 0
+  }
 
-  rows="$(csv_row_count "$src")"
+  ts="$(date +%Y%m%d%H%M%S)"
+  work="$PROCESSING_DIR/$ts-$name"
+  snapshot="$(mktemp "$PROCESSING_DIR/.csv-snapshot.XXXXXX")"
+  chmod 0600 "$snapshot"
+  if ! cp -P -- "$src" "$snapshot"; then
+    rm -f "$snapshot"
+    fail "Unable to create CSV snapshot: file=$name"
+  fi
+  mv -f -- "$snapshot" "$work"
+  rm -f -- "$src"
+  [[ -f "$work" && ! -L "$work" ]] || fail "CSV snapshot is not a regular file: file=$name"
+  digest="$(sha256_file "$work")"
+
+  rows="$(csv_row_count "$work")"
   max_rows="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.maxRows' '10000')"
   [[ "$rows" =~ ^[0-9]+$ && "$rows" -le "$max_rows" ]] \
     || fail "CSV row count exceeds limit: file=$name rows=$rows maxRows=$max_rows"
 
-  disables="$(csv_disable_count "$src")"
+  disables="$(csv_disable_count "$work")"
   max_disables="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.maxDisables' '1000')"
   [[ "$disables" =~ ^[0-9]+$ && "$disables" -le "$max_disables" ]] \
     || fail "CSV disable count exceeds limit: file=$name disables=$disables maxDisables=$max_disables"
 
-  ts="$(date +%Y%m%d%H%M%S)"
-  work="$PROCESSING_DIR/$ts-$name"
-  mv "$src" "$work"
-
-  log "event=CSV_IMPORT_START file=$(printf "%q" "$name") rows=$rows disables=$disables"
+  log "event=CSV_IMPORT_START file=$(printf "%q" "$name") sha256=$digest rows=$rows disables=$disables"
   if "$DB_TOOL" csv "$work" --provisioning >> "$LOG_FILE" 2>&1; then
     if should_apply_csv "$work"; then
       "$DB_TOOL" csv "$work" --provisioning --apply >> "$LOG_FILE" 2>&1
@@ -215,6 +236,7 @@ PROCESSING_DIR="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.processing
 PROCESSED_DIR="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.processedDir' "$BASE/processed")"
 FAILED_DIR="$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.csv.failedDir' "$BASE/failed")"
 mkdir -p "$INCOMING_DIR" "$PROCESSING_DIR" "$PROCESSED_DIR" "$FAILED_DIR" "$(dirname "$LOG_FILE")"
+chmod 0700 "$PROCESSING_DIR"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || fail "another CSV import runner is already running"

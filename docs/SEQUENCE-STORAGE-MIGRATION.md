@@ -4,7 +4,12 @@
 
 `graphicalmatrix.sequence.storage` を変更した後、既存ユーザーの `sequence` を現在の保存方式で再保存するための管理コマンドです。
 
-対象は `graphicalmatrix_enrollment.sequence` です。`initial_sequence` はアカウントマネージャーから渡される初期値の参照用途として平文またはaliasのまま扱う設計のため、このmigrationでは更新しません。
+対象は `graphicalmatrix_enrollment.sequence` です。`initial_sequence` は
+`USER RESET` 用の初期パスワードとして平文で保持します。旧手順で暗号化済みの
+`initial_sequence` が残っている場合は、migration時に平文へ正規化します。
+
+保存方式を変更した後は、migrationが完了するまで設定方式と異なる既存行は
+認証に使用されません。先にdry-runで全対象を確認してから切り替えてください。
 
 ## 対応できる移行
 

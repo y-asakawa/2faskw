@@ -11,9 +11,13 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INTEGER NOT NULL DEFAULT 0,
+  state_version BIGINT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_status
   ON graphicalmatrix_enrollment (status);

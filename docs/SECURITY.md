@@ -189,7 +189,9 @@ graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalm
 
 - plaintextはPoC/検証用のみです
 - AES-GCMや共通キーワード暗号化は復号可能ですが、鍵管理リスクがあります
-- 既存plaintext sequenceは後方互換で認証できます
+- plaintext sequenceは `graphicalmatrix.sequence.storage = plaintext` の場合のみ認証できます。
+  `keyword`、`aes-gcm`、`hash` へ変更した後は `migrate-sequence-storage` で既存行を
+  現在の保存方式へ移行してください。
 - 新規登録、sequence変更、RESET、API更新、CSV登録時に現在の保存方式で保存されます
 - hash方式ではAPI応答の `sequence` は空配列になり、`sequenceRecoverable` は `false` になります
 - 保存方式を本番途中で変更する場合は、`docs/SEQUENCE-STORAGE-MIGRATION.md` の手順でdry-run後に移行します

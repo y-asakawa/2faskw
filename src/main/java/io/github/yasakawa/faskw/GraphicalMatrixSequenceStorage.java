@@ -62,12 +62,29 @@ public final class GraphicalMatrixSequenceStorage {
 
         final String rawMode = property(props, "graphicalmatrix.sequence.storage", "auto");
         final String mode = normalizeMode(rawMode);
-        final String keyword = secret(props, "graphicalmatrix.sequence.keyword",
-            "graphicalmatrix.sequence.keywordFile");
-        final String aesKeyText = secret(props, "graphicalmatrix.sequence.aesKey",
-            "graphicalmatrix.sequence.aesKeyFile");
-        final String pepperText = secret(props, "graphicalmatrix.sequence.pepper",
-            "graphicalmatrix.sequence.pepperFile");
+        final String keyword;
+        final String aesKeyText;
+        final String pepperText;
+        if ("keyword".equals(mode)) {
+            keyword = secret(props, "graphicalmatrix.sequence.keyword",
+                "graphicalmatrix.sequence.keywordFile");
+            aesKeyText = "";
+            pepperText = "";
+        } else if ("aes-gcm".equals(mode)) {
+            keyword = "";
+            aesKeyText = secret(props, "graphicalmatrix.sequence.aesKey",
+                "graphicalmatrix.sequence.aesKeyFile");
+            pepperText = "";
+        } else if ("hash".equals(mode)) {
+            keyword = "";
+            aesKeyText = "";
+            pepperText = secret(props, "graphicalmatrix.sequence.pepper",
+                "graphicalmatrix.sequence.pepperFile");
+        } else {
+            keyword = "";
+            aesKeyText = "";
+            pepperText = "";
+        }
 
         return new GraphicalMatrixSequenceStorage(
             mode,
@@ -151,6 +168,11 @@ public final class GraphicalMatrixSequenceStorage {
         return "plaintext";
     }
 
+    public boolean acceptedForRuntime(final String stored) {
+        final String storedMode = storedMode(stored);
+        return !"empty".equals(storedMode) && mode.equals(storedMode);
+    }
+
     public int count(final String stored) {
         if (stored == null || stored.trim().isEmpty()) {
             return 0;
@@ -170,7 +192,7 @@ public final class GraphicalMatrixSequenceStorage {
     }
 
     public boolean usable(final String stored, final GraphicalMatrixConfig config) {
-        if (stored == null || stored.trim().isEmpty()) {
+        if (!acceptedForRuntime(stored)) {
             return false;
         }
         if (isHash(stored)) {
@@ -186,6 +208,9 @@ public final class GraphicalMatrixSequenceStorage {
 
     public boolean matches(final String stored, final List<String> selected,
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed) {
+        if (!acceptedForRuntime(stored)) {
+            return false;
+        }
         if (isHash(stored)) {
             require(pepper, "graphicalmatrix.sequence.pepper or pepperFile");
             final String[] parts = stored.split(":", 4);

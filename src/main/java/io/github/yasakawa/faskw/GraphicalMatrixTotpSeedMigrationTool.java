@@ -104,12 +104,14 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
                 + "totp_registered_at BIGINT NOT NULL DEFAULT 0,"
                 + "last_success_at BIGINT NOT NULL DEFAULT 0,"
                 + "force_sequence_change INT NOT NULL DEFAULT 0,"
+                + "state_version BIGINT NOT NULL DEFAULT 0,"
                 + "created_at BIGINT NOT NULL,"
                 + "updated_at BIGINT NOT NULL"
                 + ")");
             addColumnIfMissing(st, "totp_seed VARCHAR(255)");
             addColumnIfMissing(st, "totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED'");
             addColumnIfMissing(st, "totp_registered_at BIGINT NOT NULL DEFAULT 0");
+            addColumnIfMissing(st, "state_version BIGINT NOT NULL DEFAULT 0");
         }
     }
 

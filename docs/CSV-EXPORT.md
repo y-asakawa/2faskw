@@ -8,7 +8,7 @@ CSV形式:
 
 ```text
 action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
-A,user001,GraphicalMatrix,off,"img01,img02,img03,img04","img03,img07,img11,img14"
+A,user001,GraphicalMatrix,off,,"img03,img07,img11,img14"
 ```
 
 出力されるactionは、全ユーザーを新規登録できるように `A` です。
@@ -40,8 +40,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export -
 - `user_id`
 - `mfa_method`
 - `force_sequence_change`
-- `initial_sequence`
-- 復号した現在の `sequence`
+- `initial_sequence`（平文の初期値）
+- 復号した現在の `sequence`（復号できる保存方式の場合）
 
 以下は管理CSVの対象外です。
 

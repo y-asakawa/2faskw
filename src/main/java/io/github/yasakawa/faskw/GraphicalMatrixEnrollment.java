@@ -6,19 +6,27 @@ public final class GraphicalMatrixEnrollment {
     private final int failedCount;
     private final long lockedUntil;
     private final boolean forceSequenceChange;
+    private final long stateVersion;
 
     public GraphicalMatrixEnrollment(final String sequence, final String status,
             final int failedCount, final long lockedUntil) {
-        this(sequence, status, failedCount, lockedUntil, false);
+        this(sequence, status, failedCount, lockedUntil, false, 0L);
     }
 
     public GraphicalMatrixEnrollment(final String sequence, final String status,
             final int failedCount, final long lockedUntil, final boolean forceSequenceChange) {
+        this(sequence, status, failedCount, lockedUntil, forceSequenceChange, 0L);
+    }
+
+    public GraphicalMatrixEnrollment(final String sequence, final String status,
+            final int failedCount, final long lockedUntil, final boolean forceSequenceChange,
+            final long stateVersion) {
         this.sequence = sequence;
         this.status = status;
         this.failedCount = failedCount;
         this.lockedUntil = lockedUntil;
         this.forceSequenceChange = forceSequenceChange;
+        this.stateVersion = stateVersion;
     }
 
     public String getSequence() {
@@ -39,6 +47,10 @@ public final class GraphicalMatrixEnrollment {
 
     public boolean isForceSequenceChange() {
         return forceSequenceChange;
+    }
+
+    public long getStateVersion() {
+        return stateVersion;
     }
 
     public boolean isActive() {

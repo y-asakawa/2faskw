@@ -1,5 +1,6 @@
 package io.github.yasakawa.faskw;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public final class GraphicalMatrixSequenceTool {
@@ -28,6 +29,18 @@ public final class GraphicalMatrixSequenceTool {
                 final List<String> sequence = GraphicalMatrixSupport.csv(args[2]);
                 final boolean ordered = Boolean.parseBoolean(args[3]);
                 final boolean duplicates = Boolean.parseBoolean(args[4]);
+                System.out.println(storage.encode(sequence, ordered, duplicates));
+                return;
+            }
+            if ("encode-stdin".equals(command)) {
+                if (args.length < 4) {
+                    usage();
+                    System.exit(2);
+                }
+                final String input = new String(System.in.readAllBytes(), StandardCharsets.UTF_8).trim();
+                final List<String> sequence = GraphicalMatrixSupport.csv(input);
+                final boolean ordered = Boolean.parseBoolean(args[2]);
+                final boolean duplicates = Boolean.parseBoolean(args[3]);
                 System.out.println(storage.encode(sequence, ordered, duplicates));
                 return;
             }
@@ -70,6 +83,7 @@ public final class GraphicalMatrixSequenceTool {
         System.err.println("Usage:");
         System.err.println("  GraphicalMatrixSequenceTool mode IDP_HOME");
         System.err.println("  GraphicalMatrixSequenceTool encode IDP_HOME sequenceCsv ordered duplicates");
+        System.err.println("  GraphicalMatrixSequenceTool encode-stdin IDP_HOME ordered duplicates");
         System.err.println("  GraphicalMatrixSequenceTool display IDP_HOME storedSequence");
         System.err.println("  GraphicalMatrixSequenceTool storage IDP_HOME storedSequence");
         System.err.println("  GraphicalMatrixSequenceTool matches IDP_HOME storedSequence selectedCsv ordered duplicates");

@@ -25,6 +25,8 @@ reproduction steps
 impact assessment
 whether user authentication data, credentials, TOTP seeds, authentication sequences, WebAuthn credentials, or API tokens may have been exposed
 
+
 ## Supported Versions
 
 Only the latest published release is expected to receive security fixes unless the release notes state otherwise.
+

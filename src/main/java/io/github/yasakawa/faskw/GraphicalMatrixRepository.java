@@ -26,17 +26,18 @@ public final class GraphicalMatrixRepository {
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT sequence, status, failed_count, locked_until, force_sequence_change "
+                    "SELECT sequence, status, failed_count, locked_until, force_sequence_change, state_version "
                     + "FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
                 ps.setString(1, user);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
                         return new GraphicalMatrixEnrollment(
-                            sequenceStorage.readableSequence(rs.getString("sequence")),
+                            rs.getString("sequence"),
                             rs.getString("status"),
                             rs.getInt("failed_count"),
                             rs.getLong("locked_until"),
-                            rs.getInt("force_sequence_change") != 0
+                            rs.getInt("force_sequence_change") != 0,
+                            rs.getLong("state_version")
                         );
                     }
                 }
@@ -237,6 +238,7 @@ public final class GraphicalMatrixRepository {
     }
 
     public boolean updateSequence(final String user, final List<String> sequence, final long now,
+            final long expectedStateVersion,
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed) throws Exception {
         final String storedSequence = sequenceStorage.encode(
             sequence, orderedSelectionRequired, duplicateSelectionsAllowed);
@@ -244,12 +246,16 @@ public final class GraphicalMatrixRepository {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
-                    + "SET sequence = ?, status = 'ACTIVE', failed_count = 0, locked_until = 0, "
-                    + "force_sequence_change = 0, updated_at = ? "
-                    + "WHERE user_id = ?")) {
+                    + "SET sequence = ?, force_sequence_change = 0, updated_at = ?, "
+                    + "state_version = state_version + 1 "
+                    + "WHERE user_id = ? AND status = 'ACTIVE' "
+                    + "AND mfa_method = 'GraphicalMatrix' AND locked_until <= ? "
+                    + "AND state_version = ?")) {
                 ps.setString(1, storedSequence);
                 ps.setLong(2, now);
                 ps.setString(3, user);
+                ps.setLong(4, now);
+                ps.setLong(5, expectedStateVersion);
                 return ps.executeUpdate() == 1;
             }
         }
@@ -269,7 +275,8 @@ public final class GraphicalMatrixRepository {
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET mfa_method = 'TOTP', totp_seed = NULL, "
                         + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
-                        + "failed_count = 0, locked_until = 0, updated_at = ? "
+                        + "failed_count = 0, locked_until = 0, "
+                        + "state_version = state_version + 1, updated_at = ? "
                         + "WHERE user_id = ?")) {
                     ps.setLong(1, now);
                     ps.setString(2, user);
@@ -280,7 +287,8 @@ public final class GraphicalMatrixRepository {
             if ("WEBAUTHN".equals(normalized)) {
                 try (PreparedStatement ps = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
-                        + "SET mfa_method = ?, failed_count = 0, locked_until = 0, updated_at = ? "
+                        + "SET mfa_method = ?, failed_count = 0, locked_until = 0, "
+                        + "state_version = state_version + 1, updated_at = ? "
                         + "WHERE user_id = ?")) {
                     ps.setString(1, "WebAuthn");
                     ps.setLong(2, now);
@@ -291,7 +299,8 @@ public final class GraphicalMatrixRepository {
 
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
-                    + "SET mfa_method = 'GraphicalMatrix', failed_count = 0, locked_until = 0, updated_at = ? "
+                    + "SET mfa_method = 'GraphicalMatrix', failed_count = 0, locked_until = 0, "
+                    + "state_version = state_version + 1, updated_at = ? "
                     + "WHERE user_id = ?")) {
                 ps.setLong(1, now);
                 ps.setString(2, user);
@@ -348,6 +357,10 @@ public final class GraphicalMatrixRepository {
 
                 if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
+                }
+                if (!sequenceStorage.acceptedForRuntime(sequence)) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "sequence_storage_migration_required");
                 }
                 if (lockedUntil > now) {
                     return GraphicalMatrixVerifyResult.locked("locked_until=" + lockedUntil);
@@ -417,6 +430,10 @@ public final class GraphicalMatrixRepository {
 
                 if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
+                }
+                if (!sequenceStorage.acceptedForRuntime(sequence)) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "sequence_storage_migration_required");
                 }
                 if (lockedUntil > now) {
                     return GraphicalMatrixVerifyResult.locked("locked_until=" + lockedUntil);
@@ -521,6 +538,7 @@ public final class GraphicalMatrixRepository {
                 + "totp_registered_at BIGINT NOT NULL DEFAULT 0, "
                 + "last_success_at BIGINT NOT NULL DEFAULT 0, "
                 + "force_sequence_change INT NOT NULL DEFAULT 0, "
+                + "state_version BIGINT NOT NULL DEFAULT 0, "
                 + "created_at BIGINT NOT NULL, "
                 + "updated_at BIGINT NOT NULL)"
             );
@@ -550,12 +568,11 @@ public final class GraphicalMatrixRepository {
             );
             st.executeUpdate(
                 "ALTER TABLE graphicalmatrix_enrollment "
-                + "ADD COLUMN IF NOT EXISTS initial_sequence VARCHAR(1024) NOT NULL DEFAULT ''"
+                + "ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0"
             );
             st.executeUpdate(
-                "UPDATE graphicalmatrix_enrollment "
-                + "SET initial_sequence = sequence "
-                + "WHERE initial_sequence IS NULL OR initial_sequence = ''"
+                "ALTER TABLE graphicalmatrix_enrollment "
+                + "ADD COLUMN IF NOT EXISTS initial_sequence VARCHAR(1024) NOT NULL DEFAULT ''"
             );
         }
     }

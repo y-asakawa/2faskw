@@ -132,6 +132,7 @@ fi
 remove_file "$IDP_HOME/bin/graphicalmatrix-db.sh"
 remove_file "$IDP_HOME/bin/graphicalmatrix-db-migration.sh"
 remove_file "$IDP_HOME/bin/graphicalmatrix-api-token.sh"
+remove_file "$IDP_HOME/bin/graphicalmatrix-security-upgrade.sh"
 remove_file "$IDP_HOME/bin/graphicalmatrix-api-curl-test.sh"
 
 if [[ "$REMOVE_CONFIG" -eq 1 ]]; then

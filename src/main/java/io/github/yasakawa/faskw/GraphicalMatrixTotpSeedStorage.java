@@ -61,12 +61,22 @@ public final class GraphicalMatrixTotpSeedStorage {
         final String sequenceMode = normalizeSequenceMode(property(props, "graphicalmatrix.sequence.storage", "auto"));
         final String mode = resolveMode(configuredMode, sequenceMode);
         final boolean productionMode = booleanProperty(props, "graphicalmatrix.productionMode", false);
-        final String keyword = firstSecret(props,
-            "graphicalmatrix.totp.seed.keyword", "graphicalmatrix.totp.seed.keywordFile",
-            "graphicalmatrix.sequence.keyword", "graphicalmatrix.sequence.keywordFile");
-        final String aesKeyText = firstSecret(props,
-            "graphicalmatrix.totp.seed.aesKey", "graphicalmatrix.totp.seed.aesKeyFile",
-            "graphicalmatrix.sequence.aesKey", "graphicalmatrix.sequence.aesKeyFile");
+        final String keyword;
+        final String aesKeyText;
+        if ("keyword".equals(mode)) {
+            keyword = firstSecret(props,
+                "graphicalmatrix.totp.seed.keyword", "graphicalmatrix.totp.seed.keywordFile",
+                "graphicalmatrix.sequence.keyword", "graphicalmatrix.sequence.keywordFile");
+            aesKeyText = "";
+        } else if ("aes-gcm".equals(mode)) {
+            keyword = "";
+            aesKeyText = firstSecret(props,
+                "graphicalmatrix.totp.seed.aesKey", "graphicalmatrix.totp.seed.aesKeyFile",
+                "graphicalmatrix.sequence.aesKey", "graphicalmatrix.sequence.aesKeyFile");
+        } else {
+            keyword = "";
+            aesKeyText = "";
+        }
 
         return new GraphicalMatrixTotpSeedStorage(
             mode,

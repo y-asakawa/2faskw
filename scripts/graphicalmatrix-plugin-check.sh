@@ -5,24 +5,28 @@ IDP_HOME="/opt/shibboleth-idp"
 PACKAGE_DIR=""
 CHECK_PACKAGE=1
 CHECK_IDP=1
+CHECK_CONFIG=0
 STRICT=0
 
 package_failures=0
 package_warnings=0
 idp_failures=0
 idp_warnings=0
+config_failures=0
+config_warnings=0
 current_scope="package"
 
 usage() {
   cat <<'EOF'
 Usage:
-  graphicalmatrix-plugin-check.sh [--idp-home DIR] [--package-dir DIR] [--package-only|--idp-only] [--strict]
+  graphicalmatrix-plugin-check.sh [--idp-home DIR] [--package-dir DIR] [--package-only|--idp-only|--config-only] [--strict]
 
 Checks the 2FAS-KW plugin package and/or the target Shibboleth IdP layout.
 
 Options:
   --package-only   Check only the extracted plugin package. Useful on build hosts or CI.
   --idp-only       Check only the target IdP layout. Useful after package validation.
+  --config-only    Validate graphicalmatrix.properties and referenced files without DB access.
   --strict         Treat warnings as a failed check.
 
 Default mode checks both the package and the IdP layout.
@@ -42,11 +46,19 @@ while [[ $# -gt 0 ]]; do
     --package-only)
       CHECK_PACKAGE=1
       CHECK_IDP=0
+      CHECK_CONFIG=0
       shift
       ;;
     --idp-only)
       CHECK_PACKAGE=0
       CHECK_IDP=1
+      CHECK_CONFIG=0
+      shift
+      ;;
+    --config-only)
+      CHECK_PACKAGE=0
+      CHECK_IDP=0
+      CHECK_CONFIG=1
       shift
       ;;
     --strict)
@@ -80,6 +92,7 @@ warn() {
   case "$current_scope" in
     package) package_warnings=$((package_warnings + 1)) ;;
     idp) idp_warnings=$((idp_warnings + 1)) ;;
+    config) config_warnings=$((config_warnings + 1)) ;;
   esac
   printf 'WARN: [%s] %s\n' "$current_scope" "$1"
 }
@@ -88,6 +101,7 @@ fail() {
   case "$current_scope" in
     package) package_failures=$((package_failures + 1)) ;;
     idp) idp_failures=$((idp_failures + 1)) ;;
+    config) config_failures=$((config_failures + 1)) ;;
   esac
   printf 'FAIL: [%s] %s\n' "$current_scope" "$1"
 }
@@ -192,12 +206,14 @@ check_equals() {
 }
 
 print_summary_and_exit() {
-  local failures=$((package_failures + idp_failures))
-  local warnings=$((package_warnings + idp_warnings))
+  local failures=$((package_failures + idp_failures + config_failures))
+  local warnings=$((package_warnings + idp_warnings + config_warnings))
   local result="OK"
 
   if [[ "$failures" -gt 0 ]]; then
-    if [[ "$package_failures" -gt 0 && "$idp_failures" -gt 0 ]]; then
+    if [[ "$config_failures" -gt 0 && "$package_failures" -eq 0 && "$idp_failures" -eq 0 ]]; then
+      result="CONFIG_CHECK_FAILED"
+    elif [[ "$package_failures" -gt 0 && "$idp_failures" -gt 0 ]]; then
       result="CHECK_FAILED"
     elif [[ "$package_failures" -gt 0 ]]; then
       result="PACKAGE_CHECK_FAILED"
@@ -211,20 +227,27 @@ print_summary_and_exit() {
   fi
 
   echo
-  echo "summary: package_failures=$package_failures package_warnings=$package_warnings idp_failures=$idp_failures idp_warnings=$idp_warnings strict=$STRICT"
+  echo "summary: package_failures=$package_failures package_warnings=$package_warnings idp_failures=$idp_failures idp_warnings=$idp_warnings config_failures=$config_failures config_warnings=$config_warnings strict=$STRICT"
   echo "result: $result"
 
   case "$result" in
     OK)
-      if [[ "$CHECK_IDP" -eq 1 ]]; then
+      if [[ "$CHECK_CONFIG" -eq 1 ]]; then
+        echo "next: configuration is valid; begin a new authentication session to verify runtime behavior."
+      elif [[ "$CHECK_IDP" -eq 1 ]]; then
         echo "next: run graphicalmatrix-plugin-config.sh --idp-home $IDP_HOME for dry-run."
       else
         echo "next: run this check on the IdP server, or re-run with --idp-home DIR."
       fi
       ;;
     OK_WITH_WARNINGS)
-      echo "note: optional TOTP/WebAuthn warnings are acceptable if those MFA methods are not used."
-      echo "next: review warnings, then continue with graphicalmatrix-plugin-config.sh dry-run."
+      if [[ "$CHECK_CONFIG" -eq 1 ]]; then
+        echo "note: configuration is usable, but review storage and optional-feature warnings before production use."
+        echo "next: resolve relevant warnings, or re-run with --strict to enforce a warning-free result."
+      else
+        echo "note: optional TOTP/WebAuthn warnings are acceptable if those MFA methods are not used."
+        echo "next: review warnings, then continue with graphicalmatrix-plugin-config.sh dry-run."
+      fi
       ;;
     STRICT_WARNING_FAILED)
       echo "action: strict mode treats warnings as failures; resolve warnings or re-run without --strict."
@@ -234,6 +257,9 @@ print_summary_and_exit() {
       ;;
     IDP_CHECK_FAILED)
       echo "action: run this command on the target IdP server, or specify the correct --idp-home DIR."
+      ;;
+    CONFIG_CHECK_FAILED)
+      echo "action: fix graphicalmatrix.properties or its referenced files before allowing user authentication."
       ;;
     CHECK_FAILED)
       echo "action: fix package failures first, then re-run against the target IdP."
@@ -303,6 +329,7 @@ check_package() {
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-db.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-api-token.sh"
+  need_file "$PACKAGE_DIR/bin/graphicalmatrix-security-upgrade.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-api-curl-test.sh"
   need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-audit"
   need_file "$PACKAGE_DIR/docs/README.md"
@@ -311,6 +338,8 @@ check_package() {
   need_file "$PACKAGE_DIR/docs/SECURITY-CHECKLIST.md"
   need_file "$PACKAGE_DIR/docs/API-TOKEN-ROTATION.md"
   need_file "$PACKAGE_DIR/docs/API-CURL-TESTS.md"
+  need_file "$PACKAGE_DIR/docs/FAQ.md"
+  need_file "$PACKAGE_DIR/docs/UPGRADE.md"
   need_file "$PACKAGE_DIR/docs/CSV-EXPORT.md"
   need_file "$PACKAGE_DIR/docs/DB-MIGRATION.md"
   need_file "$PACKAGE_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
@@ -418,9 +447,59 @@ check_idp() {
   fi
 }
 
+check_config() {
+  current_scope="config"
+  echo
+  echo "== Configuration checks =="
+
+  local plugin_jar java_bin output line tool_status failures_before
+  plugin_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar")"
+  if [[ -z "$plugin_jar" ]]; then
+    plugin_jar="$(first_match "$IDP_HOME/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar")"
+  fi
+  if [[ -z "$plugin_jar" ]]; then
+    fail "2FAS-KW plugin jar not found in IdP or package"
+    return
+  fi
+  ok "configuration checker jar found: $plugin_jar"
+
+  java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+  if ! command -v "$java_bin" >/dev/null 2>&1; then
+    fail "java command not found: $java_bin"
+    return
+  fi
+  if ! "$java_bin" -version >/dev/null 2>&1; then
+    fail "java command is not usable: $java_bin"
+    return
+  fi
+
+  failures_before="$config_failures"
+  set +e
+  output="$("$java_bin" -cp "$plugin_jar" \
+    io.github.yasakawa.faskw.GraphicalMatrixConfigCheckTool \
+    --idp-home "$IDP_HOME" 2>&1)"
+  tool_status=$?
+  set -e
+
+  while IFS= read -r line; do
+    case "$line" in
+      "OK: "*) ok "${line#OK: }" ;;
+      "WARN: "*) warn "${line#WARN: }" ;;
+      "FAIL: "*) fail "${line#FAIL: }" ;;
+      CONFIG_SUMMARY*) ;;
+      "") ;;
+      *) fail "configuration checker output: $line" ;;
+    esac
+  done <<< "$output"
+
+  if [[ "$tool_status" -ne 0 && "$config_failures" -eq "$failures_before" ]]; then
+    fail "configuration checker exited with status $tool_status"
+  fi
+}
+
 echo "package_dir=$PACKAGE_DIR"
 echo "idp_home=$IDP_HOME"
-echo "mode=$([[ "$CHECK_PACKAGE" -eq 1 && "$CHECK_IDP" -eq 1 ]] && echo all || { [[ "$CHECK_PACKAGE" -eq 1 ]] && echo package-only || echo idp-only; })"
+echo "mode=$([[ "$CHECK_CONFIG" -eq 1 ]] && echo config-only || { [[ "$CHECK_PACKAGE" -eq 1 && "$CHECK_IDP" -eq 1 ]] && echo all || { [[ "$CHECK_PACKAGE" -eq 1 ]] && echo package-only || echo idp-only; }; })"
 echo "strict=$STRICT"
 
 if [[ "$CHECK_PACKAGE" -eq 1 ]]; then
@@ -428,6 +507,9 @@ if [[ "$CHECK_PACKAGE" -eq 1 ]]; then
 fi
 if [[ "$CHECK_IDP" -eq 1 ]]; then
   check_idp
+fi
+if [[ "$CHECK_CONFIG" -eq 1 ]]; then
+  check_config
 fi
 
 print_summary_and_exit

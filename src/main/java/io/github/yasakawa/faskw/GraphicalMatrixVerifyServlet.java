@@ -32,25 +32,25 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             return;
         }
 
-        final String sessionKey = (String) session.getAttribute("graphicalmatrix.key");
-        final String submittedKey = request.getParameter("key");
-        final String key = (sessionKey != null) ? sessionKey : submittedKey;
-        if (key == null || key.isEmpty()) {
-            audit.log("VERIFY", null, "BAD_REQUEST", null, "external_key_missing", request);
-            response.sendError(400, "External authentication key is missing.");
-            return;
-        }
-
         if ("totp-register".equals(request.getParameter("mode"))) {
-            handleTotpRegistration(request, response, session, key, audit, repository);
+            handleTotpRegistration(request, response, session, audit, repository);
             return;
         }
         if ("totp-register-cancel".equals(request.getParameter("mode"))) {
-            handleTotpRegistrationCancel(request, response, session, key, audit, repository);
+            handleTotpRegistrationCancel(request, response, session, audit, repository);
             return;
         }
         if ("force-sequence-save".equals(request.getParameter("mode"))) {
-            handleForcedSequenceSave(request, response, session, key, audit, repository);
+            handleForcedSequenceSave(request, response, session, audit, repository);
+            return;
+        }
+
+        final String sessionKey = (String) session.getAttribute("graphicalmatrix.key");
+        final String submittedKey = request.getParameter("key");
+        final String key = sessionKey;
+        if (key == null || key.isEmpty()) {
+            audit.log("VERIFY", null, "BAD_REQUEST", null, "external_key_missing", request);
+            response.sendError(400, "External authentication key is missing.");
             return;
         }
 
@@ -71,7 +71,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final long now = System.currentTimeMillis();
         GraphicalMatrixVerifyResult result = GraphicalMatrixVerifyResult.failed("invalid_or_expired_challenge");
         if (user != null
-                && String.valueOf(sessionKey).equals(String.valueOf(submittedKey))
+                && matchesFlowKey(sessionKey, submittedKey)
                 && String.valueOf(challengeId).equals(String.valueOf(request.getParameter("challengeId")))
                 && String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 && expiresAt != null
@@ -96,6 +96,15 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             if (result.isSuccess()) {
                 if (config.isForceSequenceChangeEnabled()
                         && repository.isForceSequenceChangeRequired(user)) {
+                    final GraphicalMatrixEnrollment verifiedEnrollment = repository.findEnrollment(user);
+                    if (verifiedEnrollment == null || !verifiedEnrollment.isActive()
+                            || verifiedEnrollment.getLockedUntil() > now) {
+                        clearChallenge(session);
+                        request.setAttribute(ExternalAuthentication.AUTHENTICATION_EVENT_KEY,
+                            "GraphicalMatrixFailed");
+                        ExternalAuthentication.finishExternalAuthentication(key, request, response);
+                        return;
+                    }
                     final String forceCsrfToken = GraphicalMatrixSupport.token();
                     final List<String> forceDisplayOrder = orderedGraphicalIds(config);
                     session.setAttribute("forceSequence.key", key);
@@ -104,6 +113,8 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                     session.setAttribute("forceSequence.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
                     session.setAttribute("forceSequence.displayOrder", forceDisplayOrder);
                     session.setAttribute("forceSequence.config", config);
+                    session.setAttribute("forceSequence.stateVersion",
+                        Long.valueOf(verifiedEnrollment.getStateVersion()));
                     audit.log("FORCE_SEQUENCE_CHANGE_START", user, "OK", challengeId,
                         "graphicals=" + forceDisplayOrder.size() + ",choice=" + config.getChoiceCount(), request);
                     clearChallenge(session);
@@ -170,7 +181,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
     }
 
     private static void handleTotpRegistration(final HttpServletRequest request,
-            final HttpServletResponse response, final HttpSession session, final String key,
+            final HttpServletResponse response, final HttpSession session,
             final GraphicalMatrixAuditLogger audit, final GraphicalMatrixRepository repository)
             throws ServletException, IOException {
         final String user = (String) session.getAttribute("totpEnroll.user");
@@ -181,7 +192,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final long now = System.currentTimeMillis();
 
         if (user == null
-                || !String.valueOf(sessionKey).equals(String.valueOf(request.getParameter("key")))
+                || !matchesFlowKey(sessionKey, request.getParameter("key"))
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
                 || expiresAt.longValue() < now
@@ -205,7 +216,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 session.setAttribute("totpEnroll.used", Boolean.TRUE);
                 request.setAttribute(ExternalAuthentication.PRINCIPAL_NAME_KEY, user);
                 clearTotpRegistration(session);
-                ExternalAuthentication.finishExternalAuthentication(key, request, response);
+                ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
                 return;
             }
 
@@ -213,26 +224,26 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
                 final String seed = repository.prepareTotpRegistration(user, now);
                 final String retryCsrfToken = GraphicalMatrixSupport.token();
-                session.setAttribute("totpEnroll.key", key);
+                session.setAttribute("totpEnroll.key", sessionKey);
                 session.setAttribute("totpEnroll.user", user);
                 session.setAttribute("totpEnroll.csrfToken", retryCsrfToken);
                 session.setAttribute("totpEnroll.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
                 session.setAttribute("totpEnroll.used", Boolean.FALSE);
-                GraphicalMatrixStartServlet.renderTotpRegistration(request, response, key, user,
+                GraphicalMatrixStartServlet.renderTotpRegistration(request, response, sessionKey, user,
                     seed, retryCsrfToken, "コードが正しくありません。認証アプリの6桁コードを確認してください。");
                 return;
             }
 
             clearTotpRegistration(session);
             request.setAttribute(ExternalAuthentication.AUTHENTICATION_EVENT_KEY, result.getEvent());
-            ExternalAuthentication.finishExternalAuthentication(key, request, response);
+            ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
         } catch (Exception ex) {
             throw new ServletException(ex);
         }
     }
 
     private static void handleTotpRegistrationCancel(final HttpServletRequest request,
-            final HttpServletResponse response, final HttpSession session, final String key,
+            final HttpServletResponse response, final HttpSession session,
             final GraphicalMatrixAuditLogger audit, final GraphicalMatrixRepository repository)
             throws ServletException, IOException {
         final String user = (String) session.getAttribute("totpEnroll.user");
@@ -243,7 +254,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final long now = System.currentTimeMillis();
 
         if (user == null
-                || !String.valueOf(sessionKey).equals(String.valueOf(request.getParameter("key")))
+                || !matchesFlowKey(sessionKey, request.getParameter("key"))
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
                 || expiresAt.longValue() < now
@@ -302,7 +313,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             final String challengeId = GraphicalMatrixSupport.token();
             final String csrf = GraphicalMatrixSupport.token();
             clearTotpRegistration(session);
-            session.setAttribute("graphicalmatrix.key", key);
+            session.setAttribute("graphicalmatrix.key", sessionKey);
             session.setAttribute("graphicalmatrix.user", user);
             session.setAttribute("graphicalmatrix.challengeId", challengeId);
             session.setAttribute("graphicalmatrix.csrfToken", csrf);
@@ -313,7 +324,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
 
             audit.log("TOTP_REGISTER_CANCEL", user, "OK", challengeId,
                 "mfa_method=GraphicalMatrix,graphicals=" + displayOrder.size(), request);
-            GraphicalMatrixStartServlet.render(request, response, key, challengeId, csrf,
+            GraphicalMatrixStartServlet.render(request, response, sessionKey, challengeId, csrf,
                 displayOrder, config, "TOTP登録を取り消し、GraphicalMatrixに戻しました。");
         } catch (Exception ex) {
             audit.log("TOTP_REGISTER_CANCEL", user, "DB_ERROR", null,
@@ -331,7 +342,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
     }
 
     private static void handleForcedSequenceSave(final HttpServletRequest request,
-            final HttpServletResponse response, final HttpSession session, final String key,
+            final HttpServletResponse response, final HttpSession session,
             final GraphicalMatrixAuditLogger audit, final GraphicalMatrixRepository repository)
             throws ServletException, IOException {
         final String user = (String) session.getAttribute("forceSequence.user");
@@ -340,6 +351,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final Long expiresAt = (Long) session.getAttribute("forceSequence.expiresAt");
         final Object displayOrderObject = session.getAttribute("forceSequence.displayOrder");
         final Object configObject = session.getAttribute("forceSequence.config");
+        final Long stateVersion = (Long) session.getAttribute("forceSequence.stateVersion");
 
         @SuppressWarnings("unchecked")
         final List<String> displayOrder = (displayOrderObject instanceof List)
@@ -349,7 +361,8 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final long now = System.currentTimeMillis();
 
         if (user == null
-                || !String.valueOf(sessionKey).equals(String.valueOf(request.getParameter("key")))
+                || !matchesFlowKey(sessionKey, request.getParameter("key"))
+                || stateVersion == null
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
                 || expiresAt.longValue() < now) {
@@ -366,7 +379,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         if (!validNewSequence(selected, displayOrder, config)) {
             audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "BAD_REQUEST", null,
                 "invalid_new_sequence,selected_count=" + selected.size(), request);
-            renderForcedSequenceChange(request, response, config, key, csrfToken, displayOrder,
+            renderForcedSequenceChange(request, response, config, sessionKey, csrfToken, displayOrder,
                 invalidNewSequenceMessage(config));
             return;
         }
@@ -387,15 +400,15 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                     config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed())) {
                 audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "BAD_REQUEST", null,
                     "same_sequence,selected_count=" + selected.size(), request);
-                renderForcedSequenceChange(request, response, config, key, csrfToken, displayOrder,
+                renderForcedSequenceChange(request, response, config, sessionKey, csrfToken, displayOrder,
                     "同じパスワードが選択されています。別のGraphicalMatrixを選択してください。");
                 return;
             }
 
-            if (!repository.updateSequence(user, selected, now,
+            if (!repository.updateSequence(user, selected, now, stateVersion.longValue(),
                     config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed())) {
                 audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "ENROLL_REQUIRED", null,
-                    "missing_enrollment", request);
+                    "enrollment_state_changed", request);
                 clearForcedSequenceChange(session);
                 GraphicalMatrixStartServlet.renderUnavailable(request, response,
                     "GraphicalMatrixを変更できません。",
@@ -407,7 +420,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 "sequence_count=" + selected.size(), request);
             request.setAttribute(ExternalAuthentication.PRINCIPAL_NAME_KEY, user);
             clearForcedSequenceChange(session);
-            ExternalAuthentication.finishExternalAuthentication(key, request, response);
+            ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
         } catch (Exception ex) {
             audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "DB_ERROR", null,
                 ex.getClass().getSimpleName(), request);
@@ -422,6 +435,13 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         session.removeAttribute("forceSequence.expiresAt");
         session.removeAttribute("forceSequence.displayOrder");
         session.removeAttribute("forceSequence.config");
+        session.removeAttribute("forceSequence.stateVersion");
+    }
+
+    static boolean matchesFlowKey(final String sessionKey, final String submittedKey) {
+        return sessionKey != null
+            && !sessionKey.isEmpty()
+            && sessionKey.equals(submittedKey);
     }
 
     private static boolean validNewSequence(final List<String> selected,

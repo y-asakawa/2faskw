@@ -126,7 +126,7 @@ Admin Tools単体配布物とCSV provisioning runnerの安全制御。
 | `graphicalmatrix.admin.rejectPlaintextSequence` | boolean | `true` | plaintext sequence storageを拒否する。 | 本番はtrue。 |
 | `graphicalmatrix.admin.provisioning.enabled` | boolean | `false` | CSV provisioning runnerを有効化。 | SCP連携を使う場合のみtrue。 |
 | `graphicalmatrix.admin.csv.incomingDir` | path | `/opt/graphicalmatrix-admin/incoming` | CSV受信ディレクトリ。 | SCP専用ユーザーはここだけ書き込み可。 |
-| `graphicalmatrix.admin.csv.processingDir` | path | `/opt/graphicalmatrix-admin/processing` | 処理中CSV置き場。 | runnerが移動してから処理する。 |
+| `graphicalmatrix.admin.csv.processingDir` | path | `/opt/graphicalmatrix-admin/processing` | 検査・適用に使う管理者所有snapshot置き場。 | runnerが0700に設定し、送信者からの変更を遮断する。 |
 | `graphicalmatrix.admin.csv.processedDir` | path | `/opt/graphicalmatrix-admin/processed` | 正常処理後CSV置き場。 | 保存期間を決める。 |
 | `graphicalmatrix.admin.csv.failedDir` | path | `/opt/graphicalmatrix-admin/failed` | 失敗CSV置き場。 | エラー調査用。 |
 | `graphicalmatrix.admin.csv.logFile` | path | `/opt/graphicalmatrix-admin/logs/csv-import.log` | CSV処理ログ。 | logrotate対象。 |
@@ -256,8 +256,9 @@ GraphicalMatrix配布ZIPへは同梱しない。
 | `graphicalmatrix-admin-install.sh` | Admin Tools ZIPのみ | Admin Tools導入時 | Admin Tools単体インストール。 | IdP本体やweb.xmlは変更しない。 |
 | `graphicalmatrix-csv-import-runner.sh` | Admin Tools ZIPのみ | provisioning連携時 | SCP投入されたCSVをsystemd経由で取り込む。 | `admin.properties` で明示的に有効化する。 |
 | `graphicalmatrix-api-token.sh` | Plugin ZIP | API利用時 | Bearer token生成/確認/ローテーション。 | tokenは配布ZIPへ同梱しない。 |
+| `graphicalmatrix-security-upgrade.sh` | Plugin ZIP | v1.1.0更新時 | schema適用後のsequence migrationと残存データ検査。 | backup、maintenance、schema適用の確認フラグが必要。 |
 | `graphicalmatrix-api-curl-test.sh` | Plugin ZIP | API疎通確認時 | 管理APIのcurlテスト。 | 書き込みテストは検証環境で行う。 |
-| `graphicalmatrix-plugin-check.sh` | Plugin ZIP | 導入前確認時 | IdP環境/配布物の事前チェック。 | optional plugin未導入はWARN扱いの場合がある。 |
+| `graphicalmatrix-plugin-check.sh` | Plugin ZIP | 導入前・設定変更時 | IdP環境/配布物の事前チェック。 | `--config-only`でDB接続なしに設定と参照ファイルを検査できる。optional plugin未導入はWARN扱いの場合がある。 |
 | `graphicalmatrix-plugin-config.sh` | Plugin ZIP | Plugin導入時 | JAR、設定ファイル、管理スクリプト配置。 | 既存設定は上書きせず `.idpnew` を配置する。 |
 | `graphicalmatrix-plugin-uninstall.sh` | Plugin ZIP | Plugin削除時 | Pluginファイル削除補助。 | DBデータ削除は別操作。 |
 | `graphicalmatrix-plugin-webxml.sh` | Plugin ZIP | Servlet設定時 | `web.xml` へのServlet/filter設定適用。 | 適用前にdry-runする。 |

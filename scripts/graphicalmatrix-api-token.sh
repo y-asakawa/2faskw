@@ -75,6 +75,20 @@ PY
   die "openssl or python3 is required to generate an API token"
 }
 
+atomic_replace() {
+  local source="$1"
+  local destination="$2"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$source" "$destination" <<'PY'
+import os
+import sys
+os.replace(sys.argv[1], sys.argv[2])
+PY
+    return
+  fi
+  mv -fT -- "$source" "$destination"
+}
+
 api_properties() {
   printf "%s/conf/graphicalmatrix/api.properties" "$IDP_HOME"
 }
@@ -109,12 +123,11 @@ status() {
 
 rotate() {
   local file="$1"
-  local dir backup backup_base tmp token timestamp
+  local dir backup backup_base staging tmp token timestamp owner_group
   dir="$(dirname "$file")"
   timestamp="$(date +%Y%m%d-%H%M%S)"
   backup_base="$file.bak.$timestamp"
   backup="$backup_base"
-  tmp="$file.tmp.$timestamp.$$"
 
   echo "idp_home=$IDP_HOME"
   echo "api_properties=$(api_properties)"
@@ -135,22 +148,32 @@ rotate() {
     return
   fi
 
-  install -d -m 0700 "$dir"
-  if [[ "$NO_CHOWN" != "1" ]]; then
-    chown "$OWNER" "$dir" 2>/dev/null || true
+  install -d -m 0750 "$dir"
+  chmod go-w "$dir"
+  if [[ "$NO_CHOWN" != "1" && "$EUID" -eq 0 ]]; then
+    owner_group="${OWNER#*:}"
+    [[ "$owner_group" != "$OWNER" && -n "$owner_group" ]] || owner_group="root"
+    chown "root:$owner_group" "$dir"
   fi
 
+  staging="$(mktemp -d "$dir/.graphicalmatrix-token.XXXXXX")"
+  chmod 0700 "$staging"
+  tmp="$staging/token"
+  trap 'rm -rf -- "${staging:-}"' EXIT HUP INT TERM
+
   if [[ -f "$file" && "$NO_BACKUP" != "1" ]]; then
+    [[ ! -L "$file" ]] || die "token file must not be a symbolic link: $file"
     local backup_index=1
     while [[ -e "$backup" ]]; do
       backup="$backup_base.$backup_index"
       backup_index=$((backup_index + 1))
     done
-    cp "$file" "$backup"
-    chmod 0400 "$backup"
+    cp -- "$file" "$staging/backup"
+    chmod 0400 "$staging/backup"
     if [[ "$NO_CHOWN" != "1" ]]; then
-      chown "$OWNER" "$backup" 2>/dev/null || true
+      chown "$OWNER" "$staging/backup"
     fi
+    atomic_replace "$staging/backup" "$backup"
     echo "backup=$backup"
   fi
 
@@ -161,7 +184,10 @@ rotate() {
   if [[ "$NO_CHOWN" != "1" ]]; then
     chown "$OWNER" "$tmp" 2>/dev/null || true
   fi
-  mv "$tmp" "$file"
+  atomic_replace "$tmp" "$file"
+  rm -rf -- "$staging"
+  staging=""
+  trap - EXIT HUP INT TERM
   echo "rotated=yes"
   echo "token_file=$file"
   echo "restart_required=no"

@@ -49,7 +49,7 @@ public final class GraphicalMatrixCsvExportTool {
             while (rs.next()) {
                 final String userId = value(rs.getString("user_id"));
                 final String method = value(rs.getString("mfa_method"));
-                final String initialSequence = value(rs.getString("initial_sequence"));
+                final String storedInitialSequence = value(rs.getString("initial_sequence"));
                 final String storedSequence = value(rs.getString("sequence"));
                 final String storedMode = storage.storedMode(storedSequence);
 
@@ -57,17 +57,16 @@ public final class GraphicalMatrixCsvExportTool {
                     throw new IllegalStateException("User " + userId
                         + " has non-recoverable hash sequence; portable CSV export is not possible.");
                 }
-
+                final List<String> decodedInitial = GraphicalMatrixSupport.csv(storedInitialSequence);
                 final List<String> decoded = storage.displayTokens(storedSequence);
+                graphicalConfig.validateSequence(graphicalConfig.resolveSequenceToGraphicals(decodedInitial));
                 graphicalConfig.validateSequence(decoded);
-                graphicalConfig.normalizeInitialSequence(GraphicalMatrixSupport.csv(initialSequence));
-
                 lines.add(csv(
                     "A",
                     userId,
                     method,
                     rs.getInt("force_sequence_change") == 0 ? "off" : "on",
-                    initialSequence,
+                    String.join(",", graphicalConfig.normalizeInitialSequence(decodedInitial)),
                     String.join(",", decoded)
                 ));
                 if ("empty".equals(storedMode)) {

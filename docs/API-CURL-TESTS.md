@@ -199,6 +199,9 @@ curl -sS -X POST \
   "$BASE_URL/users/api-user001/reset"
 ```
 
+RESET後は `status=ACTIVE` のまま、`sequence` に `initialSequence` の内容が
+現在の保存方式で再設定され、次回ログイン時にパスワード変更が強制されます。
+
 unlock:
 
 ```bash

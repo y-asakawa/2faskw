@@ -276,26 +276,30 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             }
             if ("unlock".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
-                    "UPDATE graphicalmatrix_enrollment SET failed_count = 0, locked_until = 0, updated_at = ? WHERE user_id = ?"),
+                    "UPDATE graphicalmatrix_enrollment SET failed_count = 0, locked_until = 0, "
+                    + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_UNLOCKED", "unlocked");
                 return;
             }
             if ("enable".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
-                    "UPDATE graphicalmatrix_enrollment SET status = 'ACTIVE', updated_at = ? WHERE user_id = ?"),
+                    "UPDATE graphicalmatrix_enrollment SET status = 'ACTIVE', "
+                    + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_ENABLED", "enabled");
                 return;
             }
             if ("disable".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
-                    "UPDATE graphicalmatrix_enrollment SET status = 'DISABLED', updated_at = ? WHERE user_id = ?"),
+                    "UPDATE graphicalmatrix_enrollment SET status = 'DISABLED', "
+                    + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_DISABLED", "disabled");
                 return;
             }
             if ("totp-reset".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
                     "UPDATE graphicalmatrix_enrollment SET totp_seed = NULL, totp_status = 'UNREGISTERED', "
-                    + "totp_registered_at = 0, updated_at = ? WHERE user_id = ?"),
+                    + "totp_registered_at = 0, state_version = state_version + 1, "
+                    + "updated_at = ? WHERE user_id = ?"),
                     "API_TOTP_RESET", "totp_reset");
                 return;
             }
@@ -327,30 +331,33 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
 
         final List<String> initialTokens = body.sequence("initialSequence");
         final List<String> sequenceTokens = body.sequence("sequence");
-        String initialSequence = existing != null ? existing.initialSequence : "";
+        String storedInitialSequence = existing != null ? existing.initialSequence : "";
         String storedSequence = existing != null ? existing.sequence : "";
         String plainSequence = existing != null
             ? String.join(",", storage.displayTokens(existing.sequence))
             : "";
 
         if (!initialTokens.isEmpty()) {
-            initialSequence = String.join(",", config.normalizeInitialSequence(initialTokens));
+            final List<String> initial = config.resolveSequenceToGraphicals(initialTokens);
+            config.validateSequence(initial);
+            storedInitialSequence = String.join(",", config.normalizeInitialSequence(initial));
         }
         if (!sequenceTokens.isEmpty()) {
             plainSequence = String.join(",", config.resolveSequenceToGraphicals(sequenceTokens));
         } else if (!initialTokens.isEmpty()) {
             plainSequence = String.join(",", config.resolveSequenceToGraphicals(initialTokens));
         }
-        if (initialSequence.isEmpty() && !plainSequence.isEmpty()) {
-            initialSequence = String.join(",", config.normalizeInitialSequence(GraphicalMatrixSupport.csv(plainSequence)));
-        }
-        if ((plainSequence.isEmpty() && storedSequence.isEmpty()) || initialSequence.isEmpty()) {
+        if (plainSequence.isEmpty() && storedSequence.isEmpty()) {
             throw new ApiException(400, "SEQUENCE_REQUIRED", "API_BAD_REQUEST", user, "BAD_REQUEST", "sequence_required");
         }
         if (!plainSequence.isEmpty()) {
             config.validateSequence(GraphicalMatrixSupport.csv(plainSequence));
             storedSequence = storage.encode(GraphicalMatrixSupport.csv(plainSequence),
                 config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+        }
+        if (storedInitialSequence.isEmpty()) {
+            storedInitialSequence = String.join(",",
+                config.normalizeInitialSequence(GraphicalMatrixSupport.csv(plainSequence)));
         }
 
         try (Connection c = db()) {
@@ -360,12 +367,12 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                         "INSERT INTO graphicalmatrix_enrollment "
                         + "(user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, "
                         + "failed_count, locked_until, totp_seed, totp_status, totp_registered_at, "
-                        + "last_success_at, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 'UNREGISTERED', 0, 0, ?, ?)")) {
+                        + "last_success_at, state_version, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 'UNREGISTERED', 0, 0, 0, ?, ?)")) {
                     ps.setString(1, user);
                     ps.setString(2, method);
                     ps.setInt(3, forceValue);
-                    ps.setString(4, initialSequence);
+                    ps.setString(4, storedInitialSequence);
                     ps.setString(5, storedSequence);
                     ps.setString(6, status);
                     ps.setLong(7, now);
@@ -376,11 +383,11 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 try (PreparedStatement ps = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET mfa_method = ?, force_sequence_change = ?, initial_sequence = ?, "
-                        + "sequence = ?, status = ?, updated_at = ? "
+                        + "sequence = ?, status = ?, state_version = state_version + 1, updated_at = ? "
                         + "WHERE user_id = ?")) {
                     ps.setString(1, method);
                     ps.setInt(2, forceValue);
-                    ps.setString(3, initialSequence);
+                    ps.setString(3, storedInitialSequence);
                     ps.setString(4, storedSequence);
                     ps.setString(5, status);
                     ps.setLong(6, now);
@@ -398,13 +405,13 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         if ("TOTP".equals(method)) {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'TOTP', totp_seed = NULL, "
                 + "totp_status = 'UNREGISTERED', totp_registered_at = 0, failed_count = 0, "
-                + "locked_until = 0, updated_at = ? WHERE user_id = ?";
+                + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         } else if ("WebAuthn".equals(method)) {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'WebAuthn', failed_count = 0, "
-                + "locked_until = 0, updated_at = ? WHERE user_id = ?";
+                + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         } else {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'GraphicalMatrix', failed_count = 0, "
-                + "locked_until = 0, updated_at = ? WHERE user_id = ?";
+                + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         }
         return updateSimple(user, sql, now);
     }
@@ -414,20 +421,28 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         if (row == null) {
             return false;
         }
-        final List<String> initial = GraphicalMatrixSupport.csv(row.initialSequence);
-        final List<String> sequence = config.resolveSequenceToGraphicals(initial);
-        final String storedSequence = GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome()).encode(
-            sequence, config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+        final GraphicalMatrixSequenceStorage storage =
+            GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome());
+        if (row.initialSequence == null || row.initialSequence.trim().isEmpty()) {
+            return false;
+        }
+        final List<String> initial = config.resolveSequenceToGraphicals(
+            GraphicalMatrixSupport.csv(row.initialSequence));
+        config.validateSequence(initial);
+        final String resetSequence = storage.encode(initial,
+            config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
         final long now = System.currentTimeMillis();
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
-                    + "SET sequence = ?, mfa_method = 'GraphicalMatrix', status = 'ACTIVE', "
+                    + "SET sequence = ?, mfa_method = 'GraphicalMatrix', "
+                    + "status = 'ACTIVE', "
                     + "failed_count = 0, locked_until = 0, totp_seed = NULL, "
                     + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
-                    + "force_sequence_change = 1, updated_at = ? WHERE user_id = ?")) {
-                ps.setString(1, storedSequence);
+                    + "force_sequence_change = 1, state_version = state_version + 1, "
+                    + "updated_at = ? WHERE user_id = ?")) {
+                ps.setString(1, resetSequence);
                 ps.setLong(2, now);
                 ps.setString(3, user);
                 return ps.executeUpdate() == 1;
@@ -511,8 +526,9 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 + "status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', failed_count INT NOT NULL DEFAULT 0, "
                 + "locked_until BIGINT NOT NULL DEFAULT 0, mfa_method VARCHAR(32) NOT NULL DEFAULT 'GraphicalMatrix', "
                 + "totp_seed VARCHAR(255), totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED', "
-                + "totp_registered_at BIGINT NOT NULL DEFAULT 0, last_success_at BIGINT NOT NULL DEFAULT 0, "
-                + "force_sequence_change INT NOT NULL DEFAULT 0, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL)"
+                    + "totp_registered_at BIGINT NOT NULL DEFAULT 0, last_success_at BIGINT NOT NULL DEFAULT 0, "
+                    + "force_sequence_change INT NOT NULL DEFAULT 0, state_version BIGINT NOT NULL DEFAULT 0, "
+                    + "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL)"
             );
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS initial_sequence VARCHAR(1024) NOT NULL DEFAULT ''");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS mfa_method VARCHAR(32) NOT NULL DEFAULT 'GraphicalMatrix'");
@@ -521,6 +537,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED'");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS last_success_at BIGINT NOT NULL DEFAULT 0");
+            st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0");
         }
     }
 
@@ -653,7 +670,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome());
             final boolean sequencesExcluded = apiConfig.excludeSequences();
             final java.util.List<String> displayInitialSequence = sequencesExcluded
-                ? new ArrayList<>() : GraphicalMatrixSupport.csv(initialSequence);
+                ? new ArrayList<>() : displayInitialSequence();
             final java.util.List<String> displaySequence = sequencesExcluded
                 ? new ArrayList<>() : storage.displayTokens(sequence);
             return "{\"userId\":\"" + json(userId)
@@ -674,6 +691,15 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 + ",\"createdAt\":" + createdAt
                 + ",\"updatedAt\":" + updatedAt
                 + "}";
+        }
+
+        private java.util.List<String> displayInitialSequence() {
+            try {
+                return GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome())
+                    .normalizeInitialSequence(GraphicalMatrixSupport.csv(initialSequence));
+            } catch (Exception ex) {
+                throw new IllegalStateException("Unable to display initial sequence", ex);
+            }
         }
     }
 

@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INTEGER NOT NULL DEFAULT 0,
+  state_version BIGINT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 | --- | --- | --- | --- | --- |
 | `user_id` | `VARCHAR(255)` | no | none | ユーザーID。主キー。IdPの認証済みPrincipalと対応する。 |
 | `sequence` | `VARCHAR(1024)` | no | none | 現在のGraphicalMatrix sequence。保存方式により平文、暗号化文字列、hash文字列になる。 |
-| `initial_sequence` | `VARCHAR(1024)` | no | `''` | 初期配布またはRESET時に参照するsequence。CSV export/importでも利用する。 |
+| `initial_sequence` | `VARCHAR(1024)` | no | `''` | `USER RESET`用の初期sequence。初期パスワードとして管理者が確認できるよう平文で保持する。 |
 | `status` | `VARCHAR(32)` | no | `ACTIVE` | ユーザー状態。通常は `ACTIVE`、停止時は `DISABLED`。 |
 | `failed_count` | `INTEGER` | no | `0` | GraphicalMatrix認証失敗回数。成功時や方式変更時に0へ戻す。 |
 | `locked_until` | `BIGINT` | no | `0` | ロック解除時刻。Unix epoch milliseconds。`0` は未ロック。 |
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 | `totp_registered_at` | `BIGINT` | no | `0` | TOTP登録完了時刻。Unix epoch milliseconds。 |
 | `last_success_at` | `BIGINT` | no | `0` | 最終認証成功時刻。Unix epoch milliseconds。 |
 | `force_sequence_change` | `INTEGER` | no | `0` | 次回ログイン時のGraphicalMatrix変更強制フラグ。`0` は無効、非0は有効。 |
+| `state_version` | `BIGINT` | no | `0` | 管理状態の世代番号。本人確認後の古い画面から無効化・ロック状態を上書きしないために使用する。 |
 | `created_at` | `BIGINT` | no | none | レコード作成時刻。Unix epoch milliseconds。 |
 | `updated_at` | `BIGINT` | no | none | レコード更新時刻。Unix epoch milliseconds。 |
 

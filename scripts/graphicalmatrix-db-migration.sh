@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INT NOT NULL DEFAULT 0,
+  state_version BIGINT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
@@ -187,7 +188,7 @@ ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_seed VARCHA
 ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED';
 ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS last_success_at BIGINT NOT NULL DEFAULT 0;
-UPDATE graphicalmatrix_enrollment SET initial_sequence = sequence WHERE initial_sequence IS NULL OR initial_sequence = '';
+ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
 SQL
 }
 
@@ -195,7 +196,7 @@ migration_select() {
   cat <<'SQL'
 SELECT user_id, sequence, initial_sequence, status, failed_count, locked_until,
        mfa_method, totp_seed, totp_status, totp_registered_at, last_success_at,
-       force_sequence_change, created_at, updated_at
+       force_sequence_change, state_version, created_at, updated_at
 FROM graphicalmatrix_enrollment
 ORDER BY user_id
 SQL
@@ -288,10 +289,11 @@ CREATE TEMP TABLE graphicalmatrix_migration_import (
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INTEGER NOT NULL DEFAULT 0,
+  state_version BIGINT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
-\\copy graphicalmatrix_migration_import (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method, totp_seed, totp_status, totp_registered_at, last_success_at, force_sequence_change, created_at, updated_at) FROM '$input_q' WITH (FORMAT csv, HEADER true)
+\\copy graphicalmatrix_migration_import (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method, totp_seed, totp_status, totp_registered_at, last_success_at, force_sequence_change, state_version, created_at, updated_at) FROM '$input_q' WITH (FORMAT csv, HEADER true)
 SQL
   if [[ "$TRUNCATE" == "1" ]]; then
     echo "DELETE FROM graphicalmatrix_enrollment;" >> "$sql_file"
@@ -300,10 +302,10 @@ SQL
 INSERT INTO graphicalmatrix_enrollment
   (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method,
    totp_seed, totp_status, totp_registered_at, last_success_at, force_sequence_change,
-   created_at, updated_at)
+   state_version, created_at, updated_at)
 SELECT user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method,
        totp_seed, totp_status, totp_registered_at, last_success_at, force_sequence_change,
-       created_at, updated_at
+       state_version, created_at, updated_at
 FROM graphicalmatrix_migration_import
 ON CONFLICT (user_id) DO UPDATE
 SET sequence = EXCLUDED.sequence,
@@ -317,6 +319,7 @@ SET sequence = EXCLUDED.sequence,
     totp_registered_at = EXCLUDED.totp_registered_at,
     last_success_at = EXCLUDED.last_success_at,
     force_sequence_change = EXCLUDED.force_sequence_change,
+    state_version = EXCLUDED.state_version,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at;
 COMMIT;

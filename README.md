@@ -54,6 +54,8 @@ other Linux distributions are not currently tested by this project.
 - Build from source: [docs/build.md](docs/build.md)
 - Admin tools: [docs/ADMIN-TOOLS.md](docs/ADMIN-TOOLS.md)
 - Configuration reference: [docs/CONFIG-REFERENCE.md](docs/CONFIG-REFERENCE.md)
+- FAQ and troubleshooting: [docs/FAQ.md](docs/FAQ.md)
+- Plugin upgrade guide: [docs/UPGRADE.md](docs/UPGRADE.md)
 
 ## Security Defaults
 

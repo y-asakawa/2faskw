@@ -87,6 +87,8 @@ for key in keys:
 version = os.environ["VERSION"]
 base_name = os.environ["BASE_NAME"]
 admin_base_name = os.environ["ADMIN_BASE_NAME"]
+data = data.replace("${project.version}", version)
+data = data.replace("${plugin.metadata.url}", os.environ["PLUGIN_METADATA_URL"])
 version_pattern = r"[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?"
 
 # Keep source docs readable while making packaged docs version-correct.
@@ -169,7 +171,7 @@ cp THIRD-PARTY-NOTICES.md "$DIST_DIR/THIRD-PARTY-NOTICES.md"
 cp "target/$BASE_NAME.jar" "$DIST_DIR/webapp/WEB-INF/lib/"
 cp target/plugin-lib/*.jar "$DIST_DIR/webapp/WEB-INF/lib/"
 
-cp target/classes/io/github/yasakawa/faskw/plugin/plugin.properties \
+render_template src/main/resources/io/github/yasakawa/faskw/plugin/plugin.properties \
   "$DIST_DIR/bootstrap/plugin.properties"
 cat > "$DIST_DIR/bootstrap/keys.txt" <<'EOF'
 # PoC placeholder.
@@ -195,6 +197,7 @@ cp graphicalmatrix-db.sh "$DIST_DIR/bin/graphicalmatrix-db.sh"
 chmod 0755 "$DIST_DIR/bin/graphicalmatrix-db.sh"
 cp scripts/graphicalmatrix-db-migration.sh "$DIST_DIR/bin/graphicalmatrix-db-migration.sh"
 cp scripts/graphicalmatrix-api-token.sh "$DIST_DIR/bin/graphicalmatrix-api-token.sh"
+cp scripts/graphicalmatrix-security-upgrade.sh "$DIST_DIR/bin/graphicalmatrix-security-upgrade.sh"
 cp scripts/graphicalmatrix-api-curl-test.sh "$DIST_DIR/bin/graphicalmatrix-api-curl-test.sh"
 cp scripts/graphicalmatrix-plugin-check.sh "$DIST_DIR/bin/graphicalmatrix-plugin-check.sh"
 cp scripts/graphicalmatrix-plugin-config.sh "$DIST_DIR/bin/graphicalmatrix-plugin-config.sh"
@@ -203,6 +206,7 @@ cp scripts/graphicalmatrix-plugin-webxml.sh "$DIST_DIR/bin/graphicalmatrix-plugi
 chmod 0755 \
   "$DIST_DIR/bin/graphicalmatrix-db-migration.sh" \
   "$DIST_DIR/bin/graphicalmatrix-api-token.sh" \
+  "$DIST_DIR/bin/graphicalmatrix-security-upgrade.sh" \
   "$DIST_DIR/bin/graphicalmatrix-api-curl-test.sh" \
   "$DIST_DIR/bin/graphicalmatrix-plugin-check.sh" \
   "$DIST_DIR/bin/graphicalmatrix-plugin-config.sh" \
@@ -231,9 +235,12 @@ copy_versioned docs/API-TOKEN-ROTATION.md "$DIST_DIR/docs/API-TOKEN-ROTATION.md"
 copy_versioned docs/API-CURL-TESTS.md "$DIST_DIR/docs/API-CURL-TESTS.md"
 copy_versioned docs/ADMIN-TOOLS.md "$DIST_DIR/docs/ADMIN-TOOLS.md"
 copy_versioned docs/CONFIG-REFERENCE.md "$DIST_DIR/docs/CONFIG-REFERENCE.md"
+copy_versioned docs/FAQ.md "$DIST_DIR/docs/FAQ.md"
+copy_versioned docs/UPGRADE.md "$DIST_DIR/docs/UPGRADE.md"
 copy_versioned docs/CSV-EXPORT.md "$DIST_DIR/docs/CSV-EXPORT.md"
 copy_versioned docs/DB-MIGRATION.md "$DIST_DIR/docs/DB-MIGRATION.md"
 copy_versioned docs/SEQUENCE-STORAGE-MIGRATION.md "$DIST_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
+copy_versioned docs/SECURITY-UPGRADE-1.1.0.md "$DIST_DIR/docs/SECURITY-UPGRADE-1.1.0.md"
 copy_versioned docs/LOGROTATE.md "$DIST_DIR/docs/LOGROTATE.md"
 copy_versioned docs/INSTALL_LOADTEST.md "$DIST_DIR/docs/INSTALL_LOADTEST.md"
 copy_versioned docs/openapi.yaml "$DIST_DIR/docs/openapi.yaml"
@@ -305,9 +312,12 @@ cp examples/systemd/graphicalmatrix-csv-import.service "$ADMIN_DIST_DIR/examples
 
 copy_versioned docs/ADMIN-TOOLS.md "$ADMIN_DIST_DIR/docs/ADMIN-TOOLS.md"
 copy_versioned docs/CONFIG-REFERENCE.md "$ADMIN_DIST_DIR/docs/CONFIG-REFERENCE.md"
+copy_versioned docs/FAQ.md "$ADMIN_DIST_DIR/docs/FAQ.md"
+copy_versioned docs/UPGRADE.md "$ADMIN_DIST_DIR/docs/UPGRADE.md"
 copy_versioned docs/CSV-EXPORT.md "$ADMIN_DIST_DIR/docs/CSV-EXPORT.md"
 copy_versioned docs/DB-MIGRATION.md "$ADMIN_DIST_DIR/docs/DB-MIGRATION.md"
 copy_versioned docs/SEQUENCE-STORAGE-MIGRATION.md "$ADMIN_DIST_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
+copy_versioned docs/SECURITY-UPGRADE-1.1.0.md "$ADMIN_DIST_DIR/docs/SECURITY-UPGRADE-1.1.0.md"
 copy_versioned docs/SECURITY.md "$ADMIN_DIST_DIR/docs/SECURITY.md"
 copy_versioned docs/SECURITY-CHECKLIST.md "$ADMIN_DIST_DIR/docs/SECURITY-CHECKLIST.md"
 
