@@ -36,6 +36,8 @@
         <opensaml.version>5.2.3</opensaml.version>
         <totp.plugin.version>2.3.1</totp.plugin.version>
         <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
+        <spring.framework.version>7.0.8</spring.framework.version>
+        <httpclient.version>4.5.14</httpclient.version>
         <slf4j.version>2.0.18</slf4j.version>
         <zxing.version>3.5.4</zxing.version>
         <postgresql.version>42.7.11</postgresql.version>
@@ -104,6 +106,22 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>${slf4j.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!--
+            Compile-time only overrides for transitive IdP/plugin dependencies.
+            These are provided by the IdP runtime and must not be bundled.
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <version>${spring.framework.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>${httpclient.version}</version>
             <scope>provided</scope>
         </dependency>
 
