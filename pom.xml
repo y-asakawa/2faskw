@@ -4,7 +4,7 @@
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.github.yasakawa.faskw.graphicalmatrix</groupId>
+    <groupId>io.github.yasakawa.faskw.idp.plugin.2faskw</groupId>
     <artifactId>2faskw-idp-plugin</artifactId>
     <version>1.0.1</version>
     <packaging>jar</packaging>
