@@ -5,6 +5,9 @@
 この手順書は、GraphicalMatrix MFA / Shibboleth IdP 構成に対して負荷試験を行うための、試験用サーバ構築から試験実行、結果確認までの設計手順をまとめる。
 
 本手順は設計用であり、実サーバへの設定投入は別途実施する。
+手順中のパッケージ導入例はRocky Linux / AlmaLinux / RHEL系を想定している。
+Debian、Ubuntu、その他のLinuxでは、k6、Java、curl、jqなどの導入コマンドを
+各ディストリビューションのパッケージ管理に合わせて読み替える。
 
 ## 2. 推奨構成
 

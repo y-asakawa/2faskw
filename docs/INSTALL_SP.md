@@ -5,6 +5,12 @@
 GraphicalMatrix MFAのエンドツーエンド試験用に、SimpleSAMLphp SPを
 `192.168.0.61`へ構築し、IdP `idp.example.com`へ登録した。
 
+この文書はRocky Linux 10.2上のSimpleSAMLphpテストSP構築記録である。
+手順中の `dnf`、`firewall-cmd`、`systemctl`、Apache `httpd`、PHP-FPMの
+サービス名はRocky/RHEL互換環境を前提にしている。
+Debian、Ubuntu、その他のLinuxでは、Apache/PHPのパッケージ名、設定パス、
+サービス名、Firewall設定を環境に合わせて読み替える必要がある。
+
 現行設定は以下。
 
 ```text

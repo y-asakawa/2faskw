@@ -1,11 +1,48 @@
 # Install Guide
 
-この文書は 2FAS-KW Plugin 配布物を Shibboleth IdP 5 へ導入する手順です。
+この文書は、2FAS-KW Plugin配布物を既存のShibboleth IdP 5へ導入する手順です。
+公式Shibboleth plugin packageとしては未完成です。
 
-この配布物は内部配布用です。
-署名済み公式Shibboleth plugin packageとしての外部配布は未完成です。
+## この文書の使い方
 
-## 0. 配布物構成と必須アプリ
+OS、Jetty、Shibboleth IdP、PostgreSQL HA、SimpleSAMLphpテストSPの構築は、
+必要に応じて別文書を参照してください。
+
+| 目的 | 参照先 |
+| --- | --- |
+| IdP/APサーバ構築 | `INSTALL_AP.md` |
+| PostgreSQL HA構築 | `INSTALL_DB.md` |
+| SimpleSAMLphpテストSP構築 | `INSTALL_SP.md` |
+| 設定項目の意味 | `CONFIG-REFERENCE.md` |
+| セキュリティ確認 | `SECURITY.md`, `SECURITY-CHECKLIST.md` |
+
+作業は以下の流れで進めます。
+
+| Phase | Section | 内容 |
+| --- | --- | --- |
+| 事前確認 | 0-3 | 配布物、前提、確認項目 |
+| 配置 | 4-6 | package check、dry-run、apply |
+| 設定 | 7-11 | 保存方式、DB、web.xml、MFA/External flow |
+| 反映 | 12-15 | WAR再構築、Jetty再起動、動作確認、ログ確認 |
+| 補助 | 16-20 | Admin Tools、主要設定例、運用、rollback、記録テンプレート |
+
+## 対応Linuxディストリビューション
+
+2FAS-KWのJavaプラグイン本体はRocky Linux専用ではありません。
+ただし、この導入手順はRocky Linux 10.xで検証しており、以下を前提にしています。
+
+- systemd
+- firewalld
+- dnf
+- PGDG PostgreSQL RPM構成
+- `/opt/shibboleth-idp` をIdP homeとする構成
+- `jetty` ユーザーでJetty/IdPを実行する構成
+
+AlmaLinux、RHEL、CentOS StreamなどのRHEL互換環境では、同じ方針で動作する可能性が高いです。
+Debian、Ubuntu、その他のLinuxでは、パッケージ名、PostgreSQLのパス、サービス定義、
+Firewall設定を環境に合わせて読み替えてください。
+
+## 0. 配布物
 
 ### IdP Plugin 配布物
 
@@ -166,8 +203,11 @@ MFA連携:
 - DB接続先へのfirewalld許可
 
 ## 1. 事前確認
-[対象ソフトウェアを先にインストールしてください。インストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)<BR>
-[DBソフトウェアをインストールしてください。インストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
+
+対象ソフトウェアは先に導入しておく。
+IdP/APサーバの導入は [INSTALL_AP.md](./INSTALL_AP.md)、
+DBサーバの導入は [INSTALL_DB.md](./INSTALL_DB.md) を参照する。
+
 - Shibboleth IdP 5.2系
 - Java 21
 - Jetty 12
@@ -380,6 +420,9 @@ apply後に行うこと:
    ```
 
 ## 7. 設定ファイル確認
+
+この章では、導入時に決める保存方式と、初期状態で確認すべき主要設定を扱います。
+本番導入では、ここで選んだ保存方式を後から頻繁に変えない前提で設計してください。
 
 既存設定がある場合、導入スクリプトは上書きせず `.idpnew.TIMESTAMP` を配置します。
 差分確認して必要な設定だけ反映してください。
@@ -939,13 +982,13 @@ sudo grep -nE 'GraphicalMatrixStart|/graphicalmatrix/start|GraphicalMatrixVerify
 `/idp/graphicalmatrix/start` への直接アクセスは、External認証のconversation keyが無いため
 HTTP 500になる場合がある。直接確認では404でないことを確認する。
 
-## 12. IdP rebuild
+## 12. IdP WAR再構築
 
 ```bash
 sudo /opt/shibboleth-idp/bin/build.sh
 ```
 
-## 13. Jetty restart
+## 13. Jetty再起動
 
 systemd例:
 
@@ -1078,6 +1121,9 @@ docs/ADMIN-TOOLS.md
 ```
 
 ## 17. 主要設定例
+
+この章は設定ファイルの最終確認用です。
+導入作業中に作成したsecret fileやDB接続設定と矛盾がないことを確認してください。
 
 全設定項目の意味、型、既定値、注意点は `docs/CONFIG-REFERENCE.md` を参照してください。
 Admin Toolsでは以下でも確認できます。

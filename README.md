@@ -29,15 +29,27 @@ published artifacts.
 H2-compatible defaults may exist for local or PoC workflows, but production
 deployments should use PostgreSQL and protected sequence/TOTP seed storage.
 
+## Supported Platforms
+
+2FAS-KW has been tested on Rocky Linux 10.x. The Java plugin itself is not
+Rocky Linux specific, but the installation documents currently assume a
+RHEL-compatible environment with systemd, firewalld, dnf, and PGDG PostgreSQL
+RPM paths.
+
+Other Linux distributions may work if paths, service units, package names,
+firewall commands, and PostgreSQL layout are adjusted. AlmaLinux, RHEL, and
+CentOS Stream are expected to be the closest environments. Debian, Ubuntu, and
+other Linux distributions are not currently tested by this project.
+
 ## Documentation
 
-- Installation and operation: `docs/README.md`
-- IdP installation: `docs/INSTALL.md`
-- Security guide: `docs/SECURITY.md`
-- Security checklist: `docs/SECURITY-CHECKLIST.md`
-- Build from source: `docs/build.md`
-- Admin tools: `docs/ADMIN-TOOLS.md`
-- Configuration reference: `docs/CONFIG-REFERENCE.md`
+- Installation and operation: [docs/README.md](docs/README.md)
+- IdP installation: [docs/INSTALL.md](docs/INSTALL.md)
+- Security guide: [docs/SECURITY.md](docs/SECURITY.md)
+- Security checklist: [docs/SECURITY-CHECKLIST.md](docs/SECURITY-CHECKLIST.md)
+- Build from source: [docs/build.md](docs/build.md)
+- Admin tools: [docs/ADMIN-TOOLS.md](docs/ADMIN-TOOLS.md)
+- Configuration reference: [docs/CONFIG-REFERENCE.md](docs/CONFIG-REFERENCE.md)
 
 ## Security Defaults
 
@@ -67,7 +79,7 @@ Third-party license and attribution details are listed in
 ## Security Reporting
 
 Do not open public GitHub issues for suspected vulnerabilities. Follow
-`SECURITY.md` for the reporting process.
+`docs/SECURITY.md` for the reporting process.
 
 
 ## Screenshots
@@ -131,4 +143,4 @@ GitHub Release for published artifacts.
 ### Should security issues be reported in GitHub Issues?
 
 No. Do not open public GitHub issues for suspected vulnerabilities. Follow
-`SECURITY.md` for the reporting process.
+`docs/SECURITY.md` for the reporting process.

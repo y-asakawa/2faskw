@@ -5,6 +5,12 @@
 GraphicalMatrix MFA / TOTP / WebAuthn credential保存用PostgreSQLを
 DB 2台構成で構築した。
 
+この文書はRocky Linux 10.2でのPostgreSQL HA構築記録である。
+手順中の `dnf`、`firewall-cmd`、`systemctl`、PGDG RPM、`/usr/pgsql-18/bin`、
+`/var/lib/pgsql/18/data` はRocky/RHEL互換環境を前提にしている。
+Debian、Ubuntu、その他のLinuxでは、PostgreSQLの設定ディレクトリ、データディレクトリ、
+サービス名、Firewall設定を環境に合わせて読み替える必要がある。
+
 対象:
 
 ```text
@@ -1296,7 +1302,10 @@ query-rich-rule: yes
 DB1/DB2では、PostgreSQL用の `5432/tcp` とVRRP用の `vrrp` は変更していない。
 この設定により、SSHのみ `192.168.0.0/24` からの接続に限定される。
 
-## 17. PostgreSQL 5432/tcp SSL化手順
+## 17. PostgreSQL TLS化手順
+
+この章は、PostgreSQL 5432/tcp をTLS化するための再現手順である。
+この環境で実際に適用した結果は次章の `PostgreSQL TLS実適用記録` にまとめる。
 
 ### 17.1 現状
 
@@ -1785,427 +1794,10 @@ sudo systemctl restart postgresql-18
 - `hostssl` 強制前に必ずSSL接続成功を確認する。
 - Admin Toolsを別サーバで使う場合もCA証明書とJDBC SSL設定を同じにする。
 
-## 18. パフォーマンスチューニング設定例
+## 18. PostgreSQL TLS実適用記録
 
-### 18.1 前提
-
-この章は、将来の本番投入前に検討する設定例である。
-未適用。
-
-想定:
-
-```text
-登録ユーザー数: 約50,000
-同時接続ユーザー: 約300
-IdP台数: 2台想定
-DB台数: Primary/Standby 2台
-DB接続先: DB VIP -> HAProxy -> PostgreSQL Primary
-DB用途: GraphicalMatrix / TOTP seed / WebAuthn credential / 管理CLI
-```
-
-注意:
-
-- 同時接続ユーザー300は、そのままDB接続300本を意味しない。
-- DB接続数はIdP側の実装、接続プール、Jetty thread数、MFA画面操作頻度で決まる。
-- まずDB直結の最大接続数を増やすより、IdP側またはPgBouncerで接続数を制御する。
-- 以下の値は初期案であり、`pg_stat_activity`、`pg_stat_statements`、OSメトリクスを見て調整する。
-
-### 18.2 推奨方針
-
-本番では以下を推奨する。
-
-```text
-PostgreSQL max_connectionsをむやみに300以上にしない
-IdP/管理ツール/APIからのDB接続をプールする
-必要ならPgBouncerをDB VIP手前またはDBノード上に追加する
-PostgreSQL本体はメモリ、WAL、autovacuum、監視ログを調整する
-```
-
-DB接続数の目安:
-
-```text
-IdP 1台あたり: 30 - 50接続上限
-IdP 2台合計:   60 - 100接続上限
-Admin Tools:   通常1 - 5接続
-監視:          5 - 10接続
-max_connections初期案: 150
-```
-
-同時300ユーザーでも、DB接続は100前後に抑える設計を優先する。
-
-### 18.3 PostgreSQL設定例 8GB RAM
-
-DBサーバのRAMが8GB程度の場合の初期案。
-
-`/var/lib/pgsql/18/data/postgresql.conf`:
-
-```conf
-# GraphicalMatrix performance baseline - 8GB RAM example
-max_connections = 150
-
-shared_buffers = '2GB'
-effective_cache_size = '6GB'
-maintenance_work_mem = '512MB'
-work_mem = '8MB'
-
-wal_level = replica
-max_wal_senders = 10
-max_replication_slots = 10
-wal_keep_size = '1GB'
-checkpoint_timeout = '15min'
-checkpoint_completion_target = 0.9
-max_wal_size = '4GB'
-min_wal_size = '1GB'
-
-random_page_cost = 1.1
-effective_io_concurrency = 200
-
-autovacuum = on
-autovacuum_max_workers = 4
-autovacuum_naptime = '30s'
-autovacuum_vacuum_scale_factor = 0.05
-autovacuum_analyze_scale_factor = 0.02
-
-track_io_timing = on
-log_min_duration_statement = '1000ms'
-log_lock_waits = on
-```
-
-### 18.4 PostgreSQL設定例 16GB RAM
-
-DBサーバのRAMが16GB程度の場合の初期案。
-
-```conf
-# GraphicalMatrix performance baseline - 16GB RAM example
-max_connections = 150
-
-shared_buffers = '4GB'
-effective_cache_size = '12GB'
-maintenance_work_mem = '1GB'
-work_mem = '16MB'
-
-wal_level = replica
-max_wal_senders = 10
-max_replication_slots = 10
-wal_keep_size = '2GB'
-checkpoint_timeout = '15min'
-checkpoint_completion_target = 0.9
-max_wal_size = '8GB'
-min_wal_size = '2GB'
-
-random_page_cost = 1.1
-effective_io_concurrency = 200
-
-autovacuum = on
-autovacuum_max_workers = 4
-autovacuum_naptime = '30s'
-autovacuum_vacuum_scale_factor = 0.05
-autovacuum_analyze_scale_factor = 0.02
-
-track_io_timing = on
-log_min_duration_statement = '1000ms'
-log_lock_waits = on
-```
-
-`work_mem` は接続ごと、かつソート/ハッシュ処理ごとに使われる可能性がある。
-`max_connections` を大きくする場合は、`work_mem` を上げすぎない。
-
-### 18.5 接続プール / PgBouncer
-
-同時300ユーザーを想定する場合、接続プールを入れる方が安定する。
-
-候補:
-
-```text
-IdPアプリ側のDataSource pool
-PgBouncer
-HAProxy + PgBouncer + PostgreSQL
-```
-
-PgBouncerを使う場合の接続グラフィカル:
-
-```text
-IdP -> DB VIP:6432 -> HAProxy -> PgBouncer -> PostgreSQL Primary:5432
-```
-
-またはDBノード上:
-
-```text
-IdP -> DB VIP:6432 -> HAProxy -> local PgBouncer:6432 -> local PostgreSQL:5432
-```
-
-PgBouncer初期案:
-
-```ini
-[databases]
-graphicalmatrix = host=127.0.0.1 port=5432 dbname=graphicalmatrix
-
-[pgbouncer]
-listen_addr = 127.0.0.1
-listen_port = 6432
-pool_mode = transaction
-max_client_conn = 500
-default_pool_size = 80
-min_pool_size = 10
-reserve_pool_size = 20
-reserve_pool_timeout = 5
-server_idle_timeout = 600
-server_lifetime = 3600
-ignore_startup_parameters = extra_float_digits
-```
-
-注意:
-
-- WebAuthn StorageServiceやTOTP seed参照が長いtransactionを持たない前提なら `transaction` poolが使いやすい。
-- session stateや一時テーブルを使う処理がある場合は `session` poolを検討する。
-- PgBouncerを入れる場合、JDBC URLのポートは `6432` に変更する。
-- PostgreSQL SSLを使う場合は、PgBouncerでTLSをどこで終端するかを別途設計する。
-
-### 18.6 HAProxy設定例
-
-現在のHAProxyはDB VIPのTCP forward用途。
-同時300ユーザー想定では、HAProxy側の接続上限も明示する。
-
-例:
-
-```haproxy
-global
-    maxconn 1000
-
-defaults
-    mode tcp
-    timeout connect 5s
-    timeout client  60s
-    timeout server  60s
-
-frontend pgsql
-    bind 192.168.0.64:5432
-    maxconn 500
-    default_backend pgsql_primary
-
-backend pgsql_primary
-    option tcp-check
-    tcp-check connect
-    server local_pg 127.0.0.1:5432 check maxconn 200
-```
-
-PgBouncerを使う場合:
-
-```haproxy
-frontend pgbouncer
-    bind 192.168.0.64:6432
-    maxconn 500
-    default_backend pgbouncer_primary
-
-backend pgbouncer_primary
-    option tcp-check
-    tcp-check connect
-    server local_pgbouncer 127.0.0.1:6432 check maxconn 500
-```
-
-### 18.7 DBスキーマ / index確認
-
-50,000ユーザー規模では、現在の主キー検索中心なら大きな負荷にはなりにくい。
-ただし、管理CLIやAPIで一覧・方式別検索を多用する場合はindexを追加する。
-
-推奨index例:
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_mfa_method
-  ON graphicalmatrix_enrollment (mfa_method);
-
-CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_status
-  ON graphicalmatrix_enrollment (status);
-
-CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_force_change
-  ON graphicalmatrix_enrollment (force_sequence_change);
-
-CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_updated_at
-  ON graphicalmatrix_enrollment (updated_at);
-```
-
-WebAuthn credentialは `storagerecords` の構造に依存する。
-JSON内検索を多用する場合は、実データとクエリを見てGIN indexを検討する。
-ただし、Shibboleth標準StorageServiceの想定外index追加は、事前検証してから行う。
-
-### 18.8 autovacuum / analyze
-
-GraphicalMatrixの通常認証では、成功/失敗回数、lock、last_success_at更新が発生する。
-更新頻度が高い場合、autovacuum/analyzeが遅れると性能が落ちる。
-
-テーブル単位の設定例:
-
-```sql
-ALTER TABLE graphicalmatrix_enrollment SET (
-  autovacuum_vacuum_scale_factor = 0.02,
-  autovacuum_analyze_scale_factor = 0.01,
-  autovacuum_vacuum_threshold = 100,
-  autovacuum_analyze_threshold = 100
-);
-```
-
-確認:
-
-```sql
-SELECT
-  relname,
-  n_live_tup,
-  n_dead_tup,
-  last_vacuum,
-  last_autovacuum,
-  last_analyze,
-  last_autoanalyze
-FROM pg_stat_user_tables
-WHERE relname IN ('graphicalmatrix_enrollment', 'storagerecords');
-```
-
-### 18.9 OS設定例
-
-Linux側の基本確認。
-
-```bash
-free -h
-lsblk
-df -h /var/lib/pgsql/18/data
-ulimit -n
-sysctl net.core.somaxconn
-sysctl vm.swappiness
-```
-
-設定例:
-
-```conf
-# /etc/sysctl.d/90-graphicalmatrix-db.conf
-vm.swappiness = 10
-net.core.somaxconn = 1024
-net.ipv4.tcp_keepalive_time = 300
-net.ipv4.tcp_keepalive_intvl = 30
-net.ipv4.tcp_keepalive_probes = 5
-```
-
-反映:
-
-```bash
-sudo sysctl --system
-```
-
-systemd open files確認:
-
-```bash
-systemctl show postgresql-18 -p LimitNOFILE
-systemctl show haproxy -p LimitNOFILE
-```
-
-必要ならoverrideを検討する。
-
-### 18.10 監視項目
-
-同時300ユーザー想定では、以下を継続監視する。
-
-DB接続数:
-
-```sql
-SELECT state, count(*)
-FROM pg_stat_activity
-GROUP BY state
-ORDER BY state;
-```
-
-ユーザー別接続数:
-
-```sql
-SELECT usename, application_name, client_addr, state, count(*)
-FROM pg_stat_activity
-GROUP BY usename, application_name, client_addr, state
-ORDER BY count(*) DESC;
-```
-
-遅いSQL:
-
-```sql
-SELECT pid, usename, client_addr, now() - query_start AS duration, query
-FROM pg_stat_activity
-WHERE state = 'active'
-  AND now() - query_start > interval '5 seconds'
-ORDER BY duration DESC;
-```
-
-dead tuple:
-
-```sql
-SELECT relname, n_live_tup, n_dead_tup
-FROM pg_stat_user_tables
-ORDER BY n_dead_tup DESC;
-```
-
-replication lag:
-
-```sql
-SELECT application_name, client_addr, state, sync_state,
-       write_lag, flush_lag, replay_lag
-FROM pg_stat_replication;
-```
-
-DBサイズ:
-
-```sql
-SELECT pg_size_pretty(pg_database_size('graphicalmatrix')) AS db_size;
-SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size
-FROM pg_catalog.pg_statio_user_tables
-ORDER BY pg_total_relation_size(relid) DESC;
-```
-
-### 18.11 負荷試験
-
-本番適用前に、以下の負荷試験を行う。
-
-```text
-1. 50,000ユーザー分のgraphicalmatrix_enrollmentを投入
-2. list/show/set-method/reset/csv-exportの管理CLI性能を確認
-3. IdP 2台からMFA認証相当のDB read/updateを並列実行
-4. 同時300ユーザー相当のログイン試験
-5. 失敗回数更新、lock、unlock、last_success_at更新のwrite負荷を確認
-6. WebAuthn credentialありユーザーのログイン試験
-7. DB2停止時、DB1継続動作を確認
-8. DB1停止時、手動failover後の性能を確認
-```
-
-試験時に見る値:
-
-```text
-平均応答時間
-95 percentile / 99 percentile
-DB CPU
-DB memory
-disk I/O latency
-active connection数
-idle connection数
-lock wait
-dead tuple
-replication lag
-HAProxy current sessions
-Jetty thread使用率
-```
-
-### 18.12 適用順序
-
-推奨順序:
-
-```text
-1. 監視を先に入れる
-2. PostgreSQL設定を控えめに変更
-3. max_connectionsを150程度に設定
-4. IdP/API/Admin Tools側の接続数を制御
-5. 必要ならPgBouncerを追加
-6. 負荷試験
-7. 実測に合わせてwork_mem、autovacuum、WAL設定を調整
-```
-
-最初から大きな値にしない。
-特に `max_connections` と `work_mem` はメモリ消費に直結するため、
-同時に大きくしない。
-
-## 19. PostgreSQL TLS実適用記録
+この章は、この検証環境で実際に実施したTLS化の作業記録である。
+再利用する標準手順は前章を参照し、この章は証明書名、配置結果、確認結果の記録として扱う。
 
 `DB_test` 配下で発行した3種類の証明書をDB環境へ適用した。
 
@@ -2427,3 +2019,424 @@ active
 active
 active
 ```
+
+
+## 19. パフォーマンスチューニング設定例
+
+### 19.1 前提
+
+この章は、将来の本番投入前に検討する設定例である。
+未適用。
+
+想定:
+
+```text
+登録ユーザー数: 約50,000
+同時接続ユーザー: 約300
+IdP台数: 2台想定
+DB台数: Primary/Standby 2台
+DB接続先: DB VIP -> HAProxy -> PostgreSQL Primary
+DB用途: GraphicalMatrix / TOTP seed / WebAuthn credential / 管理CLI
+```
+
+注意:
+
+- 同時接続ユーザー300は、そのままDB接続300本を意味しない。
+- DB接続数はIdP側の実装、接続プール、Jetty thread数、MFA画面操作頻度で決まる。
+- まずDB直結の最大接続数を増やすより、IdP側またはPgBouncerで接続数を制御する。
+- 以下の値は初期案であり、`pg_stat_activity`、`pg_stat_statements`、OSメトリクスを見て調整する。
+
+### 19.2 推奨方針
+
+本番では以下を推奨する。
+
+```text
+PostgreSQL max_connectionsをむやみに300以上にしない
+IdP/管理ツール/APIからのDB接続をプールする
+必要ならPgBouncerをDB VIP手前またはDBノード上に追加する
+PostgreSQL本体はメモリ、WAL、autovacuum、監視ログを調整する
+```
+
+DB接続数の目安:
+
+```text
+IdP 1台あたり: 30 - 50接続上限
+IdP 2台合計:   60 - 100接続上限
+Admin Tools:   通常1 - 5接続
+監視:          5 - 10接続
+max_connections初期案: 150
+```
+
+同時300ユーザーでも、DB接続は100前後に抑える設計を優先する。
+
+### 19.3 PostgreSQL設定例 8GB RAM
+
+DBサーバのRAMが8GB程度の場合の初期案。
+
+`/var/lib/pgsql/18/data/postgresql.conf`:
+
+```conf
+# GraphicalMatrix performance baseline - 8GB RAM example
+max_connections = 150
+
+shared_buffers = '2GB'
+effective_cache_size = '6GB'
+maintenance_work_mem = '512MB'
+work_mem = '8MB'
+
+wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 10
+wal_keep_size = '1GB'
+checkpoint_timeout = '15min'
+checkpoint_completion_target = 0.9
+max_wal_size = '4GB'
+min_wal_size = '1GB'
+
+random_page_cost = 1.1
+effective_io_concurrency = 200
+
+autovacuum = on
+autovacuum_max_workers = 4
+autovacuum_naptime = '30s'
+autovacuum_vacuum_scale_factor = 0.05
+autovacuum_analyze_scale_factor = 0.02
+
+track_io_timing = on
+log_min_duration_statement = '1000ms'
+log_lock_waits = on
+```
+
+### 19.4 PostgreSQL設定例 16GB RAM
+
+DBサーバのRAMが16GB程度の場合の初期案。
+
+```conf
+# GraphicalMatrix performance baseline - 16GB RAM example
+max_connections = 150
+
+shared_buffers = '4GB'
+effective_cache_size = '12GB'
+maintenance_work_mem = '1GB'
+work_mem = '16MB'
+
+wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 10
+wal_keep_size = '2GB'
+checkpoint_timeout = '15min'
+checkpoint_completion_target = 0.9
+max_wal_size = '8GB'
+min_wal_size = '2GB'
+
+random_page_cost = 1.1
+effective_io_concurrency = 200
+
+autovacuum = on
+autovacuum_max_workers = 4
+autovacuum_naptime = '30s'
+autovacuum_vacuum_scale_factor = 0.05
+autovacuum_analyze_scale_factor = 0.02
+
+track_io_timing = on
+log_min_duration_statement = '1000ms'
+log_lock_waits = on
+```
+
+`work_mem` は接続ごと、かつソート/ハッシュ処理ごとに使われる可能性がある。
+`max_connections` を大きくする場合は、`work_mem` を上げすぎない。
+
+### 19.5 接続プール / PgBouncer
+
+同時300ユーザーを想定する場合、接続プールを入れる方が安定する。
+
+候補:
+
+```text
+IdPアプリ側のDataSource pool
+PgBouncer
+HAProxy + PgBouncer + PostgreSQL
+```
+
+PgBouncerを使う場合の接続グラフィカル:
+
+```text
+IdP -> DB VIP:6432 -> HAProxy -> PgBouncer -> PostgreSQL Primary:5432
+```
+
+またはDBノード上:
+
+```text
+IdP -> DB VIP:6432 -> HAProxy -> local PgBouncer:6432 -> local PostgreSQL:5432
+```
+
+PgBouncer初期案:
+
+```ini
+[databases]
+graphicalmatrix = host=127.0.0.1 port=5432 dbname=graphicalmatrix
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = 6432
+pool_mode = transaction
+max_client_conn = 500
+default_pool_size = 80
+min_pool_size = 10
+reserve_pool_size = 20
+reserve_pool_timeout = 5
+server_idle_timeout = 600
+server_lifetime = 3600
+ignore_startup_parameters = extra_float_digits
+```
+
+注意:
+
+- WebAuthn StorageServiceやTOTP seed参照が長いtransactionを持たない前提なら `transaction` poolが使いやすい。
+- session stateや一時テーブルを使う処理がある場合は `session` poolを検討する。
+- PgBouncerを入れる場合、JDBC URLのポートは `6432` に変更する。
+- PostgreSQL SSLを使う場合は、PgBouncerでTLSをどこで終端するかを別途設計する。
+
+### 19.6 HAProxy設定例
+
+現在のHAProxyはDB VIPのTCP forward用途。
+同時300ユーザー想定では、HAProxy側の接続上限も明示する。
+
+例:
+
+```haproxy
+global
+    maxconn 1000
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+
+frontend pgsql
+    bind 192.168.0.64:5432
+    maxconn 500
+    default_backend pgsql_primary
+
+backend pgsql_primary
+    option tcp-check
+    tcp-check connect
+    server local_pg 127.0.0.1:5432 check maxconn 200
+```
+
+PgBouncerを使う場合:
+
+```haproxy
+frontend pgbouncer
+    bind 192.168.0.64:6432
+    maxconn 500
+    default_backend pgbouncer_primary
+
+backend pgbouncer_primary
+    option tcp-check
+    tcp-check connect
+    server local_pgbouncer 127.0.0.1:6432 check maxconn 500
+```
+
+### 19.7 DBスキーマ / index確認
+
+50,000ユーザー規模では、現在の主キー検索中心なら大きな負荷にはなりにくい。
+ただし、管理CLIやAPIで一覧・方式別検索を多用する場合はindexを追加する。
+
+推奨index例:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_mfa_method
+  ON graphicalmatrix_enrollment (mfa_method);
+
+CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_status
+  ON graphicalmatrix_enrollment (status);
+
+CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_force_change
+  ON graphicalmatrix_enrollment (force_sequence_change);
+
+CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_updated_at
+  ON graphicalmatrix_enrollment (updated_at);
+```
+
+WebAuthn credentialは `storagerecords` の構造に依存する。
+JSON内検索を多用する場合は、実データとクエリを見てGIN indexを検討する。
+ただし、Shibboleth標準StorageServiceの想定外index追加は、事前検証してから行う。
+
+### 19.8 autovacuum / analyze
+
+GraphicalMatrixの通常認証では、成功/失敗回数、lock、last_success_at更新が発生する。
+更新頻度が高い場合、autovacuum/analyzeが遅れると性能が落ちる。
+
+テーブル単位の設定例:
+
+```sql
+ALTER TABLE graphicalmatrix_enrollment SET (
+  autovacuum_vacuum_scale_factor = 0.02,
+  autovacuum_analyze_scale_factor = 0.01,
+  autovacuum_vacuum_threshold = 100,
+  autovacuum_analyze_threshold = 100
+);
+```
+
+確認:
+
+```sql
+SELECT
+  relname,
+  n_live_tup,
+  n_dead_tup,
+  last_vacuum,
+  last_autovacuum,
+  last_analyze,
+  last_autoanalyze
+FROM pg_stat_user_tables
+WHERE relname IN ('graphicalmatrix_enrollment', 'storagerecords');
+```
+
+### 19.9 OS設定例
+
+Linux側の基本確認。
+
+```bash
+free -h
+lsblk
+df -h /var/lib/pgsql/18/data
+ulimit -n
+sysctl net.core.somaxconn
+sysctl vm.swappiness
+```
+
+設定例:
+
+```conf
+# /etc/sysctl.d/90-graphicalmatrix-db.conf
+vm.swappiness = 10
+net.core.somaxconn = 1024
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+```
+
+反映:
+
+```bash
+sudo sysctl --system
+```
+
+systemd open files確認:
+
+```bash
+systemctl show postgresql-18 -p LimitNOFILE
+systemctl show haproxy -p LimitNOFILE
+```
+
+必要ならoverrideを検討する。
+
+### 19.10 監視項目
+
+同時300ユーザー想定では、以下を継続監視する。
+
+DB接続数:
+
+```sql
+SELECT state, count(*)
+FROM pg_stat_activity
+GROUP BY state
+ORDER BY state;
+```
+
+ユーザー別接続数:
+
+```sql
+SELECT usename, application_name, client_addr, state, count(*)
+FROM pg_stat_activity
+GROUP BY usename, application_name, client_addr, state
+ORDER BY count(*) DESC;
+```
+
+遅いSQL:
+
+```sql
+SELECT pid, usename, client_addr, now() - query_start AS duration, query
+FROM pg_stat_activity
+WHERE state = 'active'
+  AND now() - query_start > interval '5 seconds'
+ORDER BY duration DESC;
+```
+
+dead tuple:
+
+```sql
+SELECT relname, n_live_tup, n_dead_tup
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+```
+
+replication lag:
+
+```sql
+SELECT application_name, client_addr, state, sync_state,
+       write_lag, flush_lag, replay_lag
+FROM pg_stat_replication;
+```
+
+DBサイズ:
+
+```sql
+SELECT pg_size_pretty(pg_database_size('graphicalmatrix')) AS db_size;
+SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size
+FROM pg_catalog.pg_statio_user_tables
+ORDER BY pg_total_relation_size(relid) DESC;
+```
+
+### 19.11 負荷試験
+
+本番適用前に、以下の負荷試験を行う。
+
+```text
+1. 50,000ユーザー分のgraphicalmatrix_enrollmentを投入
+2. list/show/set-method/reset/csv-exportの管理CLI性能を確認
+3. IdP 2台からMFA認証相当のDB read/updateを並列実行
+4. 同時300ユーザー相当のログイン試験
+5. 失敗回数更新、lock、unlock、last_success_at更新のwrite負荷を確認
+6. WebAuthn credentialありユーザーのログイン試験
+7. DB2停止時、DB1継続動作を確認
+8. DB1停止時、手動failover後の性能を確認
+```
+
+試験時に見る値:
+
+```text
+平均応答時間
+95 percentile / 99 percentile
+DB CPU
+DB memory
+disk I/O latency
+active connection数
+idle connection数
+lock wait
+dead tuple
+replication lag
+HAProxy current sessions
+Jetty thread使用率
+```
+
+### 19.12 適用順序
+
+推奨順序:
+
+```text
+1. 監視を先に入れる
+2. PostgreSQL設定を控えめに変更
+3. max_connectionsを150程度に設定
+4. IdP/API/Admin Tools側の接続数を制御
+5. 必要ならPgBouncerを追加
+6. 負荷試験
+7. 実測に合わせてwork_mem、autovacuum、WAL設定を調整
+```
+
+最初から大きな値にしない。
+特に `max_connections` と `work_mem` はメモリ消費に直結するため、
+同時に大きくしない。
