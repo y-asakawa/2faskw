@@ -12,6 +12,7 @@ on:
       - "NOTICE"
       - "MFA*.png"
       - ".github/dependabot.yml"
+      - ".github/workflows/maven.yml"
   pull_request:
     branches: ["main"]
     paths-ignore:
@@ -22,6 +23,7 @@ on:
       - "NOTICE"
       - "MFA*.png"
       - ".github/dependabot.yml"
+      - ".github/workflows/maven.yml"
 
 jobs:
   build:
