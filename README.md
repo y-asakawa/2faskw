@@ -19,12 +19,12 @@ published artifacts.
 
 ## Requirements
 
-- Shibboleth IdP 5.2 or later
-- Java 21
-- Jetty 12 runtime for IdP 5
-- PostgreSQL for production deployments
-- Optional: Shibboleth TOTP plugin
-- Optional: Shibboleth WebAuthn plugin
+- [Shibboleth IdP 5.2 or later](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3199511079)
+- [Java 21](https://openjdk.org/projects/jdk/21/)
+- [Jetty 12 runtime for IdP 5](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3516104706/Jetty12)
+- [PostgreSQL](https://www.postgresql.org/docs/) for production deployments
+- Optional: [Shibboleth TOTP plugin](https://shibboleth.atlassian.net/wiki/spaces/IDPPLUGINS/pages/1376878877)
+- Optional: [Shibboleth WebAuthn plugin](https://shibboleth.atlassian.net/wiki/spaces/IDPPLUGINS/pages/3395321933)
 
 H2-compatible defaults may exist for local or PoC workflows, but production
 deployments should use PostgreSQL and protected sequence/TOTP seed storage.
