@@ -43,7 +43,7 @@
         <postgresql.version>42.7.12</postgresql.version>
         <hikaricp.version>7.1.0</hikaricp.version>
         <junit.version>5.14.1</junit.version>
-        <h2.version>2.3.232</h2.version>
+        <h2.version>2.4.240</h2.version>
     </properties>
 
     <repositories>
