@@ -107,17 +107,25 @@ else
 fi
 
 if [[ "$REMOVE_RUNTIME_DEPS" -eq 1 ]]; then
-  remove_file "$IDP_HOME/edit-webapp/WEB-INF/lib/core-3.5.3.jar"
   if [[ "$APPLY" -eq 1 ]]; then
+    for jar in "$IDP_HOME"/edit-webapp/WEB-INF/lib/core-*.jar; do
+      [[ -e "$jar" ]] && remove_file "$jar"
+    done
+    for jar in "$IDP_HOME"/edit-webapp/WEB-INF/lib/HikariCP-*.jar; do
+      [[ -e "$jar" ]] && remove_file "$jar"
+    done
     for jar in "$IDP_HOME"/edit-webapp/WEB-INF/lib/postgresql-*.jar; do
       [[ -e "$jar" ]] && remove_file "$jar"
     done
   else
+    run_sudo rm -f "$IDP_HOME"/edit-webapp/WEB-INF/lib/core-*.jar
+    run_sudo rm -f "$IDP_HOME"/edit-webapp/WEB-INF/lib/HikariCP-*.jar
     run_sudo rm -f "$IDP_HOME/edit-webapp/WEB-INF/lib/postgresql-*.jar"
   fi
 else
   echo "Keeping runtime dependencies by default:"
-  echo "  $IDP_HOME/edit-webapp/WEB-INF/lib/core-3.5.3.jar"
+  echo "  $IDP_HOME/edit-webapp/WEB-INF/lib/core-*.jar"
+  echo "  $IDP_HOME/edit-webapp/WEB-INF/lib/HikariCP-*.jar"
   echo "  $IDP_HOME/edit-webapp/WEB-INF/lib/postgresql-*.jar"
 fi
 

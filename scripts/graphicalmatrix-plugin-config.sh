@@ -285,7 +285,10 @@ if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar >/dev/null 2>&
   echo "ERROR: 2FAS-KW plugin jar missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
   exit 1
 fi
-require_file "$PACKAGE_DIR/webapp/WEB-INF/lib/core-3.5.3.jar"
+if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/core-*.jar >/dev/null 2>&1; then
+  echo "ERROR: ZXing core jar missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
+  exit 1
+fi
 if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/HikariCP-*.jar >/dev/null 2>&1; then
   echo "ERROR: HikariCP jar missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
   exit 1

@@ -252,7 +252,7 @@ check_package() {
 
   need_dir "$PACKAGE_DIR"
 
-  local package_base package_version plugin_jar hikari_jar bootstrap_props metadata_props openapi_yaml manifest_version bootstrap_version openapi_ver
+  local package_base package_version plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props openapi_yaml manifest_version bootstrap_version openapi_ver
   package_base="$(basename "$PACKAGE_DIR")"
   if [[ "$package_base" == 2faskw-idp-plugin-* && "$package_base" != "2faskw-idp-plugin-" ]]; then
     package_version="${package_base#2faskw-idp-plugin-}"
@@ -269,7 +269,12 @@ check_package() {
     fail "2FAS-KW plugin jar missing: $PACKAGE_DIR/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar"
   fi
 
-  need_file "$PACKAGE_DIR/webapp/WEB-INF/lib/core-3.5.3.jar"
+  zxing_core_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/core-*.jar")"
+  if [[ -n "$zxing_core_jar" ]]; then
+    ok "ZXing core jar exists: $zxing_core_jar"
+  else
+    fail "ZXing core jar missing: $PACKAGE_DIR/webapp/WEB-INF/lib/core-*.jar"
+  fi
   hikari_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/HikariCP-*.jar")"
   if [[ -n "$hikari_jar" ]]; then
     ok "HikariCP jar exists: $hikari_jar"

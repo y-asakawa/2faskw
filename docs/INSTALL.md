@@ -56,9 +56,9 @@ Firewall設定を環境に合わせて読み替えてください。
 
   webapp/WEB-INF/lib/
     2faskw-idp-plugin-1.0.1.jar
-    core-3.5.3.jar
-    HikariCP-6.3.0.jar
-    postgresql-42.7.11.jar
+    core-*.jar
+    HikariCP-*.jar
+    postgresql-*.jar
 
   bootstrap/
     plugin.properties
@@ -139,9 +139,9 @@ Firewall設定を環境に合わせて読み替えてください。
 
   lib/
     2faskw-idp-plugin-1.0.1.jar
-    core-3.5.3.jar
-    HikariCP-6.3.0.jar
-    postgresql-42.7.11.jar
+    core-*.jar
+    HikariCP-*.jar
+    postgresql-*.jar
 
   conf/graphicalmatrix/
     db.properties.adminnew
@@ -400,9 +400,9 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
 
 ```text
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.0.1.jar
-/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/core-3.5.3.jar
-/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-6.3.0.jar
-/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-42.7.11.jar
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/core-*.jar
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-*.jar
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-*.jar
 ```
 
 applyが成功すると、導入内容は以下にTSV形式で記録されます。

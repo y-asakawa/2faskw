@@ -53,9 +53,9 @@ PostgreSQL client toolsの配置を環境に合わせて読み替える必要が
 
   lib/
     2faskw-idp-plugin-1.0.1.jar
-    HikariCP-6.3.0.jar
-    postgresql-42.7.11.jar
-    core-3.5.3.jar
+    HikariCP-*.jar
+    postgresql-*.jar
+    core-*.jar
 
   conf/graphicalmatrix/
     db.properties.adminnew
