@@ -208,7 +208,7 @@ MFA連携:
 IdP/APサーバの導入は [INSTALL_AP.md](./INSTALL_AP.md)、
 DBサーバの導入は [INSTALL_DB.md](./INSTALL_DB.md) を参照する。
 
-- Shibboleth IdP 5.2系
+- Shibboleth IdP 5系
 - Java 21
 - Jetty 12
 - PostgreSQL
