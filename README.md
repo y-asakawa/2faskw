@@ -101,6 +101,7 @@ https://github.com/y-asakawa/2faskw/releases/
 
 No. 2FAS-KW is an independent Shibboleth IdP plugin. It is designed for
 Shibboleth IdP 5, but it is not distributed by the Shibboleth Project.
+We may officially release it in the near future.
 
 ### Which MFA methods are supported?
 
@@ -111,9 +112,9 @@ require the corresponding Shibboleth IdP plugins.
 ### Can I use animated GIF graphical files?
 
 Yes. The graphical servlet supports `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, and
-`.webp` files, and serves `.gif` files as `graphical/gif`. Animated GIF files
-should work as long as the browser supports them and the graphical ID is listed in
-`graphicalmatrix.graphicals`.
+`.webp` files, and serves each file with the corresponding standard browser
+media type. Animated GIF files should work as long as the browser supports them
+and the graphical ID is listed in `graphicalmatrix.graphicals`.
 
 ### Can I use 2FAS-KW without a database?
 

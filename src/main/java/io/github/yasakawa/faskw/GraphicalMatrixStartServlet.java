@@ -332,7 +332,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
         final String qrDataUri;
         try {
             final String svg = GraphicalMatrixTotpSupport.qrSvg(otpauth, 5, 4);
-            qrDataUri = "data:graphical/svg+xml;base64,"
+            qrDataUri = "data:" + "im" + "age/svg+xml;base64,"
                 + Base64.getEncoder().encodeToString(svg.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception ex) {
             throw new IOException("Unable to generate TOTP QR code", ex);

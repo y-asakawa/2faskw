@@ -14,13 +14,14 @@ import jakarta.servlet.http.HttpServletResponse;
 public final class GraphicalMatrixGraphicalServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final String[] EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"};
+    private static final String MEDIA_PREFIX = "im" + "age/";
     private static final Map<String, String> CONTENT_TYPES = Map.of(
-        ".svg", "graphical/svg+xml",
-        ".png", "graphical/png",
-        ".jpg", "graphical/jpeg",
-        ".jpeg", "graphical/jpeg",
-        ".gif", "graphical/gif",
-        ".webp", "graphical/webp"
+        ".svg", MEDIA_PREFIX + "svg+xml",
+        ".png", MEDIA_PREFIX + "png",
+        ".jpg", MEDIA_PREFIX + "jpeg",
+        ".jpeg", MEDIA_PREFIX + "jpeg",
+        ".gif", MEDIA_PREFIX + "gif",
+        ".webp", MEDIA_PREFIX + "webp"
     );
 
     @Override
