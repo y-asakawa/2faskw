@@ -31,9 +31,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
 
-        <shibboleth.idp.version>5.2.2</shibboleth.idp.version>
-        <shibboleth.shared.version>9.2.2</shibboleth.shared.version>
-        <opensaml.version>5.2.2</opensaml.version>
+        <shibboleth.idp.version>5.2.3</shibboleth.idp.version>
+        <shibboleth.shared.version>9.2.3</shibboleth.shared.version>
+        <opensaml.version>5.2.3</opensaml.version>
         <totp.plugin.version>2.3.1</totp.plugin.version>
         <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
         <slf4j.version>2.0.18</slf4j.version>
