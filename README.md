@@ -97,3 +97,13 @@ Third-party license and attribution details are listed in
 Do not open public GitHub issues for suspected vulnerabilities. Follow
 `SECURITY.md` and replace the placeholder contact with the official security
 contact before public release.
+
+## **Releases**: https://github.com/y-asakawa/2faskw/commits/v1.0.1
+
+## Screenshots
+
+<p>
+  <img src="MFA01.png" alt="GraphicalMatrix MFA screenshot 1" width="32%">
+  <img src="MFA02.png" alt="GraphicalMatrix MFA screenshot 2" width="32%">
+  <img src="MFA03.png" alt="GraphicalMatrix MFA screenshot 3" width="32%">
+</p>
