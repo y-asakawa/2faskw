@@ -79,3 +79,53 @@ contact before public release.
   <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="32%">
   <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="32%">
 </p>
+
+## FAQ
+
+### Is 2FAS-KW an official Shibboleth Project plugin?
+
+No. 2FAS-KW is an independent Shibboleth IdP plugin. It is designed for
+Shibboleth IdP 5, but it is not distributed by the Shibboleth Project.
+
+### Which MFA methods are supported?
+
+2FAS-KW can route users to GraphicalMatrix, TOTP, or WebAuthn based on database
+configuration. GraphicalMatrix is provided by this plugin. TOTP and WebAuthn
+require the corresponding Shibboleth IdP plugins.
+
+### Can I use animated GIF graphical files?
+
+Yes. The graphical servlet supports `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, and
+`.webp` files, and serves `.gif` files as `graphical/gif`. Animated GIF files
+should work as long as the browser supports them and the graphical ID is listed in
+`graphicalmatrix.graphicals`.
+
+### Can I use 2FAS-KW without a database?
+
+No. The current runtime requires a JDBC database. The login, verification,
+change, TOTP registration, WebAuthn routing, admin API, and CLI tools read or
+write user state through the `graphicalmatrix_enrollment` table. PostgreSQL is
+recommended for production deployments.
+
+### Can I use this in production?
+
+Production use requires careful configuration. Use PostgreSQL, avoid plaintext
+sequence or seed storage, disable the management API unless required, and
+restrict any enabled API with HTTPS, network controls, and bearer tokens.
+
+### Does this plugin store secrets?
+
+Yes. Depending on configuration, it may store GraphicalMatrix sequences and TOTP
+seed material. Production deployments should use protected storage modes such
+as `hash`, `keyword`, or `aes-gcm` as appropriate.
+
+### Are locally built packages official releases?
+
+No. Packages built from source are not official release artifacts unless they
+are produced and signed by the maintainer release process. Use the latest
+GitHub Release for published artifacts.
+
+### Should security issues be reported in GitHub Issues?
+
+No. Do not open public GitHub issues for suspected vulnerabilities. Follow
+`SECURITY.md` for the reporting process.
