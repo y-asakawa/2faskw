@@ -10,7 +10,7 @@ on:
       - "docs/**"
       - "LICENSE"
       - "NOTICE"
-      - "MFA*.png"
+      - "*.png"
       - ".github/dependabot.yml"
       - ".github/workflows/maven.yml"
   pull_request:
@@ -21,7 +21,7 @@ on:
       - "docs/**"
       - "LICENSE"
       - "NOTICE"
-      - "MFA*.png"
+      - "*.png"
       - ".github/dependabot.yml"
       - ".github/workflows/maven.yml"
 
