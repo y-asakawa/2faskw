@@ -59,12 +59,12 @@ done
 [[ -d "$PACKAGE_DIR/bin" ]] || { echo "ERROR: package bin directory not found: $PACKAGE_DIR/bin" >&2; exit 1; }
 [[ -d "$PACKAGE_DIR/lib" ]] || { echo "ERROR: package lib directory not found: $PACKAGE_DIR/lib" >&2; exit 1; }
 [[ -f "$PACKAGE_DIR/bin/graphicalmatrix-db.sh" ]] || { echo "ERROR: graphicalmatrix-db.sh not found in package" >&2; exit 1; }
-if ! ls "$PACKAGE_DIR"/lib/graphicalmatrix-idp-plugin-*.jar >/dev/null 2>&1; then
-  echo "ERROR: GraphicalMatrix admin jar not found: $PACKAGE_DIR/lib/graphicalmatrix-idp-plugin-*.jar" >&2
+if ! ls "$PACKAGE_DIR"/lib/2faskw-idp-plugin-*.jar >/dev/null 2>&1; then
+  echo "ERROR: 2FAS-KW admin jar not found: $PACKAGE_DIR/lib/2faskw-idp-plugin-*.jar" >&2
   exit 1
 fi
 
-echo "GraphicalMatrix admin CLI install plan:"
+echo "2FAS-KW admin CLI install plan:"
 echo "  package_dir: $PACKAGE_DIR"
 echo "  prefix:      $PREFIX"
 echo "  apply:       $APPLY"

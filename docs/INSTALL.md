@@ -1,6 +1,6 @@
 # Install Guide
 
-この文書は GraphicalMatrix MFA Plugin 配布物を Shibboleth IdP 5 へ導入する手順です。
+この文書は 2FAS-KW Plugin 配布物を Shibboleth IdP 5 へ導入する手順です。
 
 この配布物は内部配布用です。
 署名済み公式Shibboleth plugin packageとしての外部配布は未完成です。
@@ -34,8 +34,8 @@ test -f /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
 
 ```bash
 cd /tmp
-unzip graphicalmatrix-idp-plugin-1.0.1.zip
-cd graphicalmatrix-idp-plugin-1.0.1
+unzip 2faskw-idp-plugin-1.0.1.zip
+cd 2faskw-idp-plugin-1.0.1
 ```
 
 ## 3. 配布物の完全性確認
@@ -67,7 +67,7 @@ macOSなど `sha256sum` がない環境では `shasum -a 256` を利用してく
 ```bash
 ./bin/graphicalmatrix-plugin-check.sh \
   --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/graphicalmatrix-idp-plugin-1.0.1
+  --package-dir /tmp/2faskw-idp-plugin-1.0.1
 ```
 
 期待値:
@@ -83,7 +83,7 @@ TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARN
 ```bash
 ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/graphicalmatrix-idp-plugin-1.0.1
+  --package-dir /tmp/2faskw-idp-plugin-1.0.1
 ```
 
 確認すること:
@@ -98,14 +98,14 @@ TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARN
 ```bash
 sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/graphicalmatrix-idp-plugin-1.0.1 \
+  --package-dir /tmp/2faskw-idp-plugin-1.0.1 \
   --apply
 ```
 
 配置される主なJAR:
 
 ```text
-/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-1.0.1.jar
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.0.1.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/core-3.5.3.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-6.3.0.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-42.7.11.jar
@@ -319,14 +319,14 @@ examples/logrotate/graphicalmatrix-audit
 ## 15. Admin Tools単体インストール
 
 管理CLIだけをDBサーバまたは管理端末へ導入する場合は、
-`graphicalmatrix-admin-tools-1.0.1.zip` を利用する。
+`2faskw-admin-tools-1.0.1.zip` を利用する。
 
 この導入では、Shibboleth IdP、Jetty、`web.xml` は変更しない。
 
 ```bash
 cd /tmp
-unzip graphicalmatrix-admin-tools-1.0.1.zip
-cd graphicalmatrix-admin-tools-1.0.1
+unzip 2faskw-admin-tools-1.0.1.zip
+cd 2faskw-admin-tools-1.0.1
 ```
 
 dry-run:

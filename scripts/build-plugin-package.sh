@@ -12,7 +12,7 @@ PYTHON="${PYTHON:-python3}"
 VERSION="$("$MVN" -q -DforceStdout help:evaluate -Dexpression=project.version)"
 ARTIFACT_ID="$("$MVN" -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
 BASE_NAME="${ARTIFACT_ID}-${VERSION}"
-ADMIN_BASE_NAME="graphicalmatrix-admin-tools-${VERSION}"
+ADMIN_BASE_NAME="2faskw-admin-tools-${VERSION}"
 DIST_ROOT="$ROOT_DIR/target/plugin-dist"
 DIST_DIR="$DIST_ROOT/$BASE_NAME"
 ZIP_FILE="$DIST_ROOT/$BASE_NAME.zip"
@@ -184,9 +184,9 @@ cp docs/SECURITY.md "$ADMIN_DIST_DIR/docs/SECURITY.md"
 cp docs/SECURITY-CHECKLIST.md "$ADMIN_DIST_DIR/docs/SECURITY-CHECKLIST.md"
 
 cat > "$ADMIN_DIST_DIR/README.md" <<EOF
-# GraphicalMatrix Admin Tools ${VERSION}
+# 2FAS-KW Admin Tools ${VERSION}
 
-This package installs only the GraphicalMatrix management CLI.
+This package installs only the 2FAS-KW management CLI.
 It does not modify Shibboleth IdP web.xml, Jetty, or IdP plugin files.
 
 License and third-party notices are included in LICENSE, NOTICE, and

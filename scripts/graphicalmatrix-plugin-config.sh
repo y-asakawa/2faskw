@@ -11,7 +11,7 @@ usage() {
 Usage:
   graphicalmatrix-plugin-config.sh [--idp-home DIR] [--package-dir DIR] [--apply]
 
-Installs GraphicalMatrix plugin package files into a Shibboleth IdP overlay layout.
+Installs 2FAS-KW plugin package files into a Shibboleth IdP overlay layout.
 
 Default mode is dry-run. Pass --apply to change files.
 
@@ -132,8 +132,8 @@ echo "idp_home=$IDP_HOME"
 
 require_dir "$PACKAGE_DIR"
 require_dir "$IDP_HOME"
-if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-*.jar >/dev/null 2>&1; then
-  echo "ERROR: GraphicalMatrix plugin jar missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
+if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar >/dev/null 2>&1; then
+  echo "ERROR: 2FAS-KW plugin jar missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
   exit 1
 fi
 require_file "$PACKAGE_DIR/webapp/WEB-INF/lib/core-3.5.3.jar"

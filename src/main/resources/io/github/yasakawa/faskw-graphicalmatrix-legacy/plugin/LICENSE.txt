@@ -1,4 +1,4 @@
-GraphicalMatrix MFA for Shibboleth IdP is licensed under the Apache License,
+2FAS-KW for Shibboleth IdP is licensed under the Apache License,
 Version 2.0.
 
 Copyright 2026 Shinshu University

@@ -1,6 +1,6 @@
 # Security Checklist
 
-このチェックリストは、GraphicalMatrix MFA Plugin の導入前・導入後に確認する項目です。
+このチェックリストは、2FAS-KW Plugin の導入前・導入後に確認する項目です。
 
 環境ごとに必要な項目が異なるため、以下の区分で確認してください。
 

@@ -1,6 +1,6 @@
-# GraphicalMatrix MFA for Shibboleth IdP
+# 2FAS-KW for Shibboleth IdP
 
-GraphicalMatrix MFA is a Shibboleth IdP 5 plugin that adds an graphical-sequence
+2FAS-KW is a Shibboleth IdP 5 plugin that adds an GraphicalMatrix graphical-sequence
 second factor after password authentication. It can route users to one of
 three MFA methods based on database settings:
 
@@ -49,8 +49,8 @@ Build the plugin and admin-tool release ZIPs:
 Expected outputs:
 
 ```text
-target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.zip
-target/admin-dist/graphicalmatrix-admin-tools-1.0.1.zip
+target/plugin-dist/2faskw-idp-plugin-1.0.1.zip
+target/admin-dist/2faskw-admin-tools-1.0.1.zip
 ```
 
 The release ZIPs include `LICENSE`, `NOTICE`, and
@@ -86,7 +86,7 @@ such as `aes-gcm` or `keyword` for TOTP seeds.
 
 ## License
 
-GraphicalMatrix MFA for Shibboleth IdP is licensed under the Apache License,
+2FAS-KW for Shibboleth IdP is licensed under the Apache License,
 Version 2.0. See `LICENSE`.
 
 Third-party license and attribution details are listed in
@@ -103,7 +103,7 @@ contact before public release.
 ## Screenshots
 
 <p>
-  <img src="MFA01.png" alt="GraphicalMatrix MFA screenshot 1" width="32%">
-  <img src="MFA02.png" alt="GraphicalMatrix MFA screenshot 2" width="32%">
-  <img src="MFA03.png" alt="GraphicalMatrix MFA screenshot 3" width="32%">
+  <img src="MFA01.png" alt="2FAS-KW screenshot 1" width="32%">
+  <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="32%">
+  <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="32%">
 </p>

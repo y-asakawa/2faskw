@@ -1,11 +1,11 @@
 # Third-Party Notices
 
-This file lists third-party components used by GraphicalMatrix MFA for
+This file lists third-party components used by 2FAS-KW for
 Shibboleth IdP. It is provided for attribution and license compliance.
 
 ## Project License
 
-GraphicalMatrix MFA for Shibboleth IdP is licensed under the Apache License,
+2FAS-KW for Shibboleth IdP is licensed under the Apache License,
 Version 2.0. See `LICENSE`.
 
 ## Runtime Libraries Bundled in the Release ZIP
@@ -19,7 +19,7 @@ Version 2.0. See `LICENSE`.
 ## Provided by the Shibboleth IdP Runtime
 
 These dependencies are declared with Maven `provided` scope and are not
-bundled in the GraphicalMatrix plugin ZIP:
+bundled in the 2FAS-KW plugin ZIP:
 
 | Component | Version Used for Compile | License |
 | --- | --- | --- |
@@ -42,5 +42,5 @@ bundled in the GraphicalMatrix plugin ZIP:
 ## Graphical and Template Assets
 
 The SVG graphical tiles, HTML templates, CSS, shell scripts, and documentation
-in this repository are part of GraphicalMatrix MFA for Shibboleth IdP unless
+in this repository are part of 2FAS-KW for Shibboleth IdP unless
 otherwise noted, and are licensed under the project license.

@@ -2,7 +2,7 @@
 
 ## 目的
 
-GraphicalMatrix MFA Pluginを、Shibboleth IdPのplugin installerで扱いやすい
+2FAS-KW Pluginを、Shibboleth IdPのplugin installerで扱いやすい
 署名済みplugin packageとして配布できるようにする。
 
 ここでいう「署名済み公式plugin package」には2段階ある。
@@ -31,10 +31,10 @@ Shibboleth IdP plugin packageは、少なくとも以下を満たす必要があ
 - 配布packageにdetached signatureを付ける
 - plugin installerで署名鍵のfingerprintを検証できるようにする
 
-現在のGraphicalMatrix pluginは、以下までは実装済み。
+現在の2FAS-KW pluginは、以下までは実装済み。
 
 ```text
-webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-1.0.1.jar
+webapp/WEB-INF/lib/2faskw-idp-plugin-1.0.1.jar
 META-INF/services/net.shibboleth.idp.plugin.IdPPlugin
 PropertyDrivenIdPPlugin実装
 bootstrap/plugin.properties
@@ -76,26 +76,26 @@ remote_graphicalmatrix_src/release/
 ## 署名鍵
 
 リリース用GPG鍵を作る。
-個人の日常鍵ではなく、GraphicalMatrix plugin release専用鍵にする。
+個人の日常鍵ではなく、2FAS-KW plugin release専用鍵にする。
 
 例:
 
 ```bash
 gpg --quick-generate-key \
-  "GraphicalMatrix MFA Plugin Release <graphicalmatrix-release@example.ac.jp>" \
+  "2FAS-KW Plugin Release <2faskw-release@example.ac.jp>" \
   rsa4096 sign 3y
 ```
 
 fingerprint確認:
 
 ```bash
-gpg --list-keys --fingerprint "GraphicalMatrix MFA Plugin Release"
+gpg --list-keys --fingerprint "2FAS-KW Plugin Release"
 ```
 
 公開鍵export:
 
 ```bash
-gpg --armor --export "GraphicalMatrix MFA Plugin Release" \
+gpg --armor --export "2FAS-KW Plugin Release" \
   > bootstrap/keys.txt
 ```
 
@@ -121,10 +121,10 @@ release/keys/RELEASE-KEY-FINGERPRINT.txt
 公式互換配布では、以下を生成する方針にする。
 
 ```text
-graphicalmatrix-idp-plugin-1.0.1.tar.gz
-graphicalmatrix-idp-plugin-1.0.1.tar.gz.asc
-graphicalmatrix-idp-plugin-1.0.1.zip
-graphicalmatrix-idp-plugin-1.0.1.zip.asc
+2faskw-idp-plugin-1.0.1.tar.gz
+2faskw-idp-plugin-1.0.1.tar.gz.asc
+2faskw-idp-plugin-1.0.1.zip
+2faskw-idp-plugin-1.0.1.zip.asc
 SHA256SUMS
 SHA256SUMS.asc
 ```
@@ -132,7 +132,7 @@ SHA256SUMS.asc
 `plugin.sh` の自動取得で利用する標準は `tar.gz + tar.gz.asc` を優先する。
 zipは手動検証/内部配布用として残す。
 
-packageの中身は現在の `graphicalmatrix-idp-plugin-1.0.1/` と同じ構造にする。
+packageの中身は現在の `2faskw-idp-plugin-1.0.1/` と同じ構造にする。
 
 ## detached signature
 
@@ -140,22 +140,22 @@ tar.gz署名:
 
 ```bash
 gpg --armor --detach-sign \
-  target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.tar.gz
+  target/plugin-dist/2faskw-idp-plugin-1.0.1.tar.gz
 ```
 
 zip署名:
 
 ```bash
 gpg --armor --detach-sign \
-  target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.zip
+  target/plugin-dist/2faskw-idp-plugin-1.0.1.zip
 ```
 
 checksum:
 
 ```bash
 sha256sum \
-  target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.tar.gz \
-  target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.zip \
+  target/plugin-dist/2faskw-idp-plugin-1.0.1.tar.gz \
+  target/plugin-dist/2faskw-idp-plugin-1.0.1.zip \
   > target/plugin-dist/SHA256SUMS
 
 gpg --armor --detach-sign target/plugin-dist/SHA256SUMS
@@ -164,8 +164,8 @@ gpg --armor --detach-sign target/plugin-dist/SHA256SUMS
 検証:
 
 ```bash
-gpg --verify graphicalmatrix-idp-plugin-1.0.1.tar.gz.asc \
-  graphicalmatrix-idp-plugin-1.0.1.tar.gz
+gpg --verify 2faskw-idp-plugin-1.0.1.tar.gz.asc \
+  2faskw-idp-plugin-1.0.1.tar.gz
 
 sha256sum -c SHA256SUMS
 ```
@@ -177,8 +177,8 @@ sha256sum -c SHA256SUMS
 ```properties
 io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.versions = 1.0.1
 
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.downloadURL.1.0.1 = https://example.jp/shibboleth/plugins/graphicalmatrix/1.0.1/
-io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.baseName.1.0.1 = graphicalmatrix-idp-plugin-1.0.1
+io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.downloadURL.1.0.1 = https://example.jp/shibboleth/plugins/2faskw/1.0.1/
+io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.baseName.1.0.1 = 2faskw-idp-plugin-1.0.1
 io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.idpVersionMin.1.0.1 = 5.2.0
 io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.idpVersionMax.1.0.1 = 6.0.0
 io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.supportLevel.1.0.1 = Current
@@ -202,7 +202,7 @@ plugin.id = io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix
 plugin.version = 1.0.1
 plugin.license = /jp/ac/example/graphicalmatrix/plugin/LICENSE.txt
 plugin.modules.required = idp.authn.Password,idp.authn.MFA
-plugin.url.0 = https://example.jp/shibboleth/plugins/graphicalmatrix/plugin.properties
+plugin.url.0 = https://example.jp/shibboleth/plugins/2faskw/plugin.properties
 ```
 
 確認すること:
@@ -217,11 +217,11 @@ plugin.url.0 = https://example.jp/shibboleth/plugins/graphicalmatrix/plugin.prop
 例:
 
 ```text
-https://example.jp/shibboleth/plugins/graphicalmatrix/plugin.properties
-https://example.jp/shibboleth/plugins/graphicalmatrix/1.0.1/graphicalmatrix-idp-plugin-1.0.1.tar.gz
-https://example.jp/shibboleth/plugins/graphicalmatrix/1.0.1/graphicalmatrix-idp-plugin-1.0.1.tar.gz.asc
-https://example.jp/shibboleth/plugins/graphicalmatrix/1.0.1/SHA256SUMS
-https://example.jp/shibboleth/plugins/graphicalmatrix/1.0.1/SHA256SUMS.asc
+https://example.jp/shibboleth/plugins/2faskw/plugin.properties
+https://example.jp/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz
+https://example.jp/shibboleth/plugins/2faskw/1.0.1/2faskw-idp-plugin-1.0.1.tar.gz.asc
+https://example.jp/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS
+https://example.jp/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS.asc
 ```
 
 公開サーバ要件:
@@ -245,16 +245,16 @@ scripts/build-plugin-package.sh
 
 # tar.gz生成
 tar -C target/plugin-dist \
-  -czf target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.tar.gz \
-  graphicalmatrix-idp-plugin-1.0.1
+  -czf target/plugin-dist/2faskw-idp-plugin-1.0.1.tar.gz \
+  2faskw-idp-plugin-1.0.1
 
 # signature生成
-gpg --armor --detach-sign target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.tar.gz
-gpg --armor --detach-sign target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.zip
+gpg --armor --detach-sign target/plugin-dist/2faskw-idp-plugin-1.0.1.tar.gz
+gpg --armor --detach-sign target/plugin-dist/2faskw-idp-plugin-1.0.1.zip
 
 # checksum生成
-sha256sum target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.tar.gz \
-          target/plugin-dist/graphicalmatrix-idp-plugin-1.0.1.zip \
+sha256sum target/plugin-dist/2faskw-idp-plugin-1.0.1.tar.gz \
+          target/plugin-dist/2faskw-idp-plugin-1.0.1.zip \
   > target/plugin-dist/SHA256SUMS
 gpg --armor --detach-sign target/plugin-dist/SHA256SUMS
 ```
@@ -265,14 +265,14 @@ IdP検証環境で行う。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/plugin.sh \
-  -i /tmp/graphicalmatrix-idp-plugin-1.0.1.tar.gz
+  -i /tmp/2faskw-idp-plugin-1.0.1.tar.gz
 ```
 
 ローカルファイルで試験する場合も、同じディレクトリに `.asc` を置く。
 
 ```text
-/tmp/graphicalmatrix-idp-plugin-1.0.1.tar.gz
-/tmp/graphicalmatrix-idp-plugin-1.0.1.tar.gz.asc
+/tmp/2faskw-idp-plugin-1.0.1.tar.gz
+/tmp/2faskw-idp-plugin-1.0.1.tar.gz.asc
 ```
 
 初回は署名鍵のaccept確認が出る。

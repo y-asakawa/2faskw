@@ -12,7 +12,7 @@ usage() {
 Usage:
   graphicalmatrix-plugin-uninstall.sh [--idp-home DIR] [--apply] [--remove-config] [--remove-runtime-deps]
 
-Removes GraphicalMatrix plugin overlay files from a Shibboleth IdP layout.
+Removes 2FAS-KW plugin overlay files from a Shibboleth IdP layout.
 
 Default mode is dry-run. Pass --apply to change files.
 
@@ -95,10 +95,14 @@ echo "mode=$([[ "$APPLY" -eq 1 ]] && echo apply || echo dry-run)"
 echo "idp_home=$IDP_HOME"
 
 if [[ "$APPLY" -eq 1 ]]; then
+  for jar in "$IDP_HOME"/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar; do
+    [[ -e "$jar" ]] && remove_file "$jar"
+  done
   for jar in "$IDP_HOME"/edit-webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-*.jar; do
     [[ -e "$jar" ]] && remove_file "$jar"
   done
 else
+  run_sudo rm -f "$IDP_HOME/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar"
   run_sudo rm -f "$IDP_HOME/edit-webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-*.jar"
 fi
 

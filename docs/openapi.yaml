@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: GraphicalMatrix MFA Admin API
+  title: 2FAS-KW Admin API
   version: 1.0.1
   description: |
-    GraphicalMatrix MFA Plugin management API for Shibboleth IdP.
+    2FAS-KW Plugin management API for Shibboleth IdP.
 
     This API is intended for trusted provisioning and account management tools.
     The API is disabled by default in plugin distributions. Enable it only with

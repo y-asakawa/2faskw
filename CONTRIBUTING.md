@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for considering a contribution to GraphicalMatrix MFA for Shibboleth IdP.
+Thank you for considering a contribution to 2FAS-KW for Shibboleth IdP.
 
 ## License
 

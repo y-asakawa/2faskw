@@ -524,7 +524,10 @@ sequence_tool_classpath() {
   )
   for lib_dir in "${candidates[@]}"; do
     [[ -d "$lib_dir" ]] || continue
-    plugin_jar="$(ls "$lib_dir"/graphicalmatrix-idp-plugin-*.jar 2>/dev/null | head -n 1 || true)"
+    plugin_jar="$(ls "$lib_dir"/2faskw-idp-plugin-*.jar 2>/dev/null | head -n 1 || true)"
+    if [[ -z "$plugin_jar" ]]; then
+      plugin_jar="$(ls "$lib_dir"/graphicalmatrix-idp-plugin-*.jar 2>/dev/null | head -n 1 || true)"
+    fi
     if [[ -z "$plugin_jar" ]]; then
       plugin_jar="$(ls "$lib_dir"/graphicalmatrix-*.jar 2>/dev/null | head -n 1 || true)"
     fi
@@ -535,7 +538,7 @@ sequence_tool_classpath() {
       return
     fi
   done
-  die "GraphicalMatrix plugin jar not found; install the admin lib directory or set SEQUENCE_TOOL_CP"
+  die "2FAS-KW plugin jar not found; install the admin lib directory or set SEQUENCE_TOOL_CP"
 }
 
 sequence_storage_encode() {

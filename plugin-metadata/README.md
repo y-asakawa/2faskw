@@ -1,6 +1,6 @@
 # Plugin Metadata
 
-This directory contains metadata for the GraphicalMatrix MFA plugin package.
+This directory contains metadata for the 2FAS-KW plugin package.
 
 Files generated in the distribution package:
 
@@ -10,7 +10,7 @@ Files generated in the distribution package:
 
 `graphicalmatrix-plugin.properties` is compatibility/distribution metadata.
 The current package version is `1.0.1`.
-The build also produces `graphicalmatrix-admin-tools-1.0.1.zip` for standalone CLI installation.
+The build also produces `2faskw-admin-tools-1.0.1.zip` for standalone CLI installation.
 
 Before external distribution:
 

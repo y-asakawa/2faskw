@@ -1,6 +1,6 @@
 # Security Guide
 
-この文書は GraphicalMatrix MFA Plugin を Shibboleth IdP へ導入する際のセキュリティ運用指針です。
+この文書は 2FAS-KW Plugin を Shibboleth IdP へ導入する際のセキュリティ運用指針です。
 
 本PluginはPoC段階の実装を含みます。本番環境へ導入する場合は、ここに記載した項目を導入前チェックリストとして確認してください。
 

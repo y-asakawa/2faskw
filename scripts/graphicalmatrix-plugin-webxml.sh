@@ -56,10 +56,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 WEB_XML="$IDP_HOME/edit-webapp/WEB-INF/web.xml"
-BEGIN_MARK="<!-- BEGIN GraphicalMatrix MFA Plugin servlet mappings -->"
-END_MARK="<!-- END GraphicalMatrix MFA Plugin servlet mappings -->"
-BEGIN_SECURITY_MARK="<!-- BEGIN GraphicalMatrix MFA Plugin security constraints -->"
-END_SECURITY_MARK="<!-- END GraphicalMatrix MFA Plugin security constraints -->"
+BEGIN_MARK="<!-- BEGIN 2FAS-KW Plugin servlet mappings -->"
+END_MARK="<!-- END 2FAS-KW Plugin servlet mappings -->"
+BEGIN_SECURITY_MARK="<!-- BEGIN 2FAS-KW Plugin security constraints -->"
+END_SECURITY_MARK="<!-- END 2FAS-KW Plugin security constraints -->"
 
 require_file() {
   local file="$1"
@@ -84,7 +84,7 @@ run_sudo() {
 
 make_servlet_block() {
   cat <<'EOF'
-    <!-- BEGIN GraphicalMatrix MFA Plugin servlet mappings -->
+    <!-- BEGIN 2FAS-KW Plugin servlet mappings -->
     <!-- GraphicalMatrix External authentication and management API endpoints. -->
     <listener>
         <listener-class>io.github.yasakawa.faskw.graphicalmatrix.GraphicalMatrixDataSourceListener</listener-class>
@@ -143,23 +143,23 @@ make_servlet_block() {
         <servlet-name>GraphicalMatrixAdminApi</servlet-name>
         <url-pattern>/graphicalmatrix-admin/api/v1/*</url-pattern>
     </servlet-mapping>
-    <!-- END GraphicalMatrix MFA Plugin servlet mappings -->
+    <!-- END 2FAS-KW Plugin servlet mappings -->
 
 EOF
 }
 
 make_security_block() {
   cat <<'EOF'
-    <!-- BEGIN GraphicalMatrix MFA Plugin security constraints -->
+    <!-- BEGIN 2FAS-KW Plugin security constraints -->
     <!-- Allow any HTTP methods to the GraphicalMatrix management API. -->
     <security-constraint>
         <web-resource-collection>
-            <web-resource-name>GraphicalMatrix Administrative API</web-resource-name>
+            <web-resource-name>2FAS-KW Administrative API</web-resource-name>
             <url-pattern>/graphicalmatrix-admin/api/*</url-pattern>
         </web-resource-collection>
         <!-- no auth-constraint tag here -->
     </security-constraint>
-    <!-- END GraphicalMatrix MFA Plugin security constraints -->
+    <!-- END 2FAS-KW Plugin security constraints -->
 
 EOF
 }

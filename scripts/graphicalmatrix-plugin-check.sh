@@ -9,7 +9,7 @@ usage() {
 Usage:
   graphicalmatrix-plugin-check.sh [--idp-home DIR] [--package-dir DIR]
 
-Checks the GraphicalMatrix plugin package and the target Shibboleth IdP layout.
+Checks the 2FAS-KW plugin package and the target Shibboleth IdP layout.
 EOF
 }
 
@@ -81,10 +81,10 @@ echo "package_dir=$PACKAGE_DIR"
 echo "idp_home=$IDP_HOME"
 
 need_dir "$PACKAGE_DIR"
-if ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-*.jar >/dev/null 2>&1; then
-  ok "GraphicalMatrix plugin jar exists"
+if ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar >/dev/null 2>&1; then
+  ok "2FAS-KW plugin jar exists"
 else
-  fail "GraphicalMatrix plugin jar missing: $PACKAGE_DIR/webapp/WEB-INF/lib/graphicalmatrix-idp-plugin-*.jar"
+  fail "2FAS-KW plugin jar missing: $PACKAGE_DIR/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar"
 fi
 need_file "$PACKAGE_DIR/webapp/WEB-INF/lib/core-3.5.3.jar"
 if ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/postgresql-*.jar >/dev/null 2>&1; then
@@ -129,7 +129,7 @@ fi
 
 if [[ -f "$PACKAGE_DIR/plugin-metadata/graphicalmatrix-plugin.properties" ]]; then
   package_base="$(basename "$PACKAGE_DIR")"
-  package_version="${package_base#graphicalmatrix-idp-plugin-}"
+  package_version="${package_base#2faskw-idp-plugin-}"
   if [[ -n "$package_version" && "$package_version" != "$package_base" ]] \
       && grep -q "io.github.yasakawa.faskw.idp.plugin.authn.graphicalmatrix.versions[[:space:]]*=[[:space:]]*$package_version" \
       "$PACKAGE_DIR/plugin-metadata/graphicalmatrix-plugin.properties"; then

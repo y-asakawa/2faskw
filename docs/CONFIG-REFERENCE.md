@@ -1,6 +1,6 @@
 # GraphicalMatrix Configuration Reference
 
-この文書は、GraphicalMatrix MFA Plugin / Admin Tools で利用する
+この文書は、2FAS-KW Plugin / Admin Tools で利用する
 `*.properties` の設定項目リファレンスである。
 
 設定例だけでなく、各項目の意味、型、既定値または例、運用上の注意をまとめる。
@@ -218,7 +218,7 @@ test01.lockedUntil=0
 
 ```text
 yes:
-  GraphicalMatrix Plugin/Admin Tools配布ZIPに含まれる
+  2FAS-KW Plugin/Admin Tools配布ZIPに含まれる
 
 no:
   OS、Shibboleth IdP、DB、運用環境側で別途用意する
@@ -228,7 +228,7 @@ no:
 
 | Component | Version | Included | Required | Purpose | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `graphicalmatrix-idp-plugin` | `1.0.1` | yes | yes | GraphicalMatrix MFA本体、Servlet、DB処理、Admin Tools用Java処理。 | このプロジェクトの成果物。 |
+| `2faskw-idp-plugin` | `1.0.1` | yes | yes | 2FAS-KW本体、Servlet、DB処理、Admin Tools用Java処理。 | このプロジェクトの成果物。 |
 | HikariCP | `6.3.0` | yes | DB pool利用時 | JDBC connection pool。 | `db.properties` の `graphicalmatrix.db.pool.*` で制御する。 |
 | PostgreSQL JDBC Driver | `42.7.11` | yes | PostgreSQL利用時 | PostgreSQLへJDBC接続する。 | TLS接続、client certificate接続にも利用する。 |
 | ZXing core | `3.5.3` | yes | TOTP QR生成時 | TOTP登録画面のQRコード生成。 | TOTPを使わない場合も配布物には含まれる。 |
