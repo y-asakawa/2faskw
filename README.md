@@ -42,7 +42,6 @@ deployments should use PostgreSQL and protected sequence/TOTP seed storage.
 - Security checklist: `docs/SECURITY-CHECKLIST.md`
 - Admin tools: `docs/ADMIN-TOOLS.md`
 - Configuration reference: `docs/CONFIG-REFERENCE.md`
-- Signed plugin package notes: `docs/SIGNED-PLUGIN-PACKAGE.md`
 - Publishing checklist: `PUBLISHING-CHECKLIST.md`
 
 ## Security Defaults

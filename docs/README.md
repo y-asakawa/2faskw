@@ -28,12 +28,6 @@ graphicalmatrix.api.enabled = false
 
 APIを利用する場合は、Bearer token、接続元IP制限、HTTPS、Firewall/LB制限を確認した後に有効化してください。
 
-署名済みplugin packageとして配布する将来手順は、以下にまとめています。
-
-```text
-docs/SIGNED-PLUGIN-PACKAGE.md
-```
-
 ## ファイル構成と必須アプリ
 
 ### 配布物構成
@@ -110,7 +104,6 @@ docs/SIGNED-PLUGIN-PACKAGE.md
     CSV-EXPORT.md
     DB-MIGRATION.md
     SEQUENCE-STORAGE-MIGRATION.md
-    SIGNED-PLUGIN-PACKAGE.md
     LOGROTATE.md
     INSTALL_LOADTEST.md
     openapi.yaml
