@@ -1,3 +1,5 @@
+<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="30%">
+
 # 2FAS-KW GraphicalMatrix MFA for Shibboleth IdP plugin
 
 About 2FAS-KW GraphicalMatrix MFA Referred to as 2FAS-KW.
