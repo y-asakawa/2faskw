@@ -4,8 +4,24 @@ on:
   workflow_dispatch:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "docs/**"
+      - "LICENSE"
+      - "NOTICE"
+      - "MFA*.png"
+      - ".github/dependabot.yml"
   pull_request:
     branches: ["main"]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "docs/**"
+      - "LICENSE"
+      - "NOTICE"
+      - "MFA*.png"
+      - ".github/dependabot.yml"
 
 jobs:
   build:
