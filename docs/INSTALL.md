@@ -521,12 +521,12 @@ docs/CONFIG-REFERENCE.md
 
 導入時の選択肢:
 
-| 用途 | PoC / 検証 | 本番推奨 | 変更時の注意 |
-| --- | --- | --- | --- |
-| DB | H2またはPostgreSQL | PostgreSQL | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う |
-| GraphicalMatrix sequence | `plaintext` | `hash` | `hash` は復号不可。後戻りには再登録が必要 |
-| TOTP seed | `auto` / `plaintext` | `aes-gcm` | TOTP seedは認証時に復号が必要なため `hash` は使えない |
-| WebAuthn credential | plugin既定またはStorageService | JDBC StorageService | 詳細はWebAuthn / StorageService設定に従う |
+| 用途 |  推奨 | 変更時の注意 |
+| --- | --- | --- |
+| DB | PostgreSQL | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う |
+| GraphicalMatrix sequence | `hash` | `auto` は `hash` として扱う。`hash` は復号不可。後戻りには再登録が必要 |
+| TOTP seed | `aes-gcm` | TOTP seedは認証時に復号が必要なため `hash` は使えない |
+| WebAuthn credential | JDBC StorageService | 詳細はWebAuthn / StorageService設定に従う |
 
 編集対象ファイル:
 
@@ -552,7 +552,7 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 ```properties
 graphicalmatrix.productionMode = true
 
-graphicalmatrix.sequence.storage = hash
+graphicalmatrix.sequence.storage = auto
 graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
 
 graphicalmatrix.totp.seed.storage = aes-gcm
@@ -1222,10 +1222,10 @@ graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
 graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
 
-graphicalmatrix.sequence.storage = plaintext
+graphicalmatrix.sequence.storage = auto
 # graphicalmatrix.sequence.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
 # graphicalmatrix.sequence.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key
-# graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
+graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
 
 graphicalmatrix.productionMode = false
 graphicalmatrix.totp.seed.storage = auto
@@ -1254,6 +1254,9 @@ graphicalmatrix.view.css.cacheSeconds = 0
 Sequence保存方式:
 
 ```properties
+graphicalmatrix.sequence.storage = auto
+graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
+
 graphicalmatrix.sequence.storage = keyword
 graphicalmatrix.sequence.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
 
@@ -1271,7 +1274,7 @@ graphicalmatrix.totp.seed.storage = aes-gcm
 graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
 ```
 
-本番推奨は `sequence.storage = hash`、`totp.seed.storage = aes-gcm`、
+本番推奨は `sequence.storage = auto` または `hash`、`totp.seed.storage = aes-gcm`、
 `graphicalmatrix.productionMode = true` です。
 
 ### db.properties

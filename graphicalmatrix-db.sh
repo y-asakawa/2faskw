@@ -481,10 +481,11 @@ normalize_force_value() {
 
 sequence_storage_mode() {
   local mode
-  mode="$(config_prop 'graphicalmatrix.sequence.storage' 'plaintext')"
+  mode="$(config_prop 'graphicalmatrix.sequence.storage' 'auto')"
   mode="$(printf "%s" "$mode" | tr '[:upper:]' '[:lower:]')"
   case "$mode" in
-    ""|plain|plaintext) printf "plaintext" ;;
+    ""|auto) printf "hash" ;;
+    plain|plaintext) printf "plaintext" ;;
     keyword|common-keyword|common_keyword) printf "keyword" ;;
     aes|aes-gcm|aes_gcm) printf "aes-gcm" ;;
     hash|hash-salt-pepper|hash_salt_pepper) printf "hash" ;;

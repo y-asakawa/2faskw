@@ -154,7 +154,7 @@ sequenceはDBの `sequence` カラムに保存します。
 
 推奨順:
 
-1. hash + salt + pepper
+1. auto / hash + salt + pepper
 2. AES-GCM暗号化
 3. 共通キーワード暗号化
 4. plaintext
@@ -165,6 +165,10 @@ sequenceはDBの `sequence` カラムに保存します。
 設定例:
 
 ```properties
+# デフォルト。本番推奨。autoはhash + salt + pepperとして扱う。
+graphicalmatrix.sequence.storage = auto
+graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
+
 # PoC / 後方互換
 graphicalmatrix.sequence.storage = plaintext
 
@@ -278,14 +282,14 @@ graphicalmatrix.totp.seed.storage = auto
 ```properties
 graphicalmatrix.productionMode = true
 
-graphicalmatrix.sequence.storage = hash
+graphicalmatrix.sequence.storage = auto
 graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
 
 graphicalmatrix.totp.seed.storage = aes-gcm
 graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
 ```
 
-`sequence.storage = hash` かつ `totp.seed.storage = auto` の組み合わせは設定不備として扱います。
+`sequence.storage = auto` または `hash` かつ `totp.seed.storage = auto` の組み合わせは設定不備として扱います。
 TOTP seedは復号必須のため、この場合は `aes-gcm` または `keyword` を明示してください。
 
 既存の平文TOTP seedを暗号化へ移行する場合:

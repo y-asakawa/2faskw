@@ -96,7 +96,7 @@ check_sequence_storage() {
   bool_true "$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.productionMode' 'true')" || return 0
   bool_true "$(prop "$ADMIN_PROPERTIES" 'graphicalmatrix.admin.rejectPlaintextSequence' 'true')" || return 0
   local mode
-  mode="$(prop "$GRAPHICAL_PROPERTIES" 'graphicalmatrix.sequence.storage' 'plaintext')"
+  mode="$(prop "$GRAPHICAL_PROPERTIES" 'graphicalmatrix.sequence.storage' 'auto')"
   case "$(printf "%s" "$mode" | tr '[:upper:]' '[:lower:]' | trim)" in
     plaintext|plain|'')
       fail "plaintext sequence storage is rejected in Admin Tools production mode"

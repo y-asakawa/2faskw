@@ -17,11 +17,14 @@
 移行先は現在の `conf/graphicalmatrix/graphicalmatrix.properties` の値で決まります。
 
 ```properties
+graphicalmatrix.sequence.storage = auto
 graphicalmatrix.sequence.storage = plaintext
 graphicalmatrix.sequence.storage = keyword
 graphicalmatrix.sequence.storage = aes-gcm
 graphicalmatrix.sequence.storage = hash
 ```
+
+`auto` は `hash` として扱います。
 
 ## 対応できない移行
 

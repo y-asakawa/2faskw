@@ -58,7 +58,7 @@ public final class GraphicalMatrixTotpSeedStorage {
         }
 
         final String configuredMode = normalizeMode(property(props, "graphicalmatrix.totp.seed.storage", "auto"));
-        final String sequenceMode = normalizeSequenceMode(property(props, "graphicalmatrix.sequence.storage", "plaintext"));
+        final String sequenceMode = normalizeSequenceMode(property(props, "graphicalmatrix.sequence.storage", "auto"));
         final String mode = resolveMode(configuredMode, sequenceMode);
         final boolean productionMode = booleanProperty(props, "graphicalmatrix.productionMode", false);
         final String keyword = firstSecret(props,
@@ -225,7 +225,10 @@ public final class GraphicalMatrixTotpSeedStorage {
 
     private static String normalizeSequenceMode(final String mode) {
         final String value = trim(mode).toLowerCase(Locale.ROOT);
-        if (value.isEmpty() || "plain".equals(value) || "plaintext".equals(value)) {
+        if (value.isEmpty() || "auto".equals(value)) {
+            return "hash";
+        }
+        if ("plain".equals(value) || "plaintext".equals(value)) {
             return "plaintext";
         }
         if ("keyword".equals(value) || "common-keyword".equals(value) || "common_keyword".equals(value)) {

@@ -60,7 +60,7 @@ public final class GraphicalMatrixSequenceStorage {
             }
         }
 
-        final String rawMode = property(props, "graphicalmatrix.sequence.storage", "plaintext");
+        final String rawMode = property(props, "graphicalmatrix.sequence.storage", "auto");
         final String mode = normalizeMode(rawMode);
         final String keyword = secret(props, "graphicalmatrix.sequence.keyword",
             "graphicalmatrix.sequence.keywordFile");
@@ -254,7 +254,10 @@ public final class GraphicalMatrixSequenceStorage {
 
     private static String normalizeMode(final String mode) {
         final String value = mode != null ? mode.trim().toLowerCase(Locale.ROOT) : "";
-        if (value.isEmpty() || "plain".equals(value) || "plaintext".equals(value)) {
+        if (value.isEmpty() || "auto".equals(value)) {
+            return "hash";
+        }
+        if ("plain".equals(value) || "plaintext".equals(value)) {
             return "plaintext";
         }
         if ("keyword".equals(value) || "common-keyword".equals(value) || "common_keyword".equals(value)) {
