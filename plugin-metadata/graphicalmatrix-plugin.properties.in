@@ -1,0 +1,26 @@
+# 2FAS-KW plugin compatibility metadata.
+#
+# This metadata is generated from version.ini by scripts/build-plugin-package.sh.
+# Before public external distribution:
+# - set DOWNLOAD_BASE_URL in version.ini to the production HTTPS URL
+# - replace bootstrap/keys.txt with real signing key material
+# - publish ZIP/TAR signatures and checksums next to the packages
+
+@PLUGIN_ID@.id = @PLUGIN_ID@
+@PLUGIN_ID@.name = @PLUGIN_NAME@
+@PLUGIN_ID@.description = 2FAS-KW GraphicalMatrix external authentication flow, self-service change screens, management CLI, optional management API, TOTP/WebAuthn routing support.
+@PLUGIN_ID@.supportLevel = @SUPPORT_LEVEL@
+@PLUGIN_ID@.versions = @VERSION@
+
+@PLUGIN_ID@.downloadURL.@VERSION@ = @DOWNLOAD_URL@
+@PLUGIN_ID@.baseName.@VERSION@ = @BASE_NAME@
+@PLUGIN_ID@.adminToolsBaseName.@VERSION@ = @ADMIN_BASE_NAME@
+@PLUGIN_ID@.idpVersionMin.@VERSION@ = @IDP_VERSION_MIN@
+@PLUGIN_ID@.idpVersionMax.@VERSION@ = @IDP_VERSION_MAX@
+@PLUGIN_ID@.javaVersionMin.@VERSION@ = @JAVA_VERSION_MIN@
+@PLUGIN_ID@.jettyVersionMin.@VERSION@ = @JETTY_VERSION_MIN@
+@PLUGIN_ID@.requiredModules.@VERSION@ = @REQUIRED_MODULES@
+@PLUGIN_ID@.optionalPlugins.@VERSION@ = @OPTIONAL_PLUGINS@
+@PLUGIN_ID@.runtimeLibraries.@VERSION@ = @RUNTIME_LIBRARIES@
+@PLUGIN_ID@.apiDefault.@VERSION@ = @API_DEFAULT@
+@PLUGIN_ID@.databaseDefault.@VERSION@ = @DATABASE_DEFAULT@

@@ -24,6 +24,13 @@ API連携を行う場合は、[openapi.yaml](./openapi.yaml)、
 [API-TOKEN-ROTATION.md](./API-TOKEN-ROTATION.md)、
 [API-CURL-TESTS.md](./API-CURL-TESTS.md) を参照してください。
 
+## バージョン管理
+
+配布物のバージョンはソース直下の `version.ini` を正とします。
+`scripts/build-plugin-package.sh` は `version.ini` を読み込み、Mavenの `revision`、
+plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョンを反映します。
+詳細は [build.md](./build.md) を参照してください。
+
 ## 導入・設定
 
 | File | Description |

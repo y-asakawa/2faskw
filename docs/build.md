@@ -2,6 +2,21 @@
 
 ## Build
 
+Release/package builds use `version.ini` as the authoritative version source.
+
+```ini
+VERSION=1.0.1
+ARTIFACT_ID=2faskw-idp-plugin
+ADMIN_ARTIFACT_ID=2faskw-admin-tools
+```
+
+`scripts/build-plugin-package.sh` reads `version.ini`, passes the version to
+Maven as `-Drevision`, and renders plugin metadata, OpenAPI, and packaged docs
+with the same version.
+
+For direct Maven builds, `pom.xml` includes a fallback `revision` value, but
+release artifacts should be built through `scripts/build-plugin-package.sh`.
+
 ```bash
 mvn -B -ntp clean package
 ```
@@ -25,8 +40,8 @@ they are produced and signed by the maintainer release process.
 Expected release output names:
 
 ```text
-target/plugin-dist/2faskw-idp-plugin-1.0.1.zip
-target/admin-dist/2faskw-admin-tools-1.0.1.zip
+target/plugin-dist/2faskw-idp-plugin-<VERSION>.zip
+target/admin-dist/2faskw-admin-tools-<VERSION>.zip
 ```
 
 Release ZIPs should include:

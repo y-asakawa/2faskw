@@ -228,7 +228,7 @@ no:
 
 | Component | Version | Included | Required | Purpose | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `2faskw-idp-plugin` | `1.0.1` | yes | yes | 2FAS-KW本体、Servlet、DB処理、Admin Tools用Java処理。 | このプロジェクトの成果物。 |
+| `2faskw-idp-plugin` | `@VERSION@` | yes | yes | 2FAS-KW本体、Servlet、DB処理、Admin Tools用Java処理。 | このプロジェクトの成果物。 |
 | HikariCP | `6.3.0` | yes | DB pool利用時 | JDBC connection pool。 | `db.properties` の `graphicalmatrix.db.pool.*` で制御する。 |
 | PostgreSQL JDBC Driver | `42.7.11` | yes | PostgreSQL利用時 | PostgreSQLへJDBC接続する。 | TLS接続、client certificate接続にも利用する。 |
 | ZXing core | `3.5.3` | yes | TOTP QR生成時 | TOTP登録画面のQRコード生成。 | TOTPを使わない場合も配布物には含まれる。 |
