@@ -5,7 +5,7 @@
 GraphicalMatrix MFAのエンドツーエンド試験用に、SimpleSAMLphp SPを
 `192.168.81.61`へ構築し、IdP `idp.example.com`へ登録した。
 
-DATE_REDACTED時点の現行設定は以下。
+現行設定は以下。
 
 ```text
 IdP:
@@ -64,15 +64,15 @@ firewalld services: cockpit dhcpv6-client http https ssh
 HTTPSエンドポイント。
 
 ```bash
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w 'root=%{http_code}\n' \
   https://sp.example.com/
 
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w 'metadata=%{http_code}\n' \
   https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -D - -o /dev/null \
   'https://sp.example.com/?login=1'
 ```
@@ -207,9 +207,9 @@ SP EntityID: https://sp.example.com/simplesaml/sp
 ローカル証明書ファイル。
 
 ```text
-SP_test/202606041921132faskwsp/2faskwsp.cert.pem
-SP_test/202606041921132faskwsp/2faskwsp.key
-SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem
+SP_test/<timestamp>2faskwsp/2faskwsp.cert.pem
+SP_test/<timestamp>2faskwsp/2faskwsp.key
+SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem
 ```
 
 ### 4.2 SPサーバへ証明書を転送
@@ -218,9 +218,9 @@ SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem
 
 ```bash
 scp -i ~/.ssh/id_ed25519 \
-  SP_test/202606041921132faskwsp/2faskwsp.cert.pem \
-  SP_test/202606041921132faskwsp/2faskwsp.key \
-  SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+  SP_test/<timestamp>2faskwsp/2faskwsp.cert.pem \
+  SP_test/<timestamp>2faskwsp/2faskwsp.key \
+  SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   user@192.168.81.61:/home/user/
 ```
 
@@ -321,7 +321,7 @@ sudo chown -R root:root /opt/simplesamlphp-2.5.2
 'technicalcontact_email' => 'root@sp.example.com',
 'secretsalt' => '<random string>',
 'trusted.url.regex' => true,
-'trusted.url.domains' => ['2faskwsp\.example-u\.ac\.jp'],
+'trusted.url.domains' => ['sp\.example\.com'],
 'session.cookie.secure' => true,
 'session.phpsession.cookiename' => 'SimpleSAML_2faskwsp',
 'store.type' => 'phpsession',
@@ -610,15 +610,15 @@ New metadata successfully loaded for '/opt/shibboleth-idp/metadata/2faskw_sp.xml
 SPサーバまたは作業端末から確認。
 
 ```bash
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w '%{http_code}\n' \
   https://sp.example.com/
 
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -o /dev/null -w '%{http_code}\n' \
   https://sp.example.com/simplesaml/module.php/saml/sp/metadata/2faskwsp
 
-curl --cacert SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
+curl --cacert SP_test/<timestamp>2faskwsp/iic_ca.ca.cert.pem \
   -D - -o /dev/null \
   'https://sp.example.com/?login=1'
 ```
@@ -671,12 +671,12 @@ IdPサーバ。
 ローカル証明書・作業ファイル。
 
 ```text
-SP_test/202606041921132faskwsp/
-SP_test/202606041713482faskw_sp/
+SP_test/<timestamp>2faskwsp/
+SP_test/<timestamp>2faskw_sp/
 ```
 
-`202606041713482faskw_sp`は旧名作業時の証明書・deployファイル。
-現行FQDNでは`202606041921132faskwsp`を使用する。
+`<timestamp>2faskw_sp`は旧名作業時の証明書・deployファイル。
+現行FQDNでは`<timestamp>2faskwsp`を使用する。
 
 ## 8. SP metadata更新が必要なケース
 
@@ -732,13 +732,13 @@ sudo systemctl restart httpd php-fpm
 SPサーバの初回導入前バックアップ。
 
 ```text
-/opt/backups/simplesamlphp-sp-20260604172109
+/opt/backups/simplesamlphp-sp-<timestamp>
 ```
 
 IdPサーバのSP metadata登録前バックアップ。
 
 ```text
-/opt/backups/2faskw-sp-metadata-20260604172937
+/opt/backups/2faskw-sp-metadata-<timestamp>
 ```
 
 IdPからSP metadataを除去する場合。
@@ -764,7 +764,7 @@ sudo systemctl restart jetty-idp.service
 
 ## 12. firewalld SSH接続元制限
 
-DATE_REDACTEDに、SPサーバ `192.168.81.61` のSSH接続元を
+SPサーバ `192.168.81.61` のSSH接続元を
 `192.168.81.0/24` のみに制限した。
 
 作業前の確認:

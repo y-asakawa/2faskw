@@ -520,7 +520,7 @@ detail
 例:
 
 ```text
-ts=DATE_REDACTEDT09:00:00Z event=ADMIN_CLI action=set-method target_user=test-user001 result=OK os_user=admin01 host=db-admin01 dry_run=false rows=1 detail=mfa_method=TOTP
+ts=<timestamp> event=ADMIN_CLI action=set-method target_user=test-user001 result=OK os_user=admin01 host=db-admin01 dry_run=false rows=1 detail=mfa_method=TOTP
 ```
 
 ログには以下を出さない。
@@ -879,8 +879,8 @@ logs:
 ユーザーID、action、件数、ファイル名、ハッシュ値、結果を記録する。
 
 ```text
-ts=DATE_REDACTEDT10:00:00Z event=CSV_IMPORT_PLAN file=users-20260610.csv sha256=<hash> add=100 modify=20 delete=0 result=OK
-ts=DATE_REDACTEDT10:00:03Z event=CSV_IMPORT_APPLY file=users-20260610.csv sha256=<hash> rows=120 result=OK
+ts=<timestamp> event=CSV_IMPORT_PLAN file=users-<date>.csv sha256=<hash> add=100 modify=20 delete=0 result=OK
+ts=<timestamp> event=CSV_IMPORT_APPLY file=users-<date>.csv sha256=<hash> rows=120 result=OK
 ```
 
 セキュリティ上の注意:

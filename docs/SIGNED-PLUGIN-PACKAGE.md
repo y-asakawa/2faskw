@@ -23,7 +23,7 @@
 
 Shibboleth IdP plugin packageは、少なくとも以下を満たす必要がある。
 
-- `webapp/WEB-INF/lib` に、`net.shibboleth.idp.plugin.IdPPlugin` serviceを実装するJARを含める
+- `webapp/WEB-INF/lib`に、`net.shibboleth.idp.plugin.IdPPlugin` serviceを実装するJARを含める
 - `bootstrap/plugin.properties` を含める
 - `bootstrap/plugin.properties` の `plugin.id` はJAR内のplugin IDと一致させる
 - `bootstrap/keys.txt` には署名検証用の公開鍵を入れる
