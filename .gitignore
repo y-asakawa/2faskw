@@ -12,6 +12,7 @@ target/
 *.swo
 .DS_Store
 docs/SIGNED-PLUGIN-PACKAGE.md
+scripts/build-plugin-package.sh
 
 # Local secrets and deployment artifacts
 *.key
