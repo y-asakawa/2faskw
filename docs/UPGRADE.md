@@ -10,51 +10,6 @@
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
-## 更新方針
-
-既存設定を維持した上書き更新は可能だが、単純に新しいファイルをコピーするだけでは不十分である。
-Plugin JARはバージョンを含むファイル名で配置されるため、旧JARを削除する必要がある。
-
-### v1.2.1からv1.2.2へのplugin.sh更新
-
-v1.2.1を `plugin.sh` で導入済みの場合は、公開metadataを使ってv1.2.2へ更新できる。
-対象IdPの範囲はv5.2.1以上、v5.2.4未満であり、v5.2.3を含む。Shibboleth plugin metadataの
-`idpVersionMax` は上限を含まない。
-
-```bash
-IDP_HOME=/opt/shibboleth-idp
-PLUGIN_ID='io.github.yasakawa.faskw.authn.graphicalmatrix'
-METADATA_URL='https://raw.githubusercontent.com/y-asakawa/2faskw/main/plugin-metadata/graphicalmatrix-plugin.properties'
-
-sudo "$IDP_HOME/bin/plugin.sh" -l
-
-sudo "$IDP_HOME/bin/plugin.sh" \
-  --updateURL "$METADATA_URL" \
-  -u "$PLUGIN_ID"
-
-sudo "$IDP_HOME/bin/plugin.sh" -l
-sudo "$IDP_HOME/bin/plugin.sh" -fl
-```
-
-更新後の一覧には `Current Version: 1.2.2` が表示されることを確認する。`plugin.sh -u` は、
-署名を検証してからWARを再構築する。`--noCheck` は互換性検査を無効化するため、この更新試験では
-指定しない。
-
-```text
-2faskw-idp-plugin-1.0.1.jar
-2faskw-idp-plugin-1.1.0.jar
-2faskw-idp-plugin-1.2.0.jar
-```
-
-新旧JARが同時に残ると、同じJavaクラスが複数のJARに存在してロード結果が不定になる可能性がある。
-
-v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
-v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
-
-v1.2.0ではLDAP保存とWebAuthn LDAP StorageServiceが追加されます。
-既定値は引き続きDB保存です。v1.1.0からv1.2.0へ更新するだけなら、既存DB保存データはそのまま利用できます。
-LDAP保存へ切り替える場合は、Plugin更新とは別にLDAP schema、ACL、既存データ移行を設計してから実施してください。
-
 ## バージョン別の追加確認
 
 | 更新元 | 更新先 | 必須対応 | 任意対応 |
@@ -62,6 +17,13 @@ LDAP保存へ切り替える場合は、Plugin更新とは別にLDAP schema、AC
 | v1.0.0 / v1.0.1 | v1.1.0 | 旧JAR削除、DB schema確認、sequence保存方式の保護、設定差分反映 | 管理API、CSV運用、logrotate設定 |
 | v1.1.0 | v1.2.0 | 旧JAR削除、v1.2.0テンプレート差分反映、config check | LDAP保存、TOTP seed暗号化設定見直し、WebAuthn LDAP StorageService |
 | v1.0.x | v1.2.0 | v1.1.0の必須対応を先に完了し、その後v1.2.0差分を反映 | LDAP保存へ切り替える場合は別途移行計画を作成 |
+
+v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
+v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
+
+v1.2.0ではLDAP保存とWebAuthn LDAP StorageServiceが追加されます。
+既定値は引き続きDB保存です。v1.1.0からv1.2.0へ更新するだけなら、既存DB保存データはそのまま利用できます。
+LDAP保存へ切り替える場合は、Plugin更新とは別にLDAP schema、ACL、既存データ移行を設計してから実施してください。
 
 v1.2.0の推奨構成:
 
@@ -509,3 +471,43 @@ sudo systemctl start jetty-idp.service
 
 LDAP schemaやLDAP上のユーザー属性を追加した場合、PluginロールバックだけではLDAP側の変更は戻りません。
 必要であればLDAP側のバックアップから復元してください。
+
+
+
+
+
+## 公式プラグイン化した場合
+
+既存設定を維持した上書き更新は可能だが、単純に新しいファイルをコピーするだけでは不十分である。
+Plugin JARはバージョンを含むファイル名で配置されるため、旧JARを削除する必要がある。
+
+### v1.2.xからv1.2.xへのplugin.sh更新
+
+v1.2.xを `plugin.sh` で導入済みの場合は、公開metadataを使ってv1.2.2以降へ更新できる。
+対象IdPの範囲はv5.2.1以上、v5.2.4未満であり、v5.2.3を含む。Shibboleth plugin metadataの
+`idpVersionMax` は上限を含まない。
+
+```bash
+IDP_HOME=/opt/shibboleth-idp
+PLUGIN_ID='io.github.yasakawa.faskw.authn.graphicalmatrix'
+METADATA_URL='https://raw.githubusercontent.com/y-asakawa/2faskw/main/plugin-metadata/graphicalmatrix-plugin.properties'
+
+sudo "$IDP_HOME/bin/plugin.sh" -l
+
+sudo "$IDP_HOME/bin/plugin.sh" \
+  --updateURL "$METADATA_URL" \
+  -u "$PLUGIN_ID"
+
+sudo "$IDP_HOME/bin/plugin.sh" -l
+sudo "$IDP_HOME/bin/plugin.sh" -fl
+```
+
+更新後の一覧には `Current Version: 1.2.2`以降 が表示されることを確認する。`plugin.sh -u` は、
+署名を検証してからWARを再構築する。`--noCheck` は互換性検査を無効化するため、この更新試験では
+指定しない。
+
+```text
+2faskw-idp-plugin-1.2.x.jar
+```
+
+新旧JARが同時に残ると、同じJavaクラスが複数のJARに存在してロード結果が不定になる可能性がある。
