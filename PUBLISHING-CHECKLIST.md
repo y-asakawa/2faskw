@@ -19,7 +19,7 @@ Shibboleth plugin distribution location.
 
 ## License and Attribution
 
-- Confirm Shinshu University has approved Apache-2.0 publication.
+- Confirm y-asakawa has approved Apache-2.0 publication.
 - Confirm the copyright owner name and year in `LICENSE` and `NOTICE`.
 - Keep `THIRD-PARTY-NOTICES.md` in the source repository and release ZIPs.
 - Re-run dependency review whenever dependency versions change.

@@ -98,7 +98,7 @@ Do not open public GitHub issues for suspected vulnerabilities. Follow
 `SECURITY.md` and replace the placeholder contact with the official security
 contact before public release.
 
-## **Releases**: https://github.com/y-asakawa/2faskw/commits/v1.0.1
+## **Releases**: https://github.com/y-asakawa/2faskw/releases/
 
 ## Screenshots
 
