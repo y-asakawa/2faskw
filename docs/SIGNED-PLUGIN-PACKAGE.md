@@ -241,7 +241,7 @@ https://example.com/shibboleth/plugins/2faskw/1.0.1/SHA256SUMS.asc
 mvn -B -ntp clean package
 
 # plugin dist作成
-scripts/build-plugin-package.sh
+# release ZIPはCIまたはローカル管理のパッケージ手順で作成する
 
 # tar.gz生成
 tar -C target/plugin-dist \
@@ -345,8 +345,8 @@ plugin.shによる署名検証インストール試験未実施
 
 ```text
 1. release用GPG鍵を作成し、公開鍵とfingerprintをローカル管理
-2. build-plugin-package.shにtar.gz生成を追加
-3. build-signed-release.shを追加
+2. release ZIP / tar.gz生成手順をCIまたはローカル手順に整理
+3. 署名とchecksum生成手順を追加
 4. plugin.properties / metadata URLを実URLへ変更
 5. 検証IdPでplugin.sh -i試験
 6. update metadata経由のplugin.sh -u試験

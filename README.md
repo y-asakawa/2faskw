@@ -34,28 +34,6 @@ Do not publish the parent `MFA` workspace. Use this directory
 H2-compatible defaults may exist for local or PoC workflows, but production
 deployments should use PostgreSQL and protected sequence/TOTP seed storage.
 
-## Build
-
-```bash
-mvn -B -ntp clean package
-```
-
-Build the plugin and admin-tool release ZIPs:
-
-```bash
-./scripts/build-plugin-package.sh
-```
-
-Expected outputs:
-
-```text
-target/plugin-dist/2faskw-idp-plugin-1.0.1.zip
-target/admin-dist/2faskw-admin-tools-1.0.1.zip
-```
-
-The release ZIPs include `LICENSE`, `NOTICE`, and
-`THIRD-PARTY-NOTICES.md`.
-
 ## Documentation
 
 - Installation and operation: `docs/README.md`
