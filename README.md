@@ -14,12 +14,8 @@ storage, and example Shibboleth configuration files.
 
 ## Status
 
-This repository is being prepared for public release and official plugin
-distribution. Before publishing a public release, replace placeholder download
-URLs, set the final security contact, and publish signed release artifacts.
-
-Do not publish the parent `MFA` workspace. Use this directory
-(`remote_graphicalmatrix_src`) as the repository root.
+2FAS-KW is under active development. Use the latest GitHub release for
+published artifacts.
 
 ## Requirements
 
