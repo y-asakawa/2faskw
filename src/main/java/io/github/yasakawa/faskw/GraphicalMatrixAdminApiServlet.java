@@ -66,7 +66,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         handle(request, response, "DELETE");
     }
 
-    private void doPatch(final HttpServletRequest request, final HttpServletResponse response)
+    @Override
+    protected void doPatch(final HttpServletRequest request, final HttpServletResponse response)
             throws IOException {
         handle(request, response, "PATCH");
     }
