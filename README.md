@@ -1,4 +1,4 @@
-<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="30%">
+<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="40%">
 
 # 2FAS-KW GraphicalMatrix MFA for Shibboleth IdP plugin
 
@@ -151,3 +151,8 @@ GitHub Release for published artifacts.
 
 No. Do not open public GitHub issues for suspected vulnerabilities. Follow
 `docs/SECURITY.md` for the reporting process.
+
+### Are the manuals available only in Japanese?
+
+Yes. The manuals are available only in Japanese. I haven't been able to get
+around to adding an English version, but the console output is in English only.
