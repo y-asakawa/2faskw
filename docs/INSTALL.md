@@ -288,14 +288,38 @@ macOSなど `sha256sum` がない環境では `shasum -a 256` を利用してく
 別ディレクトリから実行する場合だけ、`--package-dir /path/to/2faskw-idp-plugin-1.0.1`
 を指定します。
 
+ビルドサーバや手元の端末で配布物だけ確認する場合:
+
+```bash
+./bin/graphicalmatrix-plugin-check.sh --package-only
+```
+
+IdPサーバ上でIdP側の状態だけ確認する場合:
+
+```bash
+./bin/graphicalmatrix-plugin-check.sh --idp-only --idp-home /opt/shibboleth-idp
+```
+
+WARNも失敗扱いにしたい本番導入前確認では `--strict` を付けます。
+
+```bash
+./bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --strict
+```
+
 期待値:
 
 ```text
-summary: failures=0
+summary: package_failures=0 package_warnings=0 idp_failures=0 idp_warnings=0 strict=0
+result: OK
 ```
 
 TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARNは許容できます。
 [プラグインのインストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)
+
+`--package-only` ではIdP環境を確認しないため、手元の端末やCIでも `result: OK` になります。
+`--strict` ではoptional plugin未検出などのWARNも失敗扱いになります。
 
 
 ## 5. plugin files dry-run
@@ -305,12 +329,30 @@ TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARN
   --idp-home /opt/shibboleth-idp
 ```
 
+dry-runの前に、configスクリプトは配布物の `--package-only` checkを自動実行します。
+本番導入前にWARNも失敗扱いにしたい場合は `--strict` を付けます。
+すでに別手順で配布物確認済みの場合だけ、`--skip-package-check` で省略できます。
+
+```bash
+./bin/graphicalmatrix-plugin-config.sh \
+  --idp-home /opt/shibboleth-idp \
+  --strict
+```
+
 確認すること:
 
 - `edit-webapp/WEB-INF/lib/` へ配置されるJAR
 - `conf/graphicalmatrix/*.idpnew` の配置
 - `bin/` へ配置される管理スクリプト
 - 既存ファイルがある場合のbackup / `.idpnew.TIMESTAMP`
+- 最後の `summary` と `result`
+
+期待値:
+
+```text
+summary: mode=dry-run planned_changes=N applied_changes=0 backups_created=0 templates_deferred=0 failures=0 strict=0 package_check=enabled
+result: DRY_RUN_OK
+```
 
 dry-run後に行うこと:
 
@@ -342,6 +384,18 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
   --apply
 ```
 
+`--apply` はrootで実行するか、`sudo -n true` が成功するパスワードレスsudo環境で実行してください。
+sudoが非対話で利用できない場合、スクリプトはファイル変更前に停止します。
+
+本番導入前の厳格確認を同時に行う場合:
+
+```bash
+sudo ./bin/graphicalmatrix-plugin-config.sh \
+  --idp-home /opt/shibboleth-idp \
+  --apply \
+  --strict
+```
+
 配置される主なJAR:
 
 ```text
@@ -349,6 +403,20 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/core-3.5.3.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-6.3.0.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-42.7.11.jar
+```
+
+applyが成功すると、導入内容は以下にTSV形式で記録されます。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/install-manifest-YYYYMMDDHHMMSS.tsv
+```
+
+期待値:
+
+```text
+summary: mode=apply planned_changes=N applied_changes=N backups_created=N templates_deferred=N failures=0 strict=0 package_check=enabled
+result: APPLY_OK
+manifest: /opt/shibboleth-idp/conf/graphicalmatrix/install-manifest-YYYYMMDDHHMMSS.tsv
 ```
 
 apply後に行うこと:
