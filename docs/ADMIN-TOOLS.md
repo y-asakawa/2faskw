@@ -132,7 +132,7 @@ IdP側設定との同期が必要な項目を整理する。
 
 ```properties
 graphicalmatrix.db.driver=org.postgresql.Driver
-graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
+graphicalmatrix.db.url=jdbc:postgresql://192.0.2.64:5432/graphicalmatrix
 graphicalmatrix.db.user=graphicalmatrix_admin
 graphicalmatrix.db.passwordFile=/opt/graphicalmatrix-admin/credentials/graphicalmatrix-db.password
 ```
@@ -141,7 +141,7 @@ graphicalmatrix.db.passwordFile=/opt/graphicalmatrix-admin/credentials/graphical
 
 ```properties
 graphicalmatrix.db.driver=org.postgresql.Driver
-graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/graphicalmatrix-admin/credentials/db-ssl/db-ca.crt&sslcert=/opt/graphicalmatrix-admin/credentials/db-ssl/admin-client.crt&sslkey=/opt/graphicalmatrix-admin/credentials/db-ssl/admin-client.pk8
+graphicalmatrix.db.url=jdbc:postgresql://192.0.2.64:5432/graphicalmatrix?sslmode=verify-full&sslrootcert=/opt/graphicalmatrix-admin/credentials/db-ssl/db-ca.crt&sslcert=/opt/graphicalmatrix-admin/credentials/db-ssl/admin-client.crt&sslkey=/opt/graphicalmatrix-admin/credentials/db-ssl/admin-client.pk8
 graphicalmatrix.db.user=graphicalmatrix_admin
 graphicalmatrix.db.passwordFile=/opt/graphicalmatrix-admin/credentials/graphicalmatrix-db.password
 ```
@@ -462,7 +462,7 @@ DBを書き換えられないようにすることである。
 ```properties
 graphicalmatrix.admin.enabled = false
 graphicalmatrix.admin.requiredGroup = graphicalmatrix-admin
-graphicalmatrix.admin.allowedHosts = db-admin01,192.168.0.62
+graphicalmatrix.admin.allowedHosts = db-admin01,192.0.2.62
 graphicalmatrix.admin.requireClientCert = true
 graphicalmatrix.admin.clientCertPath = /opt/graphicalmatrix-admin/credentials/db-ssl/admin-client.crt
 graphicalmatrix.admin.productionMode = true
@@ -984,9 +984,9 @@ processed/failed/logsへ結果を保存
 DB1検証環境への配置:
 
 ```text
-server: 192.168.0.62 / db1.example.com
+server: 192.0.2.62 / db1.example.com
 prefix: /opt/graphicalmatrix-admin
-DB接続先: 192.168.0.64:5432 / DB VIP
+DB接続先: 192.0.2.64:5432 / DB VIP
 DBユーザー: graphicalmatrix_admin
 systemd path: graphicalmatrix-csv-import.path enabled
 ```

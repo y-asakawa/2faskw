@@ -877,7 +877,7 @@ HAProxy、Keepalived、IdP側DB接続設定を完了してください。
 ```bash
 PGPASSWORD='実際のGraphicalMatrix DBパスワード' \
   /usr/pgsql-18/bin/psql \
-  -h 192.168.0.64 \
+  -h 192.0.2.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -f /opt/shibboleth-idp/conf/graphicalmatrix/postgresql-schema.sql
@@ -888,7 +888,7 @@ PGPASSWORD='実際のGraphicalMatrix DBパスワード' \
 ```bash
 PGPASSWORD='実際のGraphicalMatrix DBパスワード' \
   /usr/pgsql-18/bin/psql \
-  -h 192.168.0.64 \
+  -h 192.0.2.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
   -Atqc 'SELECT count(*) FROM graphicalmatrix_enrollment;'
@@ -925,7 +925,7 @@ sudo -u jetty test -r /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 詳細なDB構築手順と接続先切替は `docs/INSTALL_DB.md` に従ってください。
 
 ```properties
-graphicalmatrix.db.url = jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
+graphicalmatrix.db.url = jdbc:postgresql://192.0.2.64:5432/graphicalmatrix
 graphicalmatrix.db.user = graphicalmatrix_app
 graphicalmatrix.db.passwordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
 graphicalmatrix.db.autoInit = false
@@ -1306,7 +1306,7 @@ IdPを複数台構成にする場合は、`maximumPoolSize * IdP台数` がPostg
 
 ```properties
 graphicalmatrix.api.enabled = false
-graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.168.0.0/24
+graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.0.2.0/24
 graphicalmatrix.api.bearerTokenFile = /opt/shibboleth-idp/credentials/graphicalmatrix-api.token
 graphicalmatrix.api.authFailureLimit = 5
 graphicalmatrix.api.authFailureWindowSeconds = 60

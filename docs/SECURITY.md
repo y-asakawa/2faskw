@@ -49,7 +49,7 @@ APIを有効化する場合は、以下をすべて満たしてください。
 
 ```properties
 graphicalmatrix.api.enabled = true
-graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.168.0.0/24
+graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.0.2.0/24
 graphicalmatrix.api.bearerTokenFile = /opt/shibboleth-idp/credentials/graphicalmatrix-api.token
 graphicalmatrix.api.authFailureLimit = 5
 graphicalmatrix.api.authFailureWindowSeconds = 60
