@@ -166,14 +166,12 @@ MFA連携:
 - DB接続先へのfirewalld許可
 
 ## 1. 事前確認
-
-対象:
+[対象ソフトウェアを先にインストールしてください。インストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)
 
 - Shibboleth IdP 5.2系
 - Java 21
 - Jetty 12
-- PostgreSQL推奨
-- H2はPoC / 検証用途のみ
+- PostgreSQL
 
 作業前に取得するもの:
 
@@ -187,6 +185,22 @@ MFA連携:
 
 ```bash
 /opt/shibboleth-idp/bin/build.sh --help >/dev/null
+test -f /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
+```
+
+`edit-webapp/WEB-INF/web.xml` が未作成の場合は、IdP標準の `web.xml` を
+overlay用にコピーしてから続行する。
+
+```bash
+sudo mkdir -p /opt/shibboleth-idp/edit-webapp/WEB-INF
+
+sudo cp -a \
+  /opt/shibboleth-idp/dist/webapp/WEB-INF/web.xml \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
+
+sudo chown root:root /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
+sudo chmod 0644 /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
+
 test -f /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
 ```
 
@@ -226,9 +240,13 @@ macOSなど `sha256sum` がない環境では `shasum -a 256` を利用してく
 
 ```bash
 ./bin/graphicalmatrix-plugin-check.sh \
-  --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/2faskw-idp-plugin-1.0.1
+  --idp-home /opt/shibboleth-idp
 ```
+
+このコマンドは、展開済み配布物ディレクトリ
+`2faskw-idp-plugin-1.0.1` の中で実行してください。
+別ディレクトリから実行する場合だけ、`--package-dir /path/to/2faskw-idp-plugin-1.0.1`
+を指定します。
 
 期待値:
 
@@ -237,13 +255,14 @@ summary: failures=0
 ```
 
 TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARNは許容できます。
+[プラグインのインストールはINSTALL_AP.mdを参照してください。](./INSTALL_AP.md)
+
 
 ## 5. plugin files dry-run
 
 ```bash
 ./bin/graphicalmatrix-plugin-config.sh \
-  --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/2faskw-idp-plugin-1.0.1
+  --idp-home /opt/shibboleth-idp
 ```
 
 確認すること:
@@ -253,12 +272,33 @@ TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARN
 - `bin/` へ配置される管理スクリプト
 - 既存ファイルがある場合のbackup / `.idpnew.TIMESTAMP`
 
+dry-run後に行うこと:
+
+1. dry-runの出力を確認する
+
+   コピー予定のJAR、設定テンプレート、管理スクリプト、backup予定の既存ファイルを確認します。
+   dry-runでは実ファイルは変更されません。
+
+2. 配布物内の `docs/INSTALL.md` を確認する
+
+   作業中の配布物に同梱された手順を確認します。GitHub上の最新版ではなく、
+   実際に導入しているZIP内の手順を優先してください。
+
+   ```bash
+   less docs/INSTALL.md
+   ```
+
+3. 問題がなければ、次の `plugin files apply` へ進む
+
+   `/idp/graphicalmatrix/change` の確認は、apply、設定確認、`web.xml` 適用、
+   WAR再構築、Jetty再起動が完了してから行います。dry-run直後のHTTP 404/503は
+   最終確認結果として扱いません。
+
 ## 6. plugin files apply
 
 ```bash
 sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
-  --package-dir /tmp/2faskw-idp-plugin-1.0.1 \
   --apply
 ```
 
@@ -270,6 +310,74 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-6.3.0.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-42.7.11.jar
 ```
+
+apply後に行うこと:
+
+1. `/opt/shibboleth-idp/conf/graphicalmatrix` に作成される `*.idpnew.*` を確認する
+
+   既存設定がある場合、導入スクリプトは上書きしません。
+   新しいテンプレートは `.idpnew` または `.idpnew.TIMESTAMP` として配置されます。
+
+   ```bash
+   sudo find /opt/shibboleth-idp/conf/graphicalmatrix \
+     -maxdepth 1 \
+     -type f \
+     -name '*.idpnew*' \
+     -ls
+   ```
+
+   必要に応じて、既存ファイルと差分を確認してから手動で反映します。
+
+   ```bash
+   sudo diff -u \
+     /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties \
+     /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties.idpnew
+   ```
+
+2. 後述の `web.xml` 手順で servlet mapping を適用する
+
+   2FAS-KW の servlet endpoint を IdP webapp に追加します。
+   まず dry-run で変更予定を確認し、問題なければ `--apply` を付けて適用します。
+
+   ```bash
+   ./bin/graphicalmatrix-plugin-webxml.sh \
+     --idp-home /opt/shibboleth-idp
+
+   sudo ./bin/graphicalmatrix-plugin-webxml.sh \
+     --idp-home /opt/shibboleth-idp \
+     --apply
+   ```
+
+3. `/opt/shibboleth-idp/bin/build.sh` を実行する
+
+   `edit-webapp` に配置したJAR、設定、`web.xml` の変更を IdP WAR に反映します。
+
+   ```bash
+   sudo env \
+     JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
+     PATH=/usr/lib/jvm/java-21-openjdk/bin:/usr/bin:/bin \
+     /opt/shibboleth-idp/bin/build.sh
+   ```
+
+4. Jettyを再起動する
+
+   再構築した WAR を Jetty に読み込ませます。
+
+   ```bash
+   sudo systemctl restart jetty-idp.service
+   sleep 5
+   sudo systemctl status jetty-idp.service --no-pager
+   ```
+
+5. `/idp/graphicalmatrix/change` を確認する
+
+   HTTPS FQDNで変更画面に到達できることを確認します。
+   未認証状態では、認証フロー開始を示すHTTP 302またはログイン画面のHTTP 200を期待します。
+
+   ```bash
+   curl -k -s -o /tmp/graphicalmatrix-change.out -w 'change=%{http_code}\n' \
+     https://idp.example.com/idp/graphicalmatrix/change
+   ```
 
 ## 7. 設定ファイル確認
 
@@ -291,7 +399,324 @@ docs/CONFIG-REFERENCE.md
 /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 ```
 
-管理APIは初期状態で無効にしてください。
+### 導入時に決めるDB保存方式
+
+以下は初回ユーザー登録前に決めてください。
+運用開始後に変更する場合は、既存データの移行、復号可否、再登録要否を確認する必要があります。
+特に `sequence.storage = hash` は復号できないため、別方式へ戻せません。
+
+2FAS-KWは、ユーザー登録情報、失敗回数、ロック状態、MFA方式、TOTP seedを
+`graphicalmatrix_enrollment` テーブルに保存します。
+
+導入時の選択肢:
+
+| 用途 | PoC / 検証 | 本番推奨 | 変更時の注意 |
+| --- | --- | --- | --- |
+| DB | H2またはPostgreSQL | PostgreSQL | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う |
+| GraphicalMatrix sequence | `plaintext` | `hash` | `hash` は復号不可。後戻りには再登録が必要 |
+| TOTP seed | `auto` / `plaintext` | `aes-gcm` | TOTP seedは認証時に復号が必要なため `hash` は使えない |
+| WebAuthn credential | plugin既定またはStorageService | JDBC StorageService | 詳細はWebAuthn / StorageService設定に従う |
+
+編集対象ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+```
+
+`graphicalmatrix.properties` では、GraphicalMatrix sequence と TOTP seed の保存方式を選択します。
+以下のどれを採用するかを導入時に決めてください。
+
+### 本番推奨: sequenceはhash、TOTP seedはAES-GCM
+
+GraphicalMatrix sequenceは復号不要なため `hash` を推奨します。
+TOTP seedは認証時に復号が必要なため `aes-gcm` を使います。
+
+編集ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+```properties
+graphicalmatrix.productionMode = true
+
+graphicalmatrix.sequence.storage = hash
+graphicalmatrix.sequence.pepperFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
+
+graphicalmatrix.totp.seed.storage = aes-gcm
+graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+```
+
+secret fileを作成します。pepperはHMAC用のsecret、AES keyは32 bytesのbase64値です。
+
+```bash
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper
+
+openssl rand -hex 32 | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper >/dev/null
+
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key >/dev/null
+
+sudo chown root:jetty \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+
+sudo chmod 0640 \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.pepper \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+```
+
+### 復号可能にしたい場合: sequenceとTOTP seedをkeywordで保存
+
+管理者が既存sequenceを復号できる運用にしたい場合は `keyword` を選択します。
+この例では、GraphicalMatrix sequenceとTOTP seedの両方をkeyword方式で保存します。
+本番では `hash` より弱くなるため、secret fileの権限管理を厳格にしてください。
+
+編集ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+```properties
+graphicalmatrix.productionMode = true
+
+graphicalmatrix.sequence.storage = keyword
+graphicalmatrix.sequence.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+
+graphicalmatrix.totp.seed.storage = keyword
+graphicalmatrix.totp.seed.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-totp.keyword
+```
+
+secret fileを作成します。
+
+```bash
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword >/dev/null
+
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp.keyword
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp.keyword >/dev/null
+
+sudo chown root:jetty \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp.keyword
+
+sudo chmod 0640 \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp.keyword
+```
+
+`graphicalmatrix.totp.seed.keywordFile` を省略した場合は、
+`graphicalmatrix.sequence.keywordFile` がフォールバック利用されます。
+ただし、sequence用とTOTP seed用のsecretを分けた方が、漏えい時の影響範囲を分離できます。
+
+### 復号可能にしたい場合: sequenceをAES-GCM鍵で保存
+
+`keyword` より明示的にAES-GCM鍵を使いたい場合は `aes-gcm` を選択します。
+sequenceも復号可能になるため、鍵漏えい時の影響を考慮してください。
+
+編集ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+```properties
+graphicalmatrix.productionMode = true
+
+graphicalmatrix.sequence.storage = aes-gcm
+graphicalmatrix.sequence.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key
+
+graphicalmatrix.totp.seed.storage = aes-gcm
+graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+```
+
+secret fileを作成します。
+
+```bash
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key >/dev/null
+
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key >/dev/null
+
+sudo chown root:jetty \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+
+sudo chmod 0640 \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-totp-aes.key
+```
+
+### secret fileの中身と復号方式
+
+`keywordFile` には、共通キーワード文字列を1行で保存します。
+例えば中身が `pass` の場合、以下の状態でも動作はします。
+
+```text
+/opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+```
+
+```text
+pass
+```
+
+ただし `pass` のような短い文字列は弱いため、本番では使わないでください。
+作成する場合はランダム値を使います。
+
+```bash
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword >/dev/null
+```
+
+固定文字列を入れる場合は、以下のように書けます。
+コマンド履歴や画面ログに残るため、本番では推奨しません。
+
+```bash
+printf '%s\n' 'pass' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword >/dev/null
+```
+
+`cat` で見ると中身は表示されますが、secretを画面やログへ出すことになるため、
+運用時は避けてください。
+
+```bash
+sudo cat /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+```
+
+`aesKeyFile` には、AES-GCM用の鍵を保存します。
+これは人間が覚えるパスワードではなく、16 / 24 / 32 bytesの鍵です。
+base64エンコードした32 bytes鍵を推奨します。
+
+```bash
+openssl rand -base64 32 | tr -d '\n' | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key >/dev/null
+```
+
+保存方式ごとの復号可否:
+
+| 保存方式 | DB上のprefix | 復号可否 | 内部方式 |
+| --- | --- | --- | --- |
+| `keyword` | `kw1:` / `totpkw1:` | 可 | keywordからPBKDF2-HMAC-SHA256でAES鍵を導出し、AES-GCMで復号 |
+| `aes-gcm` | `aesgcm1:` / `totpaesgcm1:` | 可 | `aesKeyFile` のAES鍵でAES-GCM復号 |
+| `hash` | `hsp1:` | 不可 | pepper付きHMAC-SHA256で照合のみ実施 |
+| `plaintext` | prefixなし | 可 | 暗号化なし |
+
+復号は、IdP runtimeや管理CLIが `graphicalmatrix.properties` とsecret fileを読んで自動的に行います。
+DB上の値を手作業で復号する運用は想定していません。
+既存データを別方式へ変換する場合は `docs/SEQUENCE-STORAGE-MIGRATION.md` を使います。
+
+---
+---
+### DB上のsequenceを確認・表示する方法
+
+
+障害調査や移行確認で、DBに保存されている特定ユーザーのGraphicalMatrix sequenceを
+表示したい場合は、管理CLIでDB上の値を確認してから `GraphicalMatrixSequenceTool` を使います。
+これは確認用の手順です。通常運用でユーザーのsequenceを表示する必要はありません。
+
+まず現在の保存方式を確認します。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh sequence-mode
+```
+
+ユーザー `test01` の登録情報を確認します。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show test01
+```
+
+出力内の `sequence` 値を控えます。
+`keyword` 方式では `kw1:`、`aes-gcm` 方式では `aesgcm1:`、`hash` 方式では `hsp1:`
+で始まります。
+
+`kw1:` または `aesgcm1:` の場合は、以下のように表示できます。
+`STORED` には `show test01` で確認した `sequence` 値をそのまま入れます。
+
+```bash
+STORED='kw1:...'
+
+CP="$(find /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 \
+  -type f \
+  -name '*.jar' \
+  -print | sort | paste -sd ':' -)"
+
+sudo java -cp "$CP" \
+  io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
+  display \
+  /opt/shibboleth-idp \
+  "$STORED"
+```
+
+表示例:
+
+```text
+img03,img07,img11,img14
+```
+
+このコマンドは `/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties` と
+secret fileを参照します。`keyword` 方式では `graphicalmatrix.sequence.keywordFile`、
+`aes-gcm` 方式では `graphicalmatrix.sequence.aesKeyFile` が正しく設定されている必要があります。
+
+`hsp1:` で始まる `hash` 方式のsequenceは復号できません。
+この場合は保存値から元の画像列を表示できず、入力された画像列との照合のみ可能です。
+
+---
+---
+
+### PostgreSQLの場合、`db.properties` で接続先を指定します。
+
+編集ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+```
+
+```properties
+graphicalmatrix.db.driver = org.postgresql.Driver
+graphicalmatrix.db.url = jdbc:postgresql://db-graphicalmatrix.example.com:5432/graphicalmatrix
+graphicalmatrix.db.user = graphicalmatrix_app
+graphicalmatrix.db.passwordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+graphicalmatrix.db.autoInit = false
+graphicalmatrix.db.pool.enabled = true
+```
+
+PoCでのみ平文sequenceを使う場合:
+
+```properties
+graphicalmatrix.productionMode = false
+graphicalmatrix.sequence.storage = plaintext
+graphicalmatrix.totp.seed.storage = auto
+```
+
+既存ユーザー登録後に `graphicalmatrix.sequence.storage` を変更する場合は、
+`docs/SEQUENCE-STORAGE-MIGRATION.md` を確認してください。
+
+### 管理APIは初期状態で無効にしてください。
 
 ```properties
 graphicalmatrix.api.enabled = false
@@ -304,7 +729,7 @@ graphicalmatrix.api.response.excludeSequences = true
 graphicalmatrix.api.sequence.requireProtectedStorage = true
 ```
 
-GraphicalMatrixチャレンジ有効期限は `graphicalmatrix.properties` で設定できます。
+### GraphicalMatrixチャレンジ有効期限は `graphicalmatrix.properties` で設定できます。
 
 ```properties
 graphicalmatrix.challenge.seconds = 180
@@ -312,7 +737,7 @@ graphicalmatrix.challenge.seconds = 180
 
 設定可能範囲は30〜900秒です。
 
-MFAポリシーは `mfa-policy.properties` で設定します。
+### MFAポリシーは `mfa-policy.properties` で設定します。
 
 ```properties
 graphicalmatrix.mfa.default = require
@@ -330,6 +755,7 @@ graphicalmatrix.mfa.useForwardedFor = false
 すり抜ける可能性があるため、`false` のままにしてください。
 
 ## 8. DB設定
+[DBのインストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
 
 PostgreSQLを利用する場合:
 

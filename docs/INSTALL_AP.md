@@ -147,6 +147,8 @@ Architecture: aarch64
 
 ## 5. PostgreSQL 18.4
 
+別サーバ、HA構成は [<mark>DBを構築する：INSTALL_DB.md</mark>](./INSTALL_DB.md)　を参照
+
 ### 5.1 PGDGリポジトリとパッケージ導入
 
 実行コマンド:
@@ -224,7 +226,8 @@ sudo useradd --system \
 
 sudo mkdir -p /opt/src /opt/jetty-base /opt/shibboleth-idp
 
-sudo tar xzf /opt/src/jetty-home-12.0.36.tar.gz -C /opt
+cd ./tmp
+sudo tar xzf jetty-home-12.0.36.tar.gz -C /opt
 sudo ln -sfn /opt/jetty-home-12.0.36 /opt/jetty-home
 
 sudo chown -R jetty:jetty /opt/jetty-base /opt/shibboleth-idp
@@ -275,13 +278,27 @@ java.version = 21.0.11
 
 ### 7.1 配置とインストール
 
-実行コマンド:
-
+実行コマンド:ホスト名を決める
 ```bash
-sudo tar xzf /opt/src/shibboleth-identity-provider-5.2.2.tar.gz -C /opt/src
+sudo hostnamectl set-hostname idp.example.com
+```
+
+設定ファイル：idp-install.properties
+```
+idp.entityID=https://idp.example.com/idp/shibboleth
+idp.scope=example.com
+idp.cookie.secure = true
+```
+
+実行コマンド：propertiesの設置
+```bash
+cd .tmp/
+sudo tar xzf shibboleth-identity-provider-5.2.2.tar.gz -C /opt/src
 
 cat > /tmp/idp-install.properties <<'EOF'
-idp.scope=example.org
+idp.entityID=https://idp.example.com/idp/shibboleth
+idp.scope=example.com
+idp.cookie.secure = true
 EOF
 chmod 0600 /tmp/idp-install.properties
 
@@ -307,17 +324,34 @@ rm -f /tmp/idp-install.properties
 sudo chown -R jetty:jetty /opt/shibboleth-idp
 ```
 
-実際の秘密値はログおよび本書には記録していない。
+※秘密値は本書には記録していない。
+※FQDN、entityID、scopeは、HTTPS化時に正式値へ更新してもよい。
 
-現在の設定:
 
-```properties
-idp.entityID=https://idp.example.com/idp/shibboleth
-idp.scope=example.com
-idp.cookie.secure = true
+変更する場合
+/opt/shibboleth-idp/conf/idp.properties をバックアップして編集します。
+```bash
+sudo cp -a /opt/shibboleth-idp/conf/idp.properties \
+  /opt/shibboleth-idp/conf/idp.properties.bak.$(date +%Y%m%d%H%M%S)
+
+sudo vi /opt/shibboleth-idp/conf/idp.properties
 ```
 
-FQDN、entityID、scopeはHTTPS化時に正式値へ更新した。
+次に、静的 metadata も IP から FQDN に直します。
+```bash
+sudo cp -a /opt/shibboleth-idp/metadata/idp-metadata.xml \
+  /opt/shibboleth-idp/metadata/idp-metadata.xml.bak.$(date +%Y%m%d%H%M%S)
+
+sudo vi /opt/shibboleth-idp/metadata/idp-metadata.xml
+```
+
+主に直す範囲
+entityID
+Scope
+SingleSignOnService Location
+SingleLogoutService Location
+ArtifactResolutionService Location があればそれも
+
 
 ### 7.2 MFAモジュール有効化
 
@@ -413,8 +447,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now jetty-idp.service
 ```
 
-確認結果:
+確認：
+```bash
+sudo systemctl is-enabled jetty-idp.service
+sudo systemctl is-active jetty-idp.service
+sudo systemctl status jetty-idp.service --no-pager
 
+sudo ss -ltnp | grep -E ':8080|:443'
+
+sudo ss -ltnp 'sport = :8080'
+
+curl -i http://127.0.0.1:8080/idp/
+curl -i http://127.0.0.1:8080/idp/status
+```
+
+確認結果:
 ```text
 jetty-idp.service: enabled / active
 Jetty listener: 0.0.0.0:8080
@@ -422,53 +469,10 @@ Jetty listener: 0.0.0.0:8080
 /idp/status: HTTP 200
 ```
 
-firewalldでは8080番を許可していないため、現在は外部ネットワーク向けの公開設定を行っていない。
+※firewalldに注意
 
-## 9. 発生した問題と対応
 
-### 9.1 IdPインストール時のidp.scope不足
-
-最初の無人インストールでは、以下のエラーが発生した。
-
-```text
-ERROR - Installation run failed
-No value for idp.scope specified
-```
-
-対応:
-
-- 未完了の新規インストール先を削除
-- property fileへ`idp.scope=example.org`を追加
-- IdPインストールを最初から再実行
-
-### 9.2 `/idp/status`がHTTP 500
-
-最初のJetty構成では、以下のクラス不足が発生した。
-
-```text
-NoClassDefFoundError: jakarta/servlet/jsp/jstl/core/Config
-```
-
-対応:
-
-```bash
-sudo -u jetty bash -lc '
-export JETTY_HOME=/opt/jetty-home
-export JETTY_BASE=/opt/jetty-base
-cd "$JETTY_BASE"
-java -jar "$JETTY_HOME/start.jar" --add-modules=ee10-jstl
-'
-
-sudo systemctl restart jetty-idp.service
-```
-
-修正後:
-
-```text
-/idp/status: HTTP 200
-```
-
-## 10. 最終確認コマンド
+## 9. 最終確認コマンド
 
 ```bash
 java -version
@@ -516,7 +520,7 @@ SELinux: Enforcing
 PostgreSQLとJetty IdPを明示的に再起動した後も、両サービスの`enabled / active`、
 PostgreSQL 18.4、HTTPSの`/idp/`とループバック経由の`/idp/status`のHTTP 200を再確認した。
 
-## 11. サーバ上の作業ログ
+## 10. サーバ上の作業ログ
 
 実行結果の詳細ログ:
 
@@ -559,12 +563,12 @@ HTTPS URL: https://idp.example.com/idp/
 証明書:
 
 ```text
-Subject: C=JP, ST=Nagano, L=Nagano, O=Example Organization, OU=IIC, CN=idp.example.com
+Subject: C=JP, ST=JAPAN, L=TOKYO, O=Example Organization, OU=, CN=idp.example.com
 Issuer: CN=private-ca.example.com
 SAN: DNS:idp.example.com, IP:192.168.0.60
 notBefore: <timestamp>
 notAfter: <timestamp>
-SHA-256: E8:B2:F7:59:11:41:CA:64:F0:1F:C3:B6:8C:52:E7:F2:10:3C:63:3A:B4:41:38:B1:BE:C9:00:F4:D6:72:9C:37
+SHA-256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 証明書チェーンの信頼可能期間はCA証明書の有効期限にも制約される。
@@ -575,14 +579,14 @@ SHA-256: E8:B2:F7:59:11:41:CA:64:F0:1F:C3:B6:8C:52:E7:F2:10:3C:63:3A:B4:41:38:B1
 
 ```bash
 openssl verify \
-  -CAfile iic_ca.ca.cert.pem \
-  2faskw.cert.pem
+  -CAfile private-ca.ca.cert.pem \
+  idp.cert.pem
 
-openssl x509 -in 2faskw.cert.pem \
+openssl x509 -in idp.cert.pem \
   -noout -subject -issuer -dates -ext subjectAltName -fingerprint -sha256
 
-openssl x509 -in 2faskw.cert.pem -pubkey -noout | openssl sha256
-openssl pkey -in 2faskw.key -pubout | openssl sha256
+openssl x509 -in idp.cert.pem -pubkey -noout | openssl sha256
+openssl pkey -in idp.key -pubout | openssl sha256
 ```
 
 確認結果:
@@ -591,45 +595,73 @@ openssl pkey -in 2faskw.key -pubout | openssl sha256
 2faskw.cert.pem: OK
 certificate/private-key match: OK
 ```
+※SHA2-256(stdin)の出力はここには記載しない。
 
 ### 12.2 バックアップ
 
 HTTPS設定前のバックアップ:
 
 ```text
-/opt/backups/https-<timestamp>
-```
+TS="$(date +%Y%m%d%H%M%S)"
+BACKUP_DIR="/opt/backups/https-$TS"
 
-バックアップディレクトリはrootのみ参照できる`0700`へ設定した。
+sudo mkdir -p "$BACKUP_DIR"
+sudo chmod 0700 "$BACKUP_DIR"
+sudo chown root:root "$BACKUP_DIR"
+
+sudo cp -a /opt/jetty-base/start.d "$BACKUP_DIR/jetty-start.d"
+sudo cp -a /opt/jetty-base/etc "$BACKUP_DIR/jetty-etc" 2>/dev/null || true
+sudo cp -a /etc/systemd/system/jetty-idp.service "$BACKUP_DIR/jetty-idp.service"
+sudo cp -a /opt/shibboleth-idp/conf/idp.properties "$BACKUP_DIR/idp.properties"
+sudo cp -a /opt/shibboleth-idp/metadata/idp-metadata.xml "$BACKUP_DIR/idp-metadata.xml"
+
+sudo stat -c '%a %U:%G %n' "$BACKUP_DIR"
+sudo ls -la "$BACKUP_DIR"
+```
 
 ### 12.3 PKCS#12作成と配置
 
-秘密鍵、サーバ証明書、IIC CA証明書からJetty用PKCS#12を作成した。
+秘密鍵、サーバ証明書、CA証明書からJetty用PKCS#12を作成した。
 PKCS#12パスワードはランダム生成し、本書および作業ログには記録していない。
 
-配置先:
-
-```text
-/opt/jetty-base/etc/2faskw-keystore.p12
-```
-
-権限:
-
-```text
--rw------- jetty:jetty /opt/jetty-base/etc/2faskw-keystore.p12
-```
-
-元の秘密鍵を配置した一時ディレクトリ`/home/user/https-stage`は、PKCS#12作成後に削除した。
-
-サーバ自身がIIC CAを信頼できるよう、以下にもCA証明書を配置した。
-
-```text
-/etc/pki/ca-trust/source/anchors/private-ca.example.com.pem
-```
-
-適用コマンド:
-
+適応コマンド：
 ```bash
+# 1. Jetty用ディレクトリを用意
+
+sudo mkdir -p /opt/jetty-base/etc
+sudo chown jetty:jetty /opt/jetty-base/etc
+sudo chmod 0750 /opt/jetty-base/etc
+
+# 2. 証明書があるディレクトリでPKCS#12を作成（あくまで例）
+パスワードをランダムに生成
+
+P12_PASS="$(openssl rand -base64 36 | tr -d '\n')"
+
+※後に利用するので、コンソールは落とさない。
+
+openssl pkcs12 -export \
+  -inkey idp.example.com.key \
+  -in idp.example.com.crt \
+  -certfile private-ca.example.com.pem \
+  -name idp.example.com \
+  -out /tmp/idp-keystore.p12 \
+  -passout "pass:$P12_PASS"
+
+# 3. 配置
+sudo mkdir -p /opt/jetty-base/etc
+sudo chown jetty:jetty /opt/jetty-base/etc
+sudo chmod 0750 /opt/jetty-base/etc
+
+sudo install -o root -g root -m 0644 \
+  private-ca.example.com.pem \
+  /etc/pki/ca-trust/source/anchors/private-ca.example.com.pem
+
+# 4. 権限
+sudo install -o jetty -g jetty -m 0600 \
+  /tmp/idp-keystore.p12 \
+  /opt/jetty-base/etc/idp-keystore.p12
+
+# 5. 適応
 sudo update-ca-trust
 ```
 
@@ -649,59 +681,79 @@ java -jar "$JETTY_HOME/start.jar" --add-modules=https
 主要設定:
 
 ```properties
+# 1. SSL設定
+sudo vi /opt/jetty-base/start.d/ssl.ini
+
+#ssl.ini
 jetty.ssl.host=0.0.0.0
 jetty.ssl.port=443
 jetty.ssl.sniRequired=true
 jetty.ssl.sniHostCheck=true
 jetty.ssl.stsMaxAgeSeconds=31536000
 jetty.ssl.stsIncludeSubdomains=false
-jetty.sslContext.keyStorePath=/opt/jetty-base/etc/2faskw-keystore.p12
+jetty.sslContext.keyStorePath=/opt/jetty-base/etc/idp-keystore.p12
 jetty.sslContext.keyStoreType=PKCS12
-```
+jetty.sslContext.keyStorePassword=[パスワード]
+jetty.sslContext.keyManagerPassword=[パスワード]
 
-設定ファイル:
+※注意
+[パスワード] printf '%s\n' "$P12_PASS"
 
-```text
-/opt/jetty-base/start.d/ssl.ini
-/opt/jetty-base/start.d/https.ini
-/opt/jetty-base/start.d/http.ini
-```
+# 2. HTTPS設定
+sudo vi /opt/jetty-base/start.d/https.ini
 
-`ssl.ini`にはPKCS#12パスワードが含まれるため、権限を`0600 jetty:jetty`にしている。
+#https.ini
+--modules=https
+jetty.ssl.host=0.0.0.0
+jetty.ssl.port=443
+jetty.ssl.sniRequired=true
+jetty.ssl.sniHostCheck=true
+jetty.ssl.stsMaxAgeSeconds=31536000
+jetty.ssl.stsIncludeSubdomains=false
 
-HTTP 8080はローカル保守用として、ループバックのみに制限した。
+# 3. HTTP設定
+sudo vi /opt/jetty-base/start.d/http.ini
 
-```properties
+#http.ini
+--modules=http
 jetty.http.host=127.0.0.1
+jetty.http.port=8080
+
+# 4. 権限
+sudo chown jetty:jetty /opt/jetty-base/start.d/ssl.ini
+sudo chmod 0600 /opt/jetty-base/start.d/ssl.ini
+
+# 5. systemdから443番へbindできるよう、`jetty-idp.service`へ以下を追加
+sudo vi /etc/systemd/system/jetty-idp.service
+
+#jetty-idp.service
+[CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICEService]
+
+# 6. restart
+sudo systemctl daemon-reload
+sudo systemctl restart jetty-idp.service
 ```
 
-systemdから443番へbindできるよう、`jetty-idp.service`へ以下を追加した。
+### 12.5 IdP metadata確認
 
-```ini
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-```
 
-### 12.5 hostname・IdP設定・metadata
+HTTPS化後、`/opt/shibboleth-idp/metadata/idp-metadata.xml` の以下が
+FQDNになっていることを確認する。
 
-実行コマンド:
+- entityID
+- Scope
+- SingleSignOnService
+- SingleLogoutService
+
+確認コマンド:
 
 ```bash
-sudo hostnamectl set-hostname idp.example.com
+sudo grep -nE 'entityID|Scope|SingleSignOnService|SingleLogoutService' \
+  /opt/shibboleth-idp/metadata/idp-metadata.xml
 ```
 
-IdP設定:
-
-```properties
-idp.entityID=https://idp.example.com/idp/shibboleth
-idp.scope=example.com
-idp.cookie.secure = true
-```
-
-`/opt/shibboleth-idp/metadata/idp-metadata.xml`についても、entityID、Scope、
-SingleSignOnService、SingleLogoutServiceをFQDNへ更新した。
-
-変更後に以下を実行した。
+変更後に実行
 
 ```bash
 sudo -u jetty env \
@@ -715,19 +767,100 @@ sudo -u jetty env \
 実行コマンド:
 
 ```bash
+# firewalld が起動していることを確認
+sudo systemctl is-enabled firewalld
+sudo systemctl is-active firewalld
+
+# 現在の zone を確認
+sudo firewall-cmd --get-default-zone
+sudo firewall-cmd --get-active-zones
+
+# 現在の許可サービスを確認
+sudo firewall-cmd --list-services
+sudo firewall-cmd --list-ports
+
 sudo firewall-cmd --add-service=https --permanent
 sudo firewall-cmd --reload
-```
 
-許可サービス:
-
-```text
-cockpit dhcpv6-client https ssh
+sudo firewall-cmd --query-service=https
+sudo firewall-cmd --list-services
+sudo firewall-cmd --list-ports
 ```
 
 8080番はfirewalldで許可せず、Jettyも`127.0.0.1:8080`だけで待ち受ける。
 
+```
+sudo firewall-cmd --query-port=8080/tcp
+sudo firewall-cmd --query-service=http
+```
+
 ### 12.7 HTTPS検証結果
+
+Jetty起動・停止コマンド:
+
+```bash
+# 自動起動を有効化して起動
+sudo systemctl enable --now jetty-idp.service
+
+# 手動起動
+sudo systemctl start jetty-idp.service
+
+# 手動停止
+sudo systemctl stop jetty-idp.service
+
+# 再起動
+sudo systemctl restart jetty-idp.service
+
+# 自動起動の有効/無効確認
+sudo systemctl is-enabled jetty-idp.service
+
+# 起動状態確認
+sudo systemctl is-active jetty-idp.service
+sudo systemctl status jetty-idp.service --no-pager
+
+# 自動起動を無効化する場合
+sudo systemctl disable jetty-idp.service
+```
+
+Jetty確認コマンド:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart jetty-idp.service
+sleep 5
+
+sudo systemctl is-enabled jetty-idp.service
+sudo systemctl is-active jetty-idp.service
+sudo systemctl status jetty-idp.service --no-pager
+
+sudo journalctl -u jetty-idp.service -n 150 --no-pager
+
+sudo ss -ltnp | grep -E ':(443|8080)[[:space:]]'
+sudo ss -ltnp 'sport = :443'
+sudo ss -ltnp 'sport = :8080'
+
+curl -s -o /tmp/idp-root.out -w 'idp=%{http_code}\n' \
+  https://idp.example.com/idp/
+
+curl -s -o /tmp/idp-status.out -w 'status=%{http_code}\n' \
+  --resolve idp.example.com:443:127.0.0.1 \
+  https://idp.example.com/idp/status
+```
+
+Jettyが起動しない場合は、以下で直接原因を確認する。
+
+```bash
+sudo journalctl -u jetty-idp.service -n 200 --no-pager \
+  | grep -E 'Caused by|Exception|ERROR|WARN|KeyStore|password|Bind|Permission|No such|accessible'
+```
+
+待受確認:
+
+```bash
+sudo ss -ltnp | grep -E ':(443|8080)[[:space:]]'
+sudo ss -ltnp 'sport = :443'
+sudo ss -ltnp 'sport = :8080'
+```
 
 待受状態:
 
@@ -738,9 +871,27 @@ cockpit dhcpv6-client https ssh
 
 外部FQDN確認:
 
+```bash
+curl -s -o /tmp/idp-root.out -w 'idp=%{http_code}\n' \
+  https://idp.example.com/idp/
+
+curl -s -o /tmp/idp-8080.out -w 'external_8080=%{http_code}\n' \
+  --connect-timeout 5 \
+  http://idp.example.com:8080/idp/ || echo 'external HTTP 8080: connection refused'
+```
+
+外部FQDN確認:
+
 ```text
 https://idp.example.com/idp/: HTTP 200
 external HTTP 8080: connection refused
+```
+
+レスポンスヘッダー確認:
+
+```bash
+curl -s -D - -o /dev/null https://idp.example.com/idp/ \
+  | grep -iE 'strict-transport-security|set-cookie'
 ```
 
 レスポンス確認:
@@ -752,12 +903,42 @@ Set-Cookie: __Host-JSESSIONID=...; Path=/; Secure; HttpOnly
 
 ループバック経由の管理status確認:
 
+```bash
+curl -s -o /tmp/idp-status.out -w 'status=%{http_code}\n' \
+  --resolve idp.example.com:443:127.0.0.1 \
+  https://idp.example.com/idp/status
+```
+
+ループバック経由の管理status確認:
+
 ```text
 https://idp.example.com/idp/status: HTTP 200
 ```
 
 外部ネットワークからの`/idp/status`はIdPのアクセス制御によりHTTP 403となる。
 これは管理エンドポイントを外部公開しない正常な状態である。
+
+外部ネットワークからの管理status確認:
+
+```bash
+curl -s -o /tmp/idp-status-external.out -w 'status_external=%{http_code}\n' \
+  https://idp.example.com/idp/status
+```
+
+期待結果:
+
+```text
+status_external=403
+```
+
+証明書チェーン確認:
+
+```bash
+openssl s_client \
+  -connect idp.example.com:443 \
+  -servername idp.example.com \
+  -verify_return_error </dev/null
+```
 
 証明書チェーン確認:
 
@@ -770,6 +951,23 @@ verify return:1
 
 PostgreSQLとJetty IdPの再起動後も、以下を再確認した。
 
+```bash
+sudo systemctl restart postgresql-18.service
+sudo systemctl restart jetty-idp.service
+
+sudo systemctl is-enabled postgresql-18.service
+sudo systemctl is-active postgresql-18.service
+sudo systemctl is-enabled jetty-idp.service
+sudo systemctl is-active jetty-idp.service
+
+curl -s -o /tmp/idp-root-after-restart.out -w 'idp=%{http_code}\n' \
+  https://idp.example.com/idp/
+
+curl -s -o /tmp/idp-status-after-restart.out -w 'status=%{http_code}\n' \
+  --resolve idp.example.com:443:127.0.0.1 \
+  https://idp.example.com/idp/status
+```
+
 ```text
 postgresql-18.service: enabled / active
 jetty-idp.service: enabled / active
@@ -777,49 +975,22 @@ HTTPS /idp/: HTTP 200
 HTTPS /idp/status from loopback: HTTP 200
 ```
 
-### 12.8 クライアント側のCA信頼
+### 12.8 利用者端末側のCA信頼
 
-この証明書は公開認証局ではなく`private-ca.example.com`によって発行されている。
-クライアントOSまたはブラウザがIIC CAを信頼していない場合、証明書警告が表示される。
+この証明書は公開認証局ではなく `private-ca.example.com` によって発行されている。
+そのため、利用者端末、検証端末、ブラウザ、または連携SPが
+このprivate CAを信頼していない場合、証明書警告またはTLS検証エラーになる。
 
-利用端末へ以下のCA証明書を信頼済みルートCAとして配布する必要がある。
-
-```text
-iic_ca.ca.cert.pem
-```
-
-CAを信頼していない一般クライアントからの確認では、以下のエラーになることを確認した。
+利用者端末または検証端末には、以下のCA証明書を信頼済みルートCAとして配布する。
 
 ```text
-SSL certificate problem: self signed certificate in certificate chain
+private-ca.example.com.pem
 ```
 
 ## 13. LDAP認証設定
 
-既存PoCサーバー`192.168.0.174`のLDAP Password認証設定を
-`2faskw`へ移植した。
-
-### 13.1 バックアップ
-
-`2faskw`:
-
-```text
-/opt/backups/ldap-sp-<timestamp>
-```
-
-### 13.2 LDAP Password認証設定
-
-LDAP接続設定:
-
-```properties
-idp.authn.LDAP.authenticator = bindSearchAuthenticator
-idp.authn.LDAP.ldapURL = ldap://192.168.0.38:389
-idp.authn.LDAP.useStartTLS = false
-idp.authn.LDAP.baseDN = ou=People,dc=example,dc=com
-idp.authn.LDAP.subtreeSearch = false
-idp.authn.LDAP.userFilter = (cn={user})
-idp.authn.LDAP.bindDN = cn=Checker,dc=example,dc=com
-```
+LDAP Password認証を有効にするため、Shibboleth IdPのLDAP接続設定と
+bind DN資格情報を設定した。ここではサンプルLDAPとして `192.168.0.38` を使う。
 
 変更ファイル:
 
@@ -828,18 +999,139 @@ idp.authn.LDAP.bindDN = cn=Checker,dc=example,dc=com
 /opt/shibboleth-idp/credentials/secrets.properties
 ```
 
-`secrets.properties`はファイル全体を上書きせず、以下のLDAP資格情報2項目だけを
-`192.168.0.174`から移植した。値は作業ログおよび本書には記録していない。
+### 13.1 バックアップ
+
+```bash
+TS="$(date +%Y%m%d%H%M%S)"
+BACKUP_DIR="/opt/backups/ldap-$TS"
+
+sudo mkdir -p "$BACKUP_DIR"
+sudo chmod 0700 "$BACKUP_DIR"
+sudo chown root:root "$BACKUP_DIR"
+
+sudo cp -a /opt/shibboleth-idp/conf/ldap.properties \
+  "$BACKUP_DIR/ldap.properties"
+
+sudo cp -a /opt/shibboleth-idp/credentials/secrets.properties \
+  "$BACKUP_DIR/secrets.properties"
+
+sudo ls -la "$BACKUP_DIR"
+```
+
+### 13.2 LDAP接続設定
+
+`ldap.properties`を編集する。
+
+```bash
+sudo vi /opt/shibboleth-idp/conf/ldap.properties
+```
+
+設定例:
+
+```properties
+idp.authn.LDAP.authenticator = bindSearchAuthenticator
+idp.authn.LDAP.ldapURL = ldap://192.168.0.38:389
+idp.authn.LDAP.useStartTLS = false
+idp.authn.LDAP.baseDN = ou=People,dc=example,dc=com
+idp.authn.LDAP.subtreeSearch = false
+idp.authn.LDAP.userFilter = (uid={user})
+idp.authn.LDAP.bindDN = uid=user,dc=example,dc=com
+```
+
+確認:
+
+```bash
+sudo grep -nE \
+  'idp.authn.LDAP.(authenticator|ldapURL|useStartTLS|baseDN|subtreeSearch|userFilter|bindDN)' \
+  /opt/shibboleth-idp/conf/ldap.properties
+```
+
+### 13.3 LDAP bind DN資格情報
+
+`secrets.properties`はファイル全体を上書きせず、LDAP資格情報の項目だけを編集する。
+実際の値は作業ログおよび本書には記録しない。
 
 ```properties
 idp.authn.LDAP.bindDNCredential
 idp.attribute.resolver.LDAP.bindDNCredential
 ```
 
+編集:
+
+```bash
+sudo vi /opt/shibboleth-idp/credentials/secrets.properties
+```
+
+設定例:
+
+```properties
+idp.authn.LDAP.bindDNCredential = <LDAP bind password>
+idp.attribute.resolver.LDAP.bindDNCredential = <LDAP bind password>
+```
+
+権限確認:
+
+```bash
+sudo chown root:jetty /opt/shibboleth-idp/credentials/secrets.properties
+sudo chmod 0640 /opt/shibboleth-idp/credentials/secrets.properties
+sudo ls -l /opt/shibboleth-idp/credentials/secrets.properties
+```
+
+値を表示せずに項目の存在だけ確認する。
+
+```bash
+sudo grep -nE \
+  '^(idp.authn.LDAP.bindDNCredential|idp.attribute.resolver.LDAP.bindDNCredential)[[:space:]]*=' \
+  /opt/shibboleth-idp/credentials/secrets.properties
+```
+
+### 13.4 LDAP疎通確認
+
 LDAP疎通確認用として以下を追加した。
 
 ```bash
 sudo dnf -y install openldap-clients
+```
+
+TCP接続確認:
+
+```bash
+nc -vz 192.168.0.38 389
+```
+
+`nc`が無い場合:
+
+```bash
+timeout 5 bash -c '</dev/tcp/192.168.0.38/389' \
+  && echo 'LDAP server TCP/389 connection: OK' \
+  || echo 'LDAP server TCP/389 connection: FAIL'
+```
+
+anonymous rootDSE確認:
+
+```bash
+ldapsearch -x \
+  -H ldap://192.168.0.38:389 \
+  -s base \
+  -b '' \
+  namingContexts
+```
+
+Checker bind確認:
+
+```bash
+LDAP_BIND_PASSWORD='<LDAP bind password>'
+
+ldapsearch -x \
+  -H ldap://192.168.0.38:389 \
+  -D 'cn=Checker,dc=example,dc=com' \
+  -w "$LDAP_BIND_PASSWORD" \
+  -b 'ou=People,dc=example,dc=com' \
+  -s one \
+  '(cn=user001)' \
+  dn
+
+unset LDAP_BIND_PASSWORD
 ```
 
 確認結果:
@@ -850,56 +1142,21 @@ LDAP anonymous rootDSE query: OK
 LDAP Checker bind: FAIL - Invalid credentials (49)
 ```
 
-`2faskw`へ移植した資格情報は、`192.168.0.174`上の値と文字数・SHA-256が一致している。
-そのため転送不備ではなく、保存済みChecker資格情報の失効・変更、またはLDAP側ポリシーを
-確認する必要がある。LDAP実ユーザーのログイン試験は、有効なCheckerパスワードへ更新後に行う。
+### 13.5 IdP反映
 
-### 13.3 SP設定の取り消し
-
-当初はSimpleSAMLphp SP metadataも移植したが、現段階では不要のため取り消した。
-
-`2faskw`で取り消した内容:
-
-```text
-LocalSPTest MetadataProvider: 削除
-/opt/shibboleth-idp/metadata/sp-test.xml: 削除
-relying-party.xmlのPoC用Assertion暗号化無効化: 追加前へ復元
-```
-
-`192.168.0.174`のSimpleSAMLphp設定も、`2faskw`登録前の状態へ復元した。
-
-取り消し前バックアップ:
-
-```text
-2faskw: /opt/backups/pre-sp-removal-<timestamp>
-192.168.0.174: /opt/backups/pre-2faskw-sp-removal-<timestamp>
-```
-
-### 13.4 再構築・検証結果
-
-実行:
+設定変更後、IdPを再起動してログを確認する。
 
 ```bash
-sudo -u jetty env \
-  JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
-  PATH=/usr/lib/jvm/java-21-openjdk/bin:/usr/bin:/bin \
-  /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+sleep 5
+sudo systemctl is-active jetty-idp.service
+sudo systemctl status jetty-idp.service --no-pager
 
-sudo systemctl restart jetty-idp
-```
+sudo journalctl -u jetty-idp.service -n 200 --no-pager \
+  | grep -iE 'error|exception|failed|caused by'
 
-確認結果:
-
-```text
-jetty-idp.service: active
-HTTPS /idp/: HTTP 200
-HTTPS /idp/status from loopback: HTTP 200
-LocalSPTest MetadataProvider count: 0
-/opt/shibboleth-idp/metadata/sp-test.xml: removed
-LDAP URL: ldap://192.168.0.38:389
-LDAP authenticator: bindSearchAuthenticator
-LDAP credential properties: 2
-LDAP real-user login: not tested because Checker bind is rejected
+sudo journalctl -u jetty-idp.service -n 300 --no-pager \
+  | grep -i ldap
 ```
 
 ## 14. TOTP・WebAuthn Plugin設定
@@ -946,9 +1203,53 @@ WebAuthn:
 /opt/backups/totp-webauthn-plugin-<timestamp>
 ```
 
+バックアップ（必要なら）:
+
+```bash
+TS="$(date +%Y%m%d%H%M%S)"
+BACKUP_DIR="/opt/backups/totp-webauthn-plugin-$TS"
+
+sudo mkdir -p "$BACKUP_DIR"
+sudo chmod 0700 "$BACKUP_DIR"
+sudo chown root:root "$BACKUP_DIR"
+
+sudo cp -a /opt/shibboleth-idp/conf "$BACKUP_DIR/conf"
+sudo cp -a /opt/shibboleth-idp/credentials "$BACKUP_DIR/credentials"
+sudo cp -a /opt/shibboleth-idp/edit-webapp "$BACKUP_DIR/edit-webapp"
+sudo cp -a /opt/shibboleth-idp/metadata "$BACKUP_DIR/metadata"
+
+sudo cp -a /opt/shibboleth-idp/system "$BACKUP_DIR/system" 2>/dev/null || true
+sudo cp -a /opt/shibboleth-idp/dist "$BACKUP_DIR/dist" 2>/dev/null || true
+
+sudo /opt/shibboleth-idp/bin/plugin.sh -l \
+  > /tmp/shibboleth-plugins-before.txt
+sudo install -o root -g root -m 0600 \
+  /tmp/shibboleth-plugins-before.txt \
+  "$BACKUP_DIR/shibboleth-plugins-before.txt"
+rm -f /tmp/shibboleth-plugins-before.txt
+
+sudo find "$BACKUP_DIR" -maxdepth 2 -type f | sort \
+  > /tmp/totp-webauthn-backup-files.txt
+sudo install -o root -g root -m 0600 \
+  /tmp/totp-webauthn-backup-files.txt \
+  "$BACKUP_DIR/backup-files.txt"
+rm -f /tmp/totp-webauthn-backup-files.txt
+
+sudo stat -c '%a %U:%G %n' "$BACKUP_DIR"
+sudo ls -la "$BACKUP_DIR"
+```
+
 ### 14.2 WebAuthn設定
 
 WebAuthnを`2faskw`のHTTPS FQDNで使用できるように設定した。
+
+設定ファイルを編集する。
+
+```bash
+sudo vi /opt/shibboleth-idp/conf/authn/webauthn.properties
+sudo vi /opt/shibboleth-idp/conf/authn/webauthn-registration.properties
+sudo vi /opt/shibboleth-idp/conf/access-control.xml
+```
 
 ```properties
 idp.authn.webauthn.relyingPartyId = idp.example.com
@@ -958,18 +1259,49 @@ idp.authn.webauthn.2fa.allowedPreviousFactors = authn/Password
 idp.authn.webauthn.admin.registration.accessPolicy = AccessByCurrentUser
 ```
 
-変更ファイル:
+`access-control.xml` では、上記 `accessPolicy` から参照する
+`AccessByCurrentUser` policyを定義する。これはWebAuthn credential登録画面で、
+認証済みユーザー本人による登録だけを許可するための設定である。
 
-```text
-/opt/shibboleth-idp/conf/authn/webauthn.properties
-/opt/shibboleth-idp/conf/authn/webauthn-registration.properties
-/opt/shibboleth-idp/conf/access-control.xml
+`shibboleth.AccessControlPolicies` の `util:map` 内に以下を追加または確認する。
+
+```xml
+<entry key="AccessByCurrentUser">
+    <bean parent="shibboleth.PredicateAccessControl">
+        <constructor-arg>
+            <bean id="AccessByCurrentUserPredicate"
+                  class="net.shibboleth.idp.plugin.authn.webauthn.admin.impl.AllowCurrentUserAccessPredicate" />
+        </constructor-arg>
+    </bean>
+</entry>
 ```
 
-設定変更前バックアップ:
+設定確認:
 
-```text
-/opt/backups/webauthn-config-<timestamp>
+```bash
+sudo grep -nE \
+  'idp.authn.webauthn.(relyingPartyId|relyingPartyName|2fa.enabled|2fa.allowedPreviousFactors|admin.registration.accessPolicy)' \
+  /opt/shibboleth-idp/conf/authn/webauthn.properties \
+  /opt/shibboleth-idp/conf/authn/webauthn-registration.properties
+
+sudo grep -n 'AccessByCurrentUser' \
+  /opt/shibboleth-idp/conf/access-control.xml
+```
+
+XML構文確認:
+
+```bash
+sudo xmllint --noout /opt/shibboleth-idp/conf/access-control.xml
+```
+
+再起動
+```bash
+sudo env \
+  JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
+  PATH=/usr/lib/jvm/java-21-openjdk/bin:/usr/bin:/bin \
+  /opt/shibboleth-idp/bin/build.sh
+
+sudo systemctl restart jetty-idp.service
 ```
 
 WebAuthn credential登録URL:
@@ -977,6 +1309,15 @@ WebAuthn credential登録URL:
 ```text
 https://idp.example.com/idp/profile/admin/webauthn-registration
 ```
+
+登録URL確認:
+
+```bash
+curl -k -s -o /tmp/webauthn-registration.out -w 'webauthn_registration=%{http_code}\n' \
+  https://idp.example.com/idp/profile/admin/webauthn-registration
+```
+
+未認証状態では、認証フロー開始を示すHTTP 302またはログイン画面のHTTP 200を期待する。
 
 ### 14.3 WAR再構築
 
@@ -992,27 +1333,9 @@ sudo env \
 sudo systemctl restart jetty-idp
 ```
 
-### 14.4 検証結果
+### 14.4 2FAS-KWをインストール
+[<mark>2FAS-KWを構築する：INSTALL.md</mark>](./INSTALL.md)　を参照
 
-```text
-Plugin: net.shibboleth.idp.plugin.authn.totp Current Version: 2.3.1
-Plugin: net.shibboleth.idp.plugin.authn.webauthn Current Version: 1.4.2
-Module: idp.authn.TOTP [ENABLED]
-Module: idp.authn.WebAuthn [ENABLED]
-jetty-idp.service: active
-HTTPS /idp/: HTTP 200
-HTTPS /idp/status from loopback: HTTP 200
-WebAuthn registration URL: HTTP 302, authentication flow started
-Current startup ERROR: none
-```
-
-### 14.5 残作業・注意事項
-
-- LDAP Checker資格情報が拒否されているため、WebAuthn credentialの実登録は未試験。
-- TOTP seed供給はGraphicalMatrix DB参照方式へ設定したが、実ユーザーでの登録・認証は未試験。
-- WebAuthn credential保存先をGraphicalMatrix DB上のJDBC StorageServiceへ変更した。
-- 既存のメモリ保存WebAuthn credentialはDBへ移行されないため、WebAuthn利用ユーザーは再登録が必要。
-- DB永続化後のWebAuthn登録・ログイン成功を確認し、JDBCAcceleratorも有効化した。
 
 ### 14.6 WebAuthn credentialをGraphicalMatrix DBへ保存する
 
@@ -2332,7 +2655,7 @@ LB -----+
         +-- IdP-2
               |
               v
-        DB VIP: 例 192.0.2.xxx:5432
+        DB VIP: 例 192.168.0.xxx:5432
               |
               v
         HAProxy active node
