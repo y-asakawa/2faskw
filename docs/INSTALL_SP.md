@@ -43,11 +43,11 @@ SimpleSAMLphpのURL検証で拒否された。そのため、ホスト名とauth
 読み取り専用で確認した結果。
 
 ```bash
-ssh operator@192.168.81.61 'hostnamectl; hostname -f'
-ssh operator@192.168.81.61 'sudo httpd -t'
-ssh operator@192.168.81.61 'systemctl is-active httpd php-fpm'
-ssh operator@192.168.81.61 'systemctl is-enabled httpd php-fpm'
-ssh operator@192.168.81.61 'sudo firewall-cmd --list-services'
+ssh user@192.168.81.61 'hostnamectl; hostname -f'
+ssh user@192.168.81.61 'sudo httpd -t'
+ssh user@192.168.81.61 'systemctl is-active httpd php-fpm'
+ssh user@192.168.81.61 'systemctl is-enabled httpd php-fpm'
+ssh user@192.168.81.61 'sudo firewall-cmd --list-services'
 ```
 
 結果。
@@ -91,11 +91,11 @@ Location: https://idp.example.com/idp/profile/SAML2/Redirect/SSO?...SigAlg=...rs
 読み取り専用で確認した結果。
 
 ```bash
-ssh operator@192.168.81.60 'hostnamectl; hostname -f'
-ssh operator@192.168.81.60 'systemctl is-active jetty-idp.service'
-ssh operator@192.168.81.60 \
+ssh user@192.168.81.60 'hostnamectl; hostname -f'
+ssh user@192.168.81.60 'systemctl is-active jetty-idp.service'
+ssh user@192.168.81.60 \
   'sudo grep -n -A5 -B3 SP2faskwTest /opt/shibboleth-idp/conf/metadata-providers.xml'
-ssh operator@192.168.81.60 \
+ssh user@192.168.81.60 \
   'sudo grep -nE "EntityDescriptor|AssertionConsumerService|2faskwsp" /opt/shibboleth-idp/metadata/2faskw_sp.xml'
 ```
 
@@ -120,56 +120,56 @@ DNSが正式に安定して解決できるなら、このhosts固定は不要に
 
 ## 3. リモートインストールログの要約
 
-SPサーバのログは`/home/operator/install-sp-01-packages.log`から
-`/home/operator/install-sp-09-final-validation.log`まで存在する。
+SPサーバのログは`/home/user/install-sp-01-packages.log`から
+`/home/user/install-sp-09-final-validation.log`まで存在する。
 これらは主に初回構築時の`2faskw_sp`およびIP正規URL暫定設定のログであり、
 最終的な`2faskwsp`変更後の現行状態とは一部異なる。
 
 ```text
-/home/operator/install-sp-01-packages.log
+/home/user/install-sp-01-packages.log
   httpd, mod_ssl, PHP 8.3.29, php-fpm, php-ldap, php-xml等を導入。
   httpd/php-fpmをenable。
 
-/home/operator/install-sp-02-simplesamlphp.log
+/home/user/install-sp-02-simplesamlphp.log
   SimpleSAMLphp 2.5.2 full packageを取得。
   SHA-256検証OK。
   /opt/simplesamlphp-2.5.2 を展開。
   /opt/simplesamlphp/bin/sanitycheck.php は存在せず実行不可。
 
-/home/operator/install-sp-03-configure.log
+/home/user/install-sp-03-configure.log
   TLSファイル、SimpleSAMLphp SP鍵、config.php、authsources.php、
   saml20-idp-remote.php、Apache設定、テストアプリを配置。
   PHP構文チェックOK。
   ただし標準ssl.confがlocalhost.crtを参照してApache構文エラー。
 
-/home/operator/install-sp-04-apache-start.log
+/home/user/install-sp-04-apache-start.log
   標準ssl.conf退避後、Apache Syntax OK。
   firewalldでhttp/httpsを許可。
   httpd/php-fpm active。
   TCP/80, TCP/443待受を確認。
 
-/home/operator/install-sp-05-local-validation.log
+/home/user/install-sp-05-local-validation.log
   初回証明書はCN=2faskw_sp.example.com。
   / はHTTP 200。
   /simplesaml/ と /simplesaml/admin/ はHTTP 500。
   原因はアンダースコア付きFQDNをSimpleSAMLphpが拒否したため。
 
-/home/operator/install-sp-06-canonical-ip.log
+/home/user/install-sp-06-canonical-ip.log
   baseurlpath/entityIDを一時的に https://192.168.81.61/ 系へ変更。
   SimpleSAMLphp cache clear実行。
   httpd/php-fpm active。
 
-/home/operator/install-sp-07-ip-validation.log
+/home/user/install-sp-07-ip-validation.log
   IP正規URLで / はHTTP 200、/simplesaml/ はHTTP 303、
   SP metadataはHTTP 200。
   古い2faskw_sp URLに対するInvalid destination URLの履歴ログあり。
 
-/home/operator/install-sp-08-fix-idp-metadata.log
+/home/user/install-sp-08-fix-idp-metadata.log
   saml20-idp-remote.phpのEndpoint形式をSimpleSAMLphp 2.5.2向けに修正。
   login startがHTTP 303になり、IdP SSOへリダイレクトすることを確認。
   修正前のEndpoint形式エラー履歴あり。
 
-/home/operator/install-sp-09-final-validation.log
+/home/user/install-sp-09-final-validation.log
   IP正規URL時点でApache Syntax OK、サービスactive、SP metadata HTTP 200、
   署名付きAuthnRequest生成、firewalld許可サービスを確認。
 ```
@@ -177,12 +177,12 @@ SPサーバのログは`/home/operator/install-sp-01-packages.log`から
 IdPサーバのログ。
 
 ```text
-/home/operator/install-sp-idp-01-metadata.log
+/home/user/install-sp-idp-01-metadata.log
   SP metadataを /opt/shibboleth-idp/metadata/2faskw_sp.xml に配置。
   metadata-providers.xmlへSP2faskwTestを追加。
   XML検証OK。
 
-/home/operator/install-sp-idp-02-restart-validation.log
+/home/user/install-sp-idp-02-restart-validation.log
   jetty-idp.service active。
   /idp/status HTTP 200。
   FilesystemMetadataResolver SP2faskwTest が metadataFile を正常ロード。
@@ -221,24 +221,24 @@ scp -i ~/.ssh/id_ed25519 \
   SP_test/202606041921132faskwsp/2faskwsp.cert.pem \
   SP_test/202606041921132faskwsp/2faskwsp.key \
   SP_test/202606041921132faskwsp/iic_ca.ca.cert.pem \
-  operator@192.168.81.61:/home/operator/
+  user@192.168.81.61:/home/user/
 ```
 
 SPサーバで実行。
 
 ```bash
-sudo install -o root -g root -m 0644 /home/operator/2faskwsp.cert.pem \
+sudo install -o root -g root -m 0644 /home/user/2faskwsp.cert.pem \
   /etc/pki/tls/certs/2faskwsp.cert.pem
-sudo install -o root -g root -m 0644 /home/operator/iic_ca.ca.cert.pem \
+sudo install -o root -g root -m 0644 /home/user/iic_ca.ca.cert.pem \
   /etc/pki/tls/certs/iic_ca.ca.cert.pem
-sudo install -o root -g root -m 0600 /home/operator/2faskwsp.key \
+sudo install -o root -g root -m 0600 /home/user/2faskwsp.key \
   /etc/pki/tls/private/2faskwsp.key
 sudo sh -c 'cat /etc/pki/tls/certs/2faskwsp.cert.pem /etc/pki/tls/certs/iic_ca.ca.cert.pem > /etc/pki/tls/certs/2faskwsp.fullchain.pem'
 
 sudo mkdir -p /opt/simplesamlphp/cert
-sudo install -o root -g apache -m 0640 /home/operator/2faskwsp.key \
+sudo install -o root -g apache -m 0640 /home/user/2faskwsp.key \
   /opt/simplesamlphp/cert/2faskwsp.key
-sudo install -o root -g apache -m 0644 /home/operator/2faskwsp.cert.pem \
+sudo install -o root -g apache -m 0644 /home/user/2faskwsp.cert.pem \
   /opt/simplesamlphp/cert/2faskwsp.cert.pem
 ```
 

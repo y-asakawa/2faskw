@@ -167,7 +167,7 @@ JMeter本体はApache公式配布物を利用する。
 
 ```bash
 sudo mkdir -p /opt/jmeter
-sudo chown operator:operator /opt/jmeter
+sudo chown user:user /opt/jmeter
 ```
 
 ## 9. ディレクトリ構成
@@ -191,7 +191,7 @@ sudo chown operator:operator /opt/jmeter
 
 ```bash
 sudo mkdir -p /opt/graphicalmatrix-loadtest/{scripts,data,results,logs}
-sudo chown -R operator:operator /opt/graphicalmatrix-loadtest
+sudo chown -R user:user /opt/graphicalmatrix-loadtest
 ```
 
 ## 10. k6 基本スクリプト例
