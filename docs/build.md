@@ -10,7 +10,15 @@ This builds the plugin JAR and copies runtime dependencies under `target/`.
 
 ## Release ZIPs
 
-Official release ZIPs are published separately from source builds.
+Build the plugin and admin-tool release ZIPs:
+
+```bash
+./scripts/build-plugin-package.sh
+```
+
+The script runs `mvn -B -ntp clean package` first, then assembles the release
+directories and ZIP files.
+
 Artifacts built locally from source are not official release packages unless
 they are produced and signed by the maintainer release process.
 
