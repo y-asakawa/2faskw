@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import net.shibboleth.idp.authn.ExternalAuthentication;
+import org.owasp.encoder.Encode;
 
 public final class GraphicalMatrixStartServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
@@ -153,7 +154,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             final List<String> displayOrder, final GraphicalMatrixConfig config,
             final String errorMessage) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
-        final String context = GraphicalMatrixSupport.html(request.getContextPath());
+        final String context = Encode.forHtml(request.getContextPath());
         final int columns = config.getColumns();
         final int choiceCount = config.getChoiceCount();
         String selectionInstruction = config.isOrderedSelectionRequired()
@@ -178,19 +179,19 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("<body>");
             out.println("<main>");
             out.println("  <h1>追加認証</h1>");
-            out.println("  <p class=\"lead\">" + GraphicalMatrixSupport.html(selectionInstruction) + "</p>");
+            out.println("  <p class=\"lead\">" + Encode.forHtml(selectionInstruction) + "</p>");
             if (errorMessage != null && !errorMessage.isEmpty()) {
-                out.println("  <div class=\"error\" role=\"alert\">" + GraphicalMatrixSupport.html(errorMessage) + "</div>");
+                out.println("  <div class=\"error\" role=\"alert\">" + Encode.forHtml(errorMessage) + "</div>");
             }
             out.println("  <section class=\"panel\" aria-label=\"GraphicalMatrix\">");
             out.println("    <form id=\"graphicalmatrix-form\" method=\"post\" action=\"" + context + "/graphicalmatrix/verify\" autocomplete=\"off\">");
-            out.println("      <input type=\"hidden\" name=\"key\" value=\"" + GraphicalMatrixSupport.html(key) + "\">");
-            out.println("      <input type=\"hidden\" name=\"challengeId\" value=\"" + GraphicalMatrixSupport.html(challengeId) + "\">");
-            out.println("      <input type=\"hidden\" name=\"csrfToken\" value=\"" + GraphicalMatrixSupport.html(csrfToken) + "\">");
+            out.println("      <input type=\"hidden\" name=\"key\" value=\"" + Encode.forHtml(key) + "\">");
+            out.println("      <input type=\"hidden\" name=\"challengeId\" value=\"" + Encode.forHtml(challengeId) + "\">");
+            out.println("      <input type=\"hidden\" name=\"csrfToken\" value=\"" + Encode.forHtml(csrfToken) + "\">");
             out.println("      <input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
             out.println("      <div class=\"grid\" style=\"--graphicalmatrix-columns: " + columns + ";\">");
             for (final String id : displayOrder) {
-                final String safeId = GraphicalMatrixSupport.html(id);
+                final String safeId = Encode.forHtml(id);
                 out.println("        <button class=\"tile\" type=\"button\" data-id=\"" + safeId + "\" aria-label=\"" + safeId + "\">");
                 out.println("          <img src=\"" + context + "/graphicalmatrix/graphical?id=" + safeId + "\" alt=\"" + safeId + "\">");
                 out.println("          <span class=\"badge\"></span>");
@@ -312,8 +313,8 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("<main>");
             out.println("  <h1>追加認証</h1>");
             out.println("  <section class=\"panel\" aria-label=\"GraphicalMatrix unavailable\">");
-            out.println("    <div class=\"error\" role=\"alert\">" + GraphicalMatrixSupport.html(title) + "</div>");
-            out.println("    <p>" + GraphicalMatrixSupport.html(message) + "</p>");
+            out.println("    <div class=\"error\" role=\"alert\">" + Encode.forHtml(title) + "</div>");
+            out.println("    <p>" + Encode.forHtml(message) + "</p>");
             out.println("  </section>");
             out.println("</main>");
             out.println("</body>");
@@ -325,7 +326,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             final String key, final String user, final String seed, final String csrfToken,
             final String errorMessage) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
-        final String context = GraphicalMatrixSupport.html(request.getContextPath());
+        final String context = Encode.forHtml(request.getContextPath());
         final String issuer = "2FAS-KW";
         final String otpauth = GraphicalMatrixTotpSupport.otpauthUrl(issuer, user, seed);
         final String qrDataUri;
@@ -373,19 +374,19 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("  <h1>TOTP登録</h1>");
             out.println("  <p class=\"lead\">認証アプリでQRコードを読み取り、表示された6桁コードを入力してください。</p>");
             if (errorMessage != null && !errorMessage.isEmpty()) {
-                out.println("  <div class=\"error\" role=\"alert\">" + GraphicalMatrixSupport.html(errorMessage) + "</div>");
+                out.println("  <div class=\"error\" role=\"alert\">" + Encode.forHtml(errorMessage) + "</div>");
             }
             out.println("  <section class=\"panel\" aria-label=\"TOTP registration\">");
             out.println("    <div class=\"layout\">");
             out.println("      <img class=\"qr\" src=\"" + qrDataUri + "\" alt=\"TOTP登録QRコード\">");
             out.println("      <div>");
-            out.println("        <p>アカウント: <strong>" + GraphicalMatrixSupport.html(user) + "</strong></p>");
+            out.println("        <p>アカウント: <strong>" + Encode.forHtml(user) + "</strong></p>");
             out.println("        <p>QRコードを読めない場合は、認証アプリに次のキーを手入力してください。</p>");
-            out.println("        <p><code>" + GraphicalMatrixSupport.html(seed) + "</code></p>");
+            out.println("        <p><code>" + Encode.forHtml(seed) + "</code></p>");
             out.println("        <form method=\"post\" action=\"" + context + "/graphicalmatrix/verify\" autocomplete=\"off\">");
             out.println("          <input type=\"hidden\" name=\"mode\" value=\"totp-register\">");
-            out.println("          <input type=\"hidden\" name=\"key\" value=\"" + GraphicalMatrixSupport.html(key) + "\">");
-            out.println("          <input type=\"hidden\" name=\"csrfToken\" value=\"" + GraphicalMatrixSupport.html(csrfToken) + "\">");
+            out.println("          <input type=\"hidden\" name=\"key\" value=\"" + Encode.forHtml(key) + "\">");
+            out.println("          <input type=\"hidden\" name=\"csrfToken\" value=\"" + Encode.forHtml(csrfToken) + "\">");
             out.println("          <label for=\"tokencode\">6桁コード</label>");
             out.println("          <input id=\"tokencode\" name=\"tokencode\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]{6}\" maxlength=\"6\" required autofocus>");
             out.println("          <div class=\"actions\"><button type=\"submit\">登録して続行</button></div>");

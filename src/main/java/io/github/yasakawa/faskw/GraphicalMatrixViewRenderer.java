@@ -11,6 +11,7 @@ import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.owasp.encoder.Encode;
 
 public final class GraphicalMatrixViewRenderer {
     private GraphicalMatrixViewRenderer() {
@@ -33,9 +34,9 @@ public final class GraphicalMatrixViewRenderer {
         final Map<String, String> values = new LinkedHashMap<>();
         values.put("title", "追加認証");
         values.put("heading", "追加認証");
-        values.put("lead", GraphicalMatrixSupport.html(selectionInstruction));
-        values.put("contextPath", GraphicalMatrixSupport.html(context));
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/verify"));
+        values.put("lead", Encode.forHtml(selectionInstruction));
+        values.put("contextPath", Encode.forHtml(context));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/verify"));
         values.put("columns", String.valueOf(config.getColumns()));
         values.put("rows", String.valueOf(config.getRows()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
@@ -77,7 +78,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "追加認証");
         values.put("heading", "追加認証");
         values.put("errorBlock", errorBlock(title));
-        values.put("message", GraphicalMatrixSupport.html(message));
+        values.put("message", Encode.forHtml(message));
         return renderTemplate(response, config.getUnavailableTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -94,13 +95,13 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "TOTP登録");
         values.put("heading", "TOTP登録");
         values.put("lead", "認証アプリでQRコードを読み取り、表示された6桁コードを入力してください。");
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/verify"));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/verify"));
         values.put("errorBlock", errorBlock(errorMessage));
-        values.put("qrDataUri", GraphicalMatrixSupport.html(qrDataUri));
-        values.put("user", GraphicalMatrixSupport.html(user));
-        values.put("seed", GraphicalMatrixSupport.html(seed));
-        values.put("key", GraphicalMatrixSupport.html(key));
-        values.put("csrfToken", GraphicalMatrixSupport.html(csrfToken));
+        values.put("qrDataUri", Encode.forHtml(qrDataUri));
+        values.put("user", Encode.forHtml(user));
+        values.put("seed", Encode.forHtml(seed));
+        values.put("key", Encode.forHtml(key));
+        values.put("csrfToken", Encode.forHtml(csrfToken));
         return renderTemplate(response, config.getTotpRegisterTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -116,7 +117,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "GraphicalMatrix変更");
         values.put("heading", "GraphicalMatrix変更");
         values.put("lead", "LDAPのユーザーIDとパスワードで認証してください。続けて現在のGraphicalMatrix確認を行います。");
-        values.put("changeUrl", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
+        values.put("changeUrl", Encode.forHtml(context + "/graphicalmatrix/change"));
         values.put("errorBlock", errorBlock(errorMessage));
         return renderTemplate(response, config.getChangeStartTemplatePath().toAbsolutePath().normalize(), values);
     }
@@ -134,7 +135,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "GraphicalMatrix変更");
         values.put("heading", "現在のGraphicalMatrix確認");
         values.put("lead", changeCurrentLead(config));
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
         values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
         values.put("errorBlock", errorBlock(errorMessage));
@@ -158,7 +159,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "GraphicalMatrix変更");
         values.put("heading", "新しいGraphicalMatrix登録");
         values.put("lead", changeNewLead(config));
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
         values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
         values.put("errorBlock", errorBlock(errorMessage));
@@ -184,7 +185,7 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "GraphicalMatrix変更");
         values.put("heading", "GraphicalMatrix変更");
         values.put("lead", forceChangeLead(config));
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/verify"));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/verify"));
         values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
         values.put("errorBlock", errorBlock(errorMessage));
@@ -210,9 +211,9 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "MFA設定変更");
         values.put("heading", "MFA設定変更");
         values.put("lead", "変更する項目を選択してください。");
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
-        values.put("user", GraphicalMatrixSupport.html(user));
-        values.put("csrfToken", GraphicalMatrixSupport.html(csrfToken));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
+        values.put("user", Encode.forHtml(user));
+        values.put("csrfToken", Encode.forHtml(csrfToken));
         values.put("methodChangeAction", methodChangeAction(context, user, csrfToken, methodChangeAllowed));
         values.put("errorBlock", errorBlock(errorMessage));
         return renderTemplate(response, config.getChangeMenuTemplatePath().toAbsolutePath().normalize(), values);
@@ -232,9 +233,9 @@ public final class GraphicalMatrixViewRenderer {
         values.put("title", "MFA方式変更");
         values.put("heading", "MFA方式変更");
         values.put("lead", "新しいGraphicalMatrixを登録しました。次回ログインから利用するMFA方式を選択してください。");
-        values.put("formAction", GraphicalMatrixSupport.html(context + "/graphicalmatrix/change"));
-        values.put("user", GraphicalMatrixSupport.html(user));
-        values.put("csrfToken", GraphicalMatrixSupport.html(csrfToken));
+        values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
+        values.put("user", Encode.forHtml(user));
+        values.put("csrfToken", Encode.forHtml(csrfToken));
         values.put("errorBlock", errorBlock(errorMessage));
         values.put("graphicalMatrixChecked", "GRAPHICALMATRIX".equals(normalized) ? " checked" : "");
         values.put("totpChecked", "TOTP".equals(normalized) ? " checked" : "");
@@ -253,8 +254,8 @@ public final class GraphicalMatrixViewRenderer {
         final Map<String, String> values = baseValues(request, config);
         values.put("title", "GraphicalMatrix変更完了");
         values.put("heading", "GraphicalMatrix変更完了");
-        values.put("user", GraphicalMatrixSupport.html(user));
-        values.put("message", GraphicalMatrixSupport.html(message));
+        values.put("user", Encode.forHtml(user));
+        values.put("message", Encode.forHtml(message));
         return renderTemplate(response, config.getChangeCompleteTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -263,7 +264,7 @@ public final class GraphicalMatrixViewRenderer {
             return "";
         }
         return "<link rel=\"stylesheet\" href=\""
-            + GraphicalMatrixSupport.html(contextPath)
+            + Encode.forHtml(contextPath)
             + "/graphicalmatrix/assets/graphicalmatrix.css\">";
     }
 
@@ -272,7 +273,7 @@ public final class GraphicalMatrixViewRenderer {
             return "";
         }
         return "<div class=\"error\" role=\"alert\">"
-            + GraphicalMatrixSupport.html(errorMessage) + "</div>";
+            + Encode.forHtml(errorMessage) + "</div>";
     }
 
     private static String changeCurrentLead(final GraphicalMatrixConfig config) {
@@ -307,7 +308,7 @@ public final class GraphicalMatrixViewRenderer {
             final GraphicalMatrixConfig config) {
         final String context = request.getContextPath();
         final Map<String, String> values = new LinkedHashMap<>();
-        values.put("contextPath", GraphicalMatrixSupport.html(context));
+        values.put("contextPath", Encode.forHtml(context));
         values.put("cssLink", cssLink(context, config));
         return values;
     }
@@ -331,11 +332,11 @@ public final class GraphicalMatrixViewRenderer {
     private static String hiddenInputs(final String key, final String challengeId, final String csrfToken) {
         final StringBuilder out = new StringBuilder();
         out.append("<input type=\"hidden\" name=\"key\" value=\"")
-            .append(GraphicalMatrixSupport.html(key)).append("\">\n");
+            .append(Encode.forHtml(key)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"challengeId\" value=\"")
-            .append(GraphicalMatrixSupport.html(challengeId)).append("\">\n");
+            .append(Encode.forHtml(challengeId)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"csrfToken\" value=\"")
-            .append(GraphicalMatrixSupport.html(csrfToken)).append("\">\n");
+            .append(Encode.forHtml(csrfToken)).append("\">\n");
         out.append("<input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
         return out.toString();
     }
@@ -345,11 +346,11 @@ public final class GraphicalMatrixViewRenderer {
         final StringBuilder out = new StringBuilder();
         out.append("<input type=\"hidden\" name=\"mode\" value=\"verify-current\">\n");
         out.append("<input type=\"hidden\" name=\"user\" value=\"")
-            .append(GraphicalMatrixSupport.html(user)).append("\">\n");
+            .append(Encode.forHtml(user)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"challengeId\" value=\"")
-            .append(GraphicalMatrixSupport.html(challengeId)).append("\">\n");
+            .append(Encode.forHtml(challengeId)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"csrfToken\" value=\"")
-            .append(GraphicalMatrixSupport.html(csrfToken)).append("\">\n");
+            .append(Encode.forHtml(csrfToken)).append("\">\n");
         out.append("<input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
         return out.toString();
     }
@@ -358,9 +359,9 @@ public final class GraphicalMatrixViewRenderer {
         final StringBuilder out = new StringBuilder();
         out.append("<input type=\"hidden\" name=\"mode\" value=\"save\">\n");
         out.append("<input type=\"hidden\" name=\"user\" value=\"")
-            .append(GraphicalMatrixSupport.html(user)).append("\">\n");
+            .append(Encode.forHtml(user)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"csrfToken\" value=\"")
-            .append(GraphicalMatrixSupport.html(csrfToken)).append("\">\n");
+            .append(Encode.forHtml(csrfToken)).append("\">\n");
         out.append("<input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
         return out.toString();
     }
@@ -369,19 +370,19 @@ public final class GraphicalMatrixViewRenderer {
         final StringBuilder out = new StringBuilder();
         out.append("<input type=\"hidden\" name=\"mode\" value=\"force-sequence-save\">\n");
         out.append("<input type=\"hidden\" name=\"key\" value=\"")
-            .append(GraphicalMatrixSupport.html(key)).append("\">\n");
+            .append(Encode.forHtml(key)).append("\">\n");
         out.append("<input type=\"hidden\" name=\"csrfToken\" value=\"")
-            .append(GraphicalMatrixSupport.html(csrfToken)).append("\">\n");
+            .append(Encode.forHtml(csrfToken)).append("\">\n");
         out.append("<input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
         return out.toString();
     }
 
     private static String backMenuForm(final String contextPath, final String user, final String csrfToken) {
         return "<form id=\"back-menu-form\" method=\"post\" action=\""
-            + GraphicalMatrixSupport.html(contextPath) + "/graphicalmatrix/change\" autocomplete=\"off\">\n"
+            + Encode.forHtml(contextPath) + "/graphicalmatrix/change\" autocomplete=\"off\">\n"
             + "  <input type=\"hidden\" name=\"mode\" value=\"back-menu\">\n"
-            + "  <input type=\"hidden\" name=\"user\" value=\"" + GraphicalMatrixSupport.html(user) + "\">\n"
-            + "  <input type=\"hidden\" name=\"csrfToken\" value=\"" + GraphicalMatrixSupport.html(csrfToken) + "\">\n"
+            + "  <input type=\"hidden\" name=\"user\" value=\"" + Encode.forHtml(user) + "\">\n"
+            + "  <input type=\"hidden\" name=\"csrfToken\" value=\"" + Encode.forHtml(csrfToken) + "\">\n"
             + "</form>";
     }
 
@@ -394,10 +395,10 @@ public final class GraphicalMatrixViewRenderer {
                 + "</div>";
         }
         return "<form method=\"post\" action=\""
-            + GraphicalMatrixSupport.html(contextPath) + "/graphicalmatrix/change\">\n"
+            + Encode.forHtml(contextPath) + "/graphicalmatrix/change\">\n"
             + "  <input type=\"hidden\" name=\"mode\" value=\"choose-method\">\n"
-            + "  <input type=\"hidden\" name=\"user\" value=\"" + GraphicalMatrixSupport.html(user) + "\">\n"
-            + "  <input type=\"hidden\" name=\"csrfToken\" value=\"" + GraphicalMatrixSupport.html(csrfToken) + "\">\n"
+            + "  <input type=\"hidden\" name=\"user\" value=\"" + Encode.forHtml(user) + "\">\n"
+            + "  <input type=\"hidden\" name=\"csrfToken\" value=\"" + Encode.forHtml(csrfToken) + "\">\n"
             + "  <button type=\"submit\">MFA方式を変更</button>\n"
             + "</form>";
     }
@@ -405,10 +406,10 @@ public final class GraphicalMatrixViewRenderer {
     private static String tiles(final String contextPath, final List<String> displayOrder) {
         final StringBuilder out = new StringBuilder();
         for (final String id : displayOrder) {
-            final String safeId = GraphicalMatrixSupport.html(id);
+            final String safeId = Encode.forHtml(id);
             out.append("<button class=\"tile\" type=\"button\" data-id=\"")
                 .append(safeId).append("\" aria-label=\"").append(safeId).append("\">\n");
-            out.append("  <img src=\"").append(GraphicalMatrixSupport.html(contextPath))
+            out.append("  <img src=\"").append(Encode.forHtml(contextPath))
                 .append("/graphicalmatrix/graphical?id=").append(url(id)).append("\" alt=\"")
                 .append(safeId).append("\">\n");
             out.append("  <span class=\"badge\"></span>\n");

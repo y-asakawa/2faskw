@@ -34,14 +34,15 @@
         <shibboleth.idp.version>5.2.3</shibboleth.idp.version>
         <shibboleth.shared.version>9.2.3</shibboleth.shared.version>
         <opensaml.version>5.2.3</opensaml.version>
-        <totp.plugin.version>2.3.1</totp.plugin.version>
+        <totp.plugin.version>2.3.2</totp.plugin.version>
         <jakarta.servlet.version>6.1.0</jakarta.servlet.version>
         <spring.framework.version>7.0.8</spring.framework.version>
         <httpclient.version>4.5.14</httpclient.version>
         <slf4j.version>2.0.18</slf4j.version>
         <zxing.version>3.5.4</zxing.version>
-        <postgresql.version>42.7.12</postgresql.version>
+        <postgresql.version>42.7.13</postgresql.version>
         <hikaricp.version>7.1.0</hikaricp.version>
+        <owasp.encoder.version>1.3.1</owasp.encoder.version>
         <junit.version>6.1.1</junit.version>
         <h2.version>2.4.240</h2.version>
     </properties>
@@ -148,6 +149,11 @@
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
             <version>${hikaricp.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.owasp.encoder</groupId>
+            <artifactId>encoder</artifactId>
+            <version>${owasp.encoder.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

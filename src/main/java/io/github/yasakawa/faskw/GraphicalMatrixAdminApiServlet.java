@@ -16,7 +16,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import jakarta.servlet.ServletException;
@@ -27,9 +26,6 @@ import jakarta.servlet.http.HttpServletResponse;
 public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final Pattern USER_ID = Pattern.compile("[A-Za-z0-9._@-]{1,255}");
-    private static final Pattern JSON_STRING = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-    private static final Pattern JSON_ARRAY = Pattern.compile("\"%s\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
-    private static final Pattern JSON_BOOLEAN = Pattern.compile("\"%s\"\\s*:\\s*(true|false|\"[^\"]*\")", Pattern.CASE_INSENSITIVE);
     private static final Map<String, RateLimitState> AUTH_FAILURES = new ConcurrentHashMap<>();
     private static final AtomicBoolean SCHEMA_INITIALIZED = new AtomicBoolean(false);
     private static final int MAX_JSON_BODY_BYTES = 64 * 1024;
@@ -710,10 +706,10 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         }
     }
 
-    private static final class JsonBody {
+    static final class JsonBody {
         private final String raw;
 
-        private JsonBody(final String raw) {
+        JsonBody(final String raw) {
             this.raw = raw != null ? raw : "";
         }
 
@@ -741,66 +737,244 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         }
 
         String string(final String name) {
-            final Matcher matcher = Pattern.compile(String.format(JSON_STRING.pattern(), Pattern.quote(name))).matcher(raw);
-            return matcher.find() ? unescape(matcher.group(1)) : null;
+            final int valueStart = valueStart(name);
+            final JsonString value = readString(valueStart);
+            return value != null ? value.value : null;
         }
 
         Integer boolAsInt(final String name) {
-            final Matcher matcher = Pattern.compile(String.format(JSON_BOOLEAN.pattern(), Pattern.quote(name)),
-                Pattern.CASE_INSENSITIVE).matcher(raw);
-            if (!matcher.find()) {
+            final int valueStart = valueStart(name);
+            if (valueStart < 0) {
                 return null;
             }
-            String value = matcher.group(1).trim();
-            if (value.startsWith("\"") && value.endsWith("\"")) {
-                value = value.substring(1, value.length() - 1);
+            final JsonString stringValue = readString(valueStart);
+            if (stringValue != null) {
+                return truthy(stringValue.value) ? 1 : 0;
             }
-            final String normalized = value.trim().toLowerCase(Locale.ROOT);
-            return ("true".equals(normalized) || "1".equals(normalized)
-                || "yes".equals(normalized) || "on".equals(normalized)) ? 1 : 0;
+            final String literal = readLiteral(valueStart);
+            if (literal == null) {
+                return null;
+            }
+            if ("true".equalsIgnoreCase(literal)) {
+                return 1;
+            }
+            return "false".equalsIgnoreCase(literal) ? 0 : null;
         }
 
         List<String> sequence(final String name) {
-            final Matcher array = Pattern.compile(String.format(JSON_ARRAY.pattern(), Pattern.quote(name)),
-                Pattern.DOTALL).matcher(raw);
-            if (array.find()) {
-                final List<String> out = new ArrayList<>();
-                final Matcher item = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"").matcher(array.group(1));
-                while (item.find()) {
-                    final String value = unescape(item.group(1)).trim();
-                    if (!value.isEmpty()) {
-                        out.add(value);
-                    }
-                }
-                return out;
+            final int valueStart = valueStart(name);
+            if (valueStart < 0) {
+                return new ArrayList<>();
             }
-            final String asString = string(name);
-            return asString != null ? GraphicalMatrixSupport.csv(asString) : new ArrayList<>();
+            if (raw.charAt(valueStart) == '[') {
+                final List<String> values = readStringArray(valueStart);
+                return values != null ? values : new ArrayList<>();
+            }
+            final JsonString value = readString(valueStart);
+            return value != null ? GraphicalMatrixSupport.csv(value.value) : new ArrayList<>();
         }
 
-        private static String unescape(final String value) {
-            final StringBuilder out = new StringBuilder();
-            boolean escaped = false;
-            for (int i = 0; i < value.length(); i++) {
-                final char c = value.charAt(i);
-                if (escaped) {
-                    if (c == 'n') {
-                        out.append('\n');
-                    } else if (c == 'r') {
-                        out.append('\r');
-                    } else if (c == 't') {
-                        out.append('\t');
-                    } else {
-                        out.append(c);
+        private int valueStart(final String name) {
+            int index = skipWhitespace(0);
+            if (index >= raw.length() || raw.charAt(index) != '{') {
+                return -1;
+            }
+            index++;
+            while (true) {
+                index = skipWhitespace(index);
+                if (index >= raw.length() || raw.charAt(index) == '}') {
+                    return -1;
+                }
+                final JsonString key = readString(index);
+                if (key == null) {
+                    return -1;
+                }
+                index = skipWhitespace(key.nextIndex);
+                if (index >= raw.length() || raw.charAt(index) != ':') {
+                    return -1;
+                }
+                index = skipWhitespace(index + 1);
+                if (index >= raw.length()) {
+                    return -1;
+                }
+                if (name.equals(key.value)) {
+                    return index;
+                }
+                index = skipValue(index);
+                if (index < 0) {
+                    return -1;
+                }
+                index = skipWhitespace(index);
+                if (index < raw.length() && raw.charAt(index) == ',') {
+                    index++;
+                    continue;
+                }
+                return -1;
+            }
+        }
+
+        private List<String> readStringArray(final int start) {
+            final List<String> values = new ArrayList<>();
+            int index = skipWhitespace(start + 1);
+            if (index < raw.length() && raw.charAt(index) == ']') {
+                return values;
+            }
+            while (index < raw.length()) {
+                final JsonString item = readString(index);
+                if (item == null) {
+                    return null;
+                }
+                final String value = item.value.trim();
+                if (!value.isEmpty()) {
+                    values.add(value);
+                }
+                index = skipWhitespace(item.nextIndex);
+                if (index < raw.length() && raw.charAt(index) == ',') {
+                    index = skipWhitespace(index + 1);
+                    continue;
+                }
+                return index < raw.length() && raw.charAt(index) == ']' ? values : null;
+            }
+            return null;
+        }
+
+        private JsonString readString(final int start) {
+            if (start < 0 || start >= raw.length() || raw.charAt(start) != '"') {
+                return null;
+            }
+            final StringBuilder value = new StringBuilder();
+            for (int index = start + 1; index < raw.length(); index++) {
+                final char c = raw.charAt(index);
+                if (c == '"') {
+                    return new JsonString(value.toString(), index + 1);
+                }
+                if (c == '\\') {
+                    if (++index >= raw.length()) {
+                        return null;
                     }
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true;
+                    final char escaped = raw.charAt(index);
+                    switch (escaped) {
+                        case '"':
+                        case '\\':
+                        case '/':
+                            value.append(escaped);
+                            break;
+                        case 'b':
+                            value.append('\b');
+                            break;
+                        case 'f':
+                            value.append('\f');
+                            break;
+                        case 'n':
+                            value.append('\n');
+                            break;
+                        case 'r':
+                            value.append('\r');
+                            break;
+                        case 't':
+                            value.append('\t');
+                            break;
+                        case 'u':
+                            if (index + 4 >= raw.length()) {
+                                return null;
+                            }
+                            final String hex = raw.substring(index + 1, index + 5);
+                            try {
+                                value.append((char) Integer.parseInt(hex, 16));
+                            } catch (NumberFormatException ex) {
+                                return null;
+                            }
+                            index += 4;
+                            break;
+                        default:
+                            return null;
+                    }
+                } else if (c < 0x20) {
+                    return null;
                 } else {
-                    out.append(c);
+                    value.append(c);
                 }
             }
-            return out.toString();
+            return null;
+        }
+
+        private String readLiteral(final int start) {
+            int end = start;
+            while (end < raw.length()) {
+                final char c = raw.charAt(end);
+                if (c == ',' || c == '}' || c == ']' || Character.isWhitespace(c)) {
+                    break;
+                }
+                end++;
+            }
+            return end > start ? raw.substring(start, end) : null;
+        }
+
+        private int skipValue(final int start) {
+            if (start >= raw.length()) {
+                return -1;
+            }
+            final char first = raw.charAt(start);
+            if (first == '"') {
+                final JsonString value = readString(start);
+                return value != null ? value.nextIndex : -1;
+            }
+            if (first != '{' && first != '[') {
+                final String literal = readLiteral(start);
+                return literal != null ? start + literal.length() : -1;
+            }
+
+            int depth = 0;
+            boolean inString = false;
+            boolean escaped = false;
+            for (int index = start; index < raw.length(); index++) {
+                final char c = raw.charAt(index);
+                if (inString) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (c == '\\') {
+                        escaped = true;
+                    } else if (c == '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+                if (c == '"') {
+                    inString = true;
+                } else if (c == '{' || c == '[') {
+                    depth++;
+                } else if (c == '}' || c == ']') {
+                    depth--;
+                    if (depth == 0) {
+                        return index + 1;
+                    }
+                }
+            }
+            return -1;
+        }
+
+        private int skipWhitespace(final int start) {
+            int index = start;
+            while (index < raw.length() && Character.isWhitespace(raw.charAt(index))) {
+                index++;
+            }
+            return index;
+        }
+
+        private static boolean truthy(final String value) {
+            final String normalized = value.trim().toLowerCase(Locale.ROOT);
+            return "true".equals(normalized) || "1".equals(normalized)
+                || "yes".equals(normalized) || "on".equals(normalized);
+        }
+
+        private static final class JsonString {
+            private final String value;
+            private final int nextIndex;
+
+            JsonString(final String value, final int nextIndex) {
+                this.value = value;
+                this.nextIndex = nextIndex;
+            }
         }
     }
 

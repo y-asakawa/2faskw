@@ -25,6 +25,9 @@ on:
       - ".github/dependabot.yml"
       - ".github/workflows/maven.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
