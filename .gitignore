@@ -12,6 +12,8 @@ target/
 *.swo
 .DS_Store
 docs/SIGNED-PLUGIN-PACKAGE.md
+docs/build_admin.md
+scripts/local-unattended-install.sh
 
 # Local secrets and deployment artifacts
 *.key

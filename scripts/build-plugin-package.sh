@@ -78,6 +78,7 @@ keys = [
     "API_DEFAULT",
     "DATABASE_DEFAULT",
     "BASE_NAME",
+    "PLUGIN_ARCHIVE_BASE_NAME",
     "ADMIN_BASE_NAME",
     "RUNTIME_LIBRARIES",
 ]
@@ -123,7 +124,15 @@ require_var ARTIFACT_ID
 require_var ADMIN_ARTIFACT_ID
 require_var PLUGIN_ID
 require_var DOWNLOAD_BASE_URL
+require_var RELEASE_TAG
 require_var PLUGIN_METADATA_URL
+
+PUBLIC_SIGNING_KEY_FILE="$ROOT_DIR/bootstrap/keys.txt"
+if [[ ! -s "$PUBLIC_SIGNING_KEY_FILE" ]] \
+  || ! grep -q -- '-----BEGIN PGP PUBLIC KEY BLOCK-----' "$PUBLIC_SIGNING_KEY_FILE"; then
+  echo "ERROR: public signing key not found or invalid: $PUBLIC_SIGNING_KEY_FILE" >&2
+  exit 1
+fi
 
 "$MVN" -B -ntp -Drevision="$VERSION" -Dplugin.metadata.url="$PLUGIN_METADATA_URL" clean package
 
@@ -139,18 +148,37 @@ if [[ "$MAVEN_ARTIFACT_ID" != "$ARTIFACT_ID" ]]; then
 fi
 
 BASE_NAME="${ARTIFACT_ID}-${VERSION}"
+PLUGIN_ARCHIVE_BASE_NAME="$ARTIFACT_ID"
 ADMIN_BASE_NAME="${ADMIN_ARTIFACT_ID}-${VERSION}"
-DOWNLOAD_URL="${DOWNLOAD_BASE_URL%/}/${VERSION}/"
+DOWNLOAD_URL="${DOWNLOAD_BASE_URL%/}/${RELEASE_TAG}/"
 RUNTIME_LIBRARIES="$(find target/plugin-lib -maxdepth 1 -type f -name '*.jar' -exec basename {} \; | sort | paste -sd, -)"
-export VERSION ARTIFACT_ID ADMIN_ARTIFACT_ID BASE_NAME ADMIN_BASE_NAME DOWNLOAD_URL RUNTIME_LIBRARIES
+export VERSION ARTIFACT_ID ADMIN_ARTIFACT_ID BASE_NAME PLUGIN_ARCHIVE_BASE_NAME ADMIN_BASE_NAME DOWNLOAD_URL RUNTIME_LIBRARIES
 DIST_ROOT="$ROOT_DIR/target/plugin-dist"
 DIST_DIR="$DIST_ROOT/$BASE_NAME"
-ZIP_FILE="$DIST_ROOT/$BASE_NAME.zip"
+ZIP_FILE="$DIST_ROOT/$PLUGIN_ARCHIVE_BASE_NAME.zip"
+TAR_GZ_FILE="$DIST_ROOT/$PLUGIN_ARCHIVE_BASE_NAME.tar.gz"
+VERSIONED_ZIP_FILE="$DIST_ROOT/$BASE_NAME.zip"
+VERSIONED_TAR_GZ_FILE="$DIST_ROOT/$BASE_NAME.tar.gz"
+CHECKSUM_FILE="$DIST_ROOT/SHA256SUMS"
+CHECKSUM_SIGNATURE_FILE="$CHECKSUM_FILE.asc"
 ADMIN_DIST_ROOT="$ROOT_DIR/target/admin-dist"
 ADMIN_DIST_DIR="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME"
 ADMIN_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME.zip"
 
-rm -rf "$DIST_DIR" "$ZIP_FILE" "$ADMIN_DIST_DIR" "$ADMIN_ZIP_FILE"
+rm -rf \
+  "$DIST_DIR" \
+  "$ZIP_FILE" \
+  "$ZIP_FILE.asc" \
+  "$TAR_GZ_FILE" \
+  "$TAR_GZ_FILE.asc" \
+  "$VERSIONED_ZIP_FILE" \
+  "$VERSIONED_ZIP_FILE.asc" \
+  "$VERSIONED_TAR_GZ_FILE" \
+  "$VERSIONED_TAR_GZ_FILE.asc" \
+  "$CHECKSUM_FILE" \
+  "$CHECKSUM_SIGNATURE_FILE" \
+  "$ADMIN_DIST_DIR" \
+  "$ADMIN_ZIP_FILE"
 mkdir -p \
   "$DIST_DIR/webapp/WEB-INF/lib" \
   "$DIST_DIR/bootstrap" \
@@ -174,10 +202,7 @@ cp target/plugin-lib/*.jar "$DIST_DIR/webapp/WEB-INF/lib/"
 
 render_template src/main/resources/io/github/yasakawa/faskw/plugin/plugin.properties \
   "$DIST_DIR/bootstrap/plugin.properties"
-cat > "$DIST_DIR/bootstrap/keys.txt" <<'EOF'
-# PoC placeholder.
-# Add the plugin signing public key material before external distribution.
-EOF
+cp "$PUBLIC_SIGNING_KEY_FILE" "$DIST_DIR/bootstrap/keys.txt"
 
 cp graphicalmatrix.properties "$DIST_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
 cp db.properties "$DIST_DIR/conf/graphicalmatrix/db.properties.idpnew"
@@ -266,7 +291,9 @@ copy_versioned docs/openapi.yaml "$DIST_DIR/docs/openapi.yaml"
   fi
 )
 
-"$PYTHON" - "$DIST_ROOT" "$BASE_NAME" "$ZIP_FILE" <<'PY'
+create_plugin_zip() {
+  local zip_file="$1"
+  "$PYTHON" - "$DIST_ROOT" "$BASE_NAME" "$zip_file" <<'PY'
 import os
 import sys
 import zipfile
@@ -283,9 +310,23 @@ with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
             with open(path, "rb") as handle:
                 zf.writestr(info, handle.read())
 PY
+}
+
+create_plugin_zip "$ZIP_FILE"
+create_plugin_zip "$VERSIONED_ZIP_FILE"
+
+if ! command -v tar >/dev/null 2>&1; then
+  echo "ERROR: tar is required to build the Shibboleth plugin archive" >&2
+  exit 1
+fi
+COPYFILE_DISABLE=1 tar -C "$DIST_ROOT" -czf "$TAR_GZ_FILE" "$BASE_NAME"
+COPYFILE_DISABLE=1 tar -C "$DIST_ROOT" -czf "$VERSIONED_TAR_GZ_FILE" "$BASE_NAME"
 
 echo "plugin_dist_dir=$DIST_DIR"
 echo "plugin_zip=$ZIP_FILE"
+echo "plugin_tar_gz=$TAR_GZ_FILE"
+echo "plugin_versioned_zip=$VERSIONED_ZIP_FILE"
+echo "plugin_versioned_tar_gz=$VERSIONED_TAR_GZ_FILE"
 
 mkdir -p \
   "$ADMIN_DIST_DIR/bin" \
