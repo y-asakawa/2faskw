@@ -75,16 +75,22 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             final String method) throws IOException {
         noStore(response);
         final GraphicalMatrixApiConfig apiConfig;
-        final GraphicalMatrixConfig matrixConfig;
         try {
             apiConfig = GraphicalMatrixApiConfig.load(GraphicalMatrixRuntime.idpHome());
-            matrixConfig = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
         } catch (Exception ex) {
             json(response, 500, "{\"error\":\"CONFIG_ERROR\",\"detail\":\"" + json(ex.getClass().getSimpleName()) + "\"}");
             return;
         }
 
         if (!authorize(request, response, apiConfig)) {
+            return;
+        }
+
+        final GraphicalMatrixConfig matrixConfig;
+        try {
+            matrixConfig = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
+        } catch (Exception ex) {
+            json(response, 500, "{\"error\":\"CONFIG_ERROR\",\"detail\":\"" + json(ex.getClass().getSimpleName()) + "\"}");
             return;
         }
 

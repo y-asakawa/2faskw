@@ -420,8 +420,8 @@ docs/CONFIG-REFERENCE.md
 編集対象ファイル:
 
 ```text
-/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
-/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
 ```
 
 `graphicalmatrix.properties` では、GraphicalMatrix sequence と TOTP seed の保存方式を選択します。
@@ -435,7 +435,7 @@ TOTP seedは認証時に復号が必要なため `aes-gcm` を使います。
 編集ファイル:
 
 ```text
-/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 ```
 
 ```properties
@@ -481,7 +481,7 @@ sudo chmod 0640 \
 編集ファイル:
 
 ```text
-/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 ```
 
 ```properties
@@ -497,6 +497,8 @@ graphicalmatrix.totp.seed.keywordFile = /opt/shibboleth-idp/credentials/graphica
 secret fileを作成します。
 
 ```bash
+# ここではランダムにパスワードを作成しています。
+
 sudo install -o root -g jetty -m 0640 /dev/null \
   /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
 
@@ -530,7 +532,7 @@ sequenceも復号可能になるため、鍵漏えい時の影響を考慮して
 編集ファイル:
 
 ```text
-/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 ```
 
 ```properties
@@ -546,6 +548,8 @@ graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphical
 secret fileを作成します。
 
 ```bash
+# ここではランダムにパスワードを作成しています。
+
 sudo install -o root -g jetty -m 0640 /dev/null \
   /opt/shibboleth-idp/credentials/graphicalmatrix-sequence-aes.key
 
@@ -573,7 +577,7 @@ sudo chmod 0640 \
 例えば中身が `pass` の場合、以下の状態でも動作はします。
 
 ```text
-/opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
+sudo vi /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
 ```
 
 ```text
@@ -693,7 +697,7 @@ secret fileを参照します。`keyword` 方式では `graphicalmatrix.sequence
 編集ファイル:
 
 ```text
-/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
 ```
 
 ```properties
@@ -718,26 +722,24 @@ graphicalmatrix.totp.seed.storage = auto
 
 ### 管理APIは初期状態で無効にしてください。
 
+編集ファイル:
+
+```text
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/api.properties
+```
+
 ```properties
 graphicalmatrix.api.enabled = false
-graphicalmatrix.api.allowedCidrs = 127.0.0.1/32,192.168.0.0/24
-graphicalmatrix.api.bearerTokenFile = /opt/shibboleth-idp/credentials/graphicalmatrix-api.token
-graphicalmatrix.api.authFailureLimit = 5
-graphicalmatrix.api.authFailureWindowSeconds = 60
-graphicalmatrix.api.authFailureLockSeconds = 300
-graphicalmatrix.api.response.excludeSequences = true
-graphicalmatrix.api.sequence.requireProtectedStorage = true
 ```
 
-### GraphicalMatrixチャレンジ有効期限は `graphicalmatrix.properties` で設定できます。
-
-```properties
-graphicalmatrix.challenge.seconds = 180
-```
-
-設定可能範囲は30〜900秒です。
 
 ### MFAポリシーは `mfa-policy.properties` で設定します。
+
+編集ファイル:
+
+```text
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
+```
 
 ```properties
 graphicalmatrix.mfa.default = require
@@ -757,29 +759,66 @@ graphicalmatrix.mfa.useForwardedFor = false
 ## 8. DB設定
 [DBのインストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
 
-PostgreSQLを利用する場合:
+PostgreSQLを利用する場合は、先に `docs/INSTALL_DB.md` のDB構築、VIP、
+HAProxy、Keepalived、IdP側DB接続設定を完了してください。
+この章では、2FAS-KW用スキーマだけを適用します。
 
 ```bash
-psql -h <DB_HOST> -U <DDL_USER> -d graphicalmatrix \
+PGPASSWORD='実際のGraphicalMatrix DBパスワード' \
+  /usr/pgsql-18/bin/psql \
+  -h 192.168.0.64 \
+  -U graphicalmatrix_app \
+  -d graphicalmatrix \
   -f /opt/shibboleth-idp/conf/graphicalmatrix/postgresql-schema.sql
 ```
 
-DBスキーマは事前適用し、IdP実行時のDDL自動実行は無効にする。
+適用確認:
 
-```properties
-graphicalmatrix.db.autoInit = false
+```bash
+PGPASSWORD='実際のGraphicalMatrix DBパスワード' \
+  /usr/pgsql-18/bin/psql \
+  -h 192.168.0.64 \
+  -U graphicalmatrix_app \
+  -d graphicalmatrix \
+  -Atqc 'SELECT count(*) FROM graphicalmatrix_enrollment;'
 ```
 
-IdP runtime servlet、管理API、TOTP seed参照はHikariCP接続プールを利用する。
+新規DBなら `0` が返ります。
+
+DB接続パスワードファイルを作成します。
+ここには、DBロール作成時に `graphicalmatrix_app` へ設定したパスワードを入れます。
+
+```bash
+GRAPHICALMATRIX_DB_PASSWORD='実際のGraphicalMatrix DBパスワード'
+printf 'length=%s\n' "${#GRAPHICALMATRIX_DB_PASSWORD}"
+
+sudo install -d -m 0750 -o root -g jetty \
+  /opt/shibboleth-idp/credentials
+
+sudo install -o root -g jetty -m 0640 /dev/null \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+
+printf '%s\n' "$GRAPHICALMATRIX_DB_PASSWORD" | sudo tee \
+  /opt/shibboleth-idp/credentials/graphicalmatrix-db.password >/dev/null
+
+unset GRAPHICALMATRIX_DB_PASSWORD
+
+sudo chown root:jetty /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+sudo chmod 0640 /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+
+sudo -u jetty test -r /opt/shibboleth-idp/credentials/graphicalmatrix-db.password \
+  && echo OK
+```
+
+`/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` は、以下の状態にしておきます。
+詳細なDB構築手順と接続先切替は `docs/INSTALL_DB.md` に従ってください。
 
 ```properties
+graphicalmatrix.db.url = jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
+graphicalmatrix.db.user = graphicalmatrix_app
+graphicalmatrix.db.passwordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-db.password
+graphicalmatrix.db.autoInit = false
 graphicalmatrix.db.pool.enabled = true
-graphicalmatrix.db.pool.maximumPoolSize = 10
-graphicalmatrix.db.pool.minimumIdle = 2
-graphicalmatrix.db.pool.connectionTimeoutMillis = 30000
-graphicalmatrix.db.pool.idleTimeoutMillis = 600000
-graphicalmatrix.db.pool.maxLifetimeMillis = 1800000
-graphicalmatrix.db.pool.validationTimeoutMillis = 5000
 ```
 
 H2からPostgreSQLへ移行する場合:
@@ -832,7 +871,8 @@ sudo /opt/shibboleth-idp/bin/build.sh
 systemd例:
 
 ```bash
-sudo systemctl restart jetty
+sudo systemctl daemon-reload
+sudo systemctl restart jetty-idp.service
 ```
 
 環境固有の起動方式がある場合は、その手順に従ってください。

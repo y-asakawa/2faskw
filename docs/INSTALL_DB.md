@@ -137,6 +137,9 @@ sudo /usr/pgsql-18/bin/postgresql-18-setup initdb
 DB1:
 
 ```conf
+# 編集
+sudo vi /var/lib/pgsql/18/data/postgresql.conf
+
 listen_addresses = '127.0.0.1,192.168.0.62'
 port = 5432
 wal_level = replica
@@ -158,6 +161,9 @@ listen_addresses = '127.0.0.1,192.168.0.63'
 DB1/DB2共通:
 
 ```conf
+# 編集
+sudo vi /var/lib/pgsql/18/data/pg_hba.conf
+
 local   all          all                                 peer
 host    all          all              127.0.0.1/32       scram-sha-256
 host    all          all              ::1/128            scram-sha-256
@@ -170,16 +176,33 @@ host    replication  replicator       192.168.0.63/32   scram-sha-256
 DB1で作成。
 
 ```sql
+# 起動確認
+sudo systemctl status postgresql-18 --no-pager
+
+# 起動
+sudo systemctl enable --now postgresql-18
+
+# DBでpostgresユーザーとしてpsqlに入り実行
+sudo -u postgres /usr/pgsql-18/bin/psql postgres
+
 CREATE ROLE graphicalmatrix_app LOGIN PASSWORD '<GraphicalMatrix DB password>';
 CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD '<replication password>';
 CREATE DATABASE graphicalmatrix OWNER graphicalmatrix_app;
+
+# 確認
+\du
+\l graphicalmatrix
+
+# SQLを抜けて
+sudo systemctl status postgresql-18 --no-pager
+sudo -u postgres /usr/pgsql-18/bin/psql -d graphicalmatrix -c '\conninfo'
 ```
 
 パスワードの実値は文書には記録しない。
 `graphicalmatrix_app` のパスワードは既存IdPの
 `/opt/shibboleth-idp/credentials/graphicalmatrix-db.password` と同じ値を使用した。
 
-### 4.5 既存DB dump投入
+### 4.5 既存DB dump投入（データを他のSQLから移行しないのであれば不要）
 
 既存IdPサーバ `192.168.0.60` からdumpを取得した。
 
@@ -281,25 +304,31 @@ protocols: vrrp
 
 DB1/DB2両方に同じ設定を配置。
 
-`/etc/haproxy/haproxy.cfg`:
+`sudo vi /etc/haproxy/haproxy.cfg`:
 
 ```conf
+# 最小構成
 global
-    log /dev/log local0
-    log /dev/log local1 notice
-    chroot /var/lib/haproxy
-    stats timeout 30s
-    user haproxy
-    group haproxy
+    log         127.0.0.1 local2
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    maxconn     4000
+    user        haproxy
+    group       haproxy
     daemon
+    stats socket /var/lib/haproxy/stats
 
 defaults
-    log global
-    mode tcp
-    option tcplog
-    timeout connect 5s
-    timeout client  60s
-    timeout server  60s
+    mode                    tcp
+    log                     global
+    option                  tcplog
+    option                  dontlognull
+    retries                 3
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout check           10s
+    maxconn                 3000
 
 listen postgres_write
     bind 192.168.0.64:5432
@@ -344,13 +373,17 @@ sudo systemctl enable --now haproxy
 
 監視専用DBロールをDB1で作成した。
 
+```bash
+sudo -u postgres /usr/pgsql-18/bin/psql postgres
+```
+
 ```sql
 CREATE ROLE graphicalmatrix_ha_monitor LOGIN PASSWORD '<monitor password>';
 ```
 
 Primary判定スクリプト:
 
-`/usr/local/sbin/check_pg_primary.sh`
+`sudo vi /usr/local/sbin/check_pg_primary.sh`
 
 ```bash
 #!/usr/bin/env bash
@@ -368,17 +401,34 @@ role="$(PGPASSWORD="$PG_MONITOR_PASSWORD" /usr/pgsql-18/bin/psql \
 
 監視用パスワードはスクリプト本文へ直接書かず、rootのみ読めるenvファイルに分離した。
 
-`/etc/keepalived/pg_monitor.env`:
+`sudo vi /etc/keepalived/pg_monitor.env`:
 
 ```bash
 PG_MONITOR_PASSWORD='<monitor password>'
 ```
 
-権限:
+新規作成する場合:
 
 ```bash
-sudo install -m 0600 -o root -g root /tmp/pg_monitor.env /etc/keepalived/pg_monitor.env
-sudo install -m 0755 /tmp/check_pg_primary.sh /usr/local/sbin/check_pg_primary.sh
+sudo install -D -m 0600 -o root -g root /dev/null \
+  /etc/keepalived/pg_monitor.env
+
+sudo vi /etc/keepalived/pg_monitor.env
+
+sudo install -D -m 0755 -o root -g root /dev/null \
+  /usr/local/sbin/check_pg_primary.sh
+
+sudo vi /usr/local/sbin/check_pg_primary.sh
+```
+
+作成済みファイルの権限を修正する場合:
+
+```bash
+sudo chown root:root /etc/keepalived/pg_monitor.env
+sudo chmod 0600 /etc/keepalived/pg_monitor.env
+
+sudo chown root:root /usr/local/sbin/check_pg_primary.sh
+sudo chmod 0755 /usr/local/sbin/check_pg_primary.sh
 ```
 
 SELinux:
@@ -392,6 +442,10 @@ sudo setsebool -P keepalived_connect_any 1
 DB1:
 
 ```conf
+＃編集
+sudo vi /etc/keepalived/keepalived.conf
+```
+```
 global_defs {
     enable_script_security
     script_user root
@@ -447,6 +501,7 @@ unicast_peer {
 ```bash
 sudo keepalived -t -f /etc/keepalived/keepalived.conf
 sudo systemctl enable --now keepalived
+ip -br addr | grep 192.168.0.64
 ```
 
 ## 9. 確認結果
@@ -489,20 +544,23 @@ DB1がPrimaryであるため、VIPはDB1にある。
 
 ### 9.3 VIP経由接続
 
-DB1、DB2、IdPサーバ `192.168.0.60` から確認。
+DB1、DB2、IdPサーバから確認。
 
 ```bash
+＃DBがない場合
+sudo dnf -y install postgresql18
+
 PGPASSWORD='<GraphicalMatrix DB password>' \
   psql -h 192.168.0.64 \
   -U graphicalmatrix_app \
   -d graphicalmatrix \
-  -Atqc 'SELECT count(*) FROM graphicalmatrix_enrollment;'
+  -Atqc 'SELECT 1;'
 ```
 
 確認結果:
 
 ```text
-4
+1
 ```
 
 ### 9.4 Replication
@@ -538,71 +596,27 @@ status            | streaming
 sender_host       | 192.168.0.62
 ```
 
-## 10. IdP側切替
+## 10. IdP接続確認（切替）
+[<mark>2FAS-KWを構築する：INSTALL.md</mark>](./INSTALL.md)　を参照
 
-IdP `192.168.0.60` の `db.properties` をDB VIPへ切り替えた。
 
-変更前:
 
-```properties
-graphicalmatrix.db.url=jdbc:postgresql://127.0.0.1:5432/graphicalmatrix
-```
 
-変更後:
 
-```properties
-graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix
-graphicalmatrix.db.user=graphicalmatrix_app
-graphicalmatrix.db.passwordFile=/opt/shibboleth-idp/credentials/graphicalmatrix-db.password
-```
 
-作業コマンド:
 
-```bash
-TS=$(date +%Y%m%d%H%M%S)
-sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/db.properties \
-  /opt/shibboleth-idp/conf/graphicalmatrix/db.properties.local-postgresql.bak.$TS
 
-sudo sed -i \
-  's#^graphicalmatrix.db.url=.*#graphicalmatrix.db.url=jdbc:postgresql://192.168.0.64:5432/graphicalmatrix#' \
-  /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
 
-sudo chown root:jetty /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
-sudo chmod 0640 /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
-```
 
-バックアップ:
 
-```text
-/opt/shibboleth-idp/conf/graphicalmatrix/db.properties.local-postgresql.bak.<timestamp>
-```
 
-切替後確認:
 
-```bash
-sudo -u jetty /opt/shibboleth-idp/bin/graphicalmatrix-db.sh list
-```
 
-確認結果:
 
-```text
-DB VIP経由で graphicalmatrix_enrollment 4件を表示できた。
-```
 
-Jetty IdP再起動:
 
-```bash
-sudo systemctl restart jetty-idp
-sudo systemctl is-active jetty-idp
-```
 
-確認結果:
 
-```text
-active
-```
-
-IdPサーバ上のローカルPostgreSQLは切戻し用として停止していない。
 
 ### 10.1 WebAuthn StorageService切替
 

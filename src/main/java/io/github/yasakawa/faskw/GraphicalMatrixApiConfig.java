@@ -48,7 +48,7 @@ public final class GraphicalMatrixApiConfig {
         }
 
         final boolean enabled = booleanProperty(props, "graphicalmatrix.api.enabled", false);
-        final String bearerToken = token(props);
+        final String bearerToken = enabled ? token(props) : "";
         final List<Cidr> cidrs = cidrs(props.getProperty(
             "graphicalmatrix.api.allowedCidrs", DEFAULT_ALLOWED_CIDRS));
         final int authFailureLimit = intProperty(props, "graphicalmatrix.api.authFailureLimit", 5);
