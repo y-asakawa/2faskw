@@ -67,8 +67,7 @@ Third-party license and attribution details are listed in
 ## Security Reporting
 
 Do not open public GitHub issues for suspected vulnerabilities. Follow
-`SECURITY.md` and replace the placeholder contact with the official security
-contact before public release.
+`SECURITY.md` for the reporting process.
 
 ## **Releases**: https://github.com/y-asakawa/2faskw/releases/
 

@@ -11,10 +11,9 @@ docs/SECURITY-CHECKLIST.md
 
 Do not open a public GitHub issue for a suspected vulnerability.
 
-Report security issues to the project maintainers through the official
-Shinshu University contact channel for this plugin. The public repository
-should replace this paragraph with the final security contact address before
-the first public release.
+This project is provided as open source software under the Apache License 2.0,
+without warranties. Security reports are reviewed on a best-effort basis.
+Please do not disclose suspected vulnerabilities publicly.
 
 Please include:
 
