@@ -69,7 +69,6 @@ Third-party license and attribution details are listed in
 Do not open public GitHub issues for suspected vulnerabilities. Follow
 `SECURITY.md` for the reporting process.
 
-## **Releases**: https://github.com/y-asakawa/2faskw/releases/
 
 ## Screenshots
 
@@ -78,6 +77,11 @@ Do not open public GitHub issues for suspected vulnerabilities. Follow
   <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="32%">
   <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="32%">
 </p>
+
+## Releases
+
+https://github.com/y-asakawa/2faskw/releases/
+
 
 ## FAQ
 
