@@ -1,0 +1,723 @@
+openapi: 3.0.3
+info:
+  title: GraphicalMatrix MFA Admin API
+  version: 1.0.1
+  description: |
+    GraphicalMatrix MFA Plugin management API for Shibboleth IdP.
+
+    This API is intended for trusted provisioning and account management tools.
+    The API is disabled by default in plugin distributions. Enable it only with
+    HTTPS, bearer token authentication, source IP restrictions, and firewall or
+    load balancer controls.
+servers:
+  - url: https://idp.example.ac.jp/idp/graphicalmatrix-admin/api/v1
+    description: Production example
+  - url: http://127.0.0.1:8080/idp/graphicalmatrix-admin/api/v1
+    description: Local PoC example
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Graphicals
+  - name: Users
+  - name: Actions
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check API and DB availability
+      operationId: getHealth
+      responses:
+        "200":
+          description: API and DB are available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: OK
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/ApiDisabledOrNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /graphicals:
+    get:
+      tags:
+        - Graphicals
+      summary: Get GraphicalMatrix runtime graphical settings
+      operationId: getGraphicals
+      responses:
+        "200":
+          description: GraphicalMatrix graphical settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphicalSettings"
+              example:
+                columns: 5
+                rows: 5
+                choice: 4
+                order: 1
+                allowDuplicates: false
+                graphicals:
+                  - img01
+                  - img02
+                  - img03
+                aliases:
+                  A: img01
+                  B: img02
+                  C: img03
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/ApiDisabledOrNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags:
+        - Users
+      summary: Get one MFA enrollment
+      operationId: getUser
+      responses:
+        "200":
+          description: MFA enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+    put:
+      tags:
+        - Users
+      summary: Create or update one MFA enrollment
+      operationId: putUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpsertRequest"
+            examples:
+              graphicalMatrix:
+                summary: GraphicalMatrix enrollment
+                value:
+                  mfaMethod: GraphicalMatrix
+                  forceSequenceChange: true
+                  initialSequence:
+                    - A
+                    - B
+                    - C
+                    - D
+                  sequence:
+                    - img03
+                    - img07
+                    - img11
+                    - img14
+                  status: ACTIVE
+              totp:
+                summary: TOTP enrollment
+                value:
+                  mfaMethod: TOTP
+                  forceSequenceChange: false
+                  initialSequence: "A,B,C,D"
+                  sequence: "img01,img02,img03,img04"
+                  status: ACTIVE
+      responses:
+        "200":
+          description: Created or updated MFA enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/ApiDisabledOrNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+    delete:
+      tags:
+        - Users
+      summary: Delete one MFA enrollment
+      operationId: deleteUser
+      responses:
+        "200":
+          description: Deleted enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+              example:
+                userId: test01
+                deleted: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/method:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      tags:
+        - Users
+      summary: Change the MFA method for one user
+      operationId: patchUserMethod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MethodChangeRequest"
+            examples:
+              graphicalMatrix:
+                value:
+                  mfaMethod: GraphicalMatrix
+              totp:
+                value:
+                  mfaMethod: TOTP
+              webAuthn:
+                value:
+                  mfaMethod: WebAuthn
+      responses:
+        "200":
+          description: Updated enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/reset:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags:
+        - Actions
+      summary: Reset the user to initial GraphicalMatrix state
+      description: |
+        Copies initialSequence to sequence after resolving aliases, sets
+        mfaMethod to GraphicalMatrix, status to ACTIVE, clears lock and TOTP seed,
+        and enables forceSequenceChange.
+      operationId: resetUser
+      responses:
+        "200":
+          $ref: "#/components/responses/UserActionOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/unlock:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags:
+        - Actions
+      summary: Clear lock and failed count
+      operationId: unlockUser
+      responses:
+        "200":
+          $ref: "#/components/responses/UserActionOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags:
+        - Actions
+      summary: Set status to ACTIVE
+      operationId: enableUser
+      responses:
+        "200":
+          $ref: "#/components/responses/UserActionOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags:
+        - Actions
+      summary: Set status to DISABLED
+      operationId: disableUser
+      responses:
+        "200":
+          $ref: "#/components/responses/UserActionOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+  /users/{userId}/totp-reset:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags:
+        - Actions
+      summary: Clear TOTP seed and registration state
+      operationId: resetTotp
+      responses:
+        "200":
+          $ref: "#/components/responses/UserActionOk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/UserNotFoundOrApiDisabled"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ApiTokenNotConfigured"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token read from graphicalmatrix.api.bearerToken or bearerTokenFile.
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: User identifier. Allowed pattern is `[A-Za-z0-9._@-]{1,255}`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: "^[A-Za-z0-9._@-]{1,255}$"
+
+  responses:
+    UserActionOk:
+      description: Updated enrollment.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UserEnrollment"
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            badUserId:
+              value:
+                error: BAD_USER_ID
+                detail: invalid_user_id
+            unsupportedMfaMethod:
+              value:
+                error: UNSUPPORTED_MFA_METHOD
+                detail: mfa_method=FIDO2
+            sequenceRequired:
+              value:
+                error: SEQUENCE_REQUIRED
+                detail: sequence_required
+    Unauthorized:
+      description: Bearer token is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: UNAUTHORIZED
+    Forbidden:
+      description: Source IP is not allowed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: FORBIDDEN
+    RateLimited:
+      description: Bearer token authentication failures exceeded the configured rate limit.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: RATE_LIMITED
+    ApiDisabledOrNotFound:
+      description: API is disabled or endpoint does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: NOT_FOUND
+    UserNotFoundOrApiDisabled:
+      description: User is not found, API is disabled, or endpoint does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            userNotFound:
+              value:
+                error: USER_NOT_FOUND
+                detail: missing_user
+            apiDisabled:
+              value:
+                error: NOT_FOUND
+    ApiTokenNotConfigured:
+      description: API is enabled but a required security setting is not valid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            tokenNotConfigured:
+              value:
+                error: API_TOKEN_NOT_CONFIGURED
+            sequenceStorageNotProtected:
+              value:
+                error: API_SEQUENCE_STORAGE_NOT_PROTECTED
+    InternalError:
+      description: Internal error or configuration error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            internal:
+              value:
+                error: INTERNAL_ERROR
+                detail: SQLException
+            config:
+              value:
+                error: CONFIG_ERROR
+                detail: IllegalStateException
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - OK
+
+    GraphicalSettings:
+      type: object
+      required:
+        - columns
+        - rows
+        - choice
+        - order
+        - allowDuplicates
+        - graphicals
+        - aliases
+      properties:
+        columns:
+          type: integer
+          minimum: 1
+        rows:
+          type: integer
+          minimum: 1
+        choice:
+          type: integer
+          minimum: 1
+        order:
+          type: integer
+          enum:
+            - 1
+            - 2
+          description: "1 means ordered selection. 2 means unordered selection is allowed."
+        allowDuplicates:
+          type: boolean
+        graphicals:
+          type: array
+          items:
+            type: string
+        aliases:
+          type: object
+          additionalProperties:
+            type: string
+
+    UserEnrollment:
+      type: object
+      required:
+        - userId
+        - mfaMethod
+        - forceSequenceChange
+        - initialSequence
+        - sequence
+        - sequenceStorage
+        - sequenceRecoverable
+        - sequencesExcluded
+        - status
+        - failedCount
+        - lockedUntil
+        - totpStatus
+        - totpSeedSet
+        - totpRegisteredAt
+        - lastSuccessAt
+        - createdAt
+        - updatedAt
+      properties:
+        userId:
+          type: string
+        mfaMethod:
+          $ref: "#/components/schemas/MfaMethod"
+        forceSequenceChange:
+          type: boolean
+        initialSequence:
+          type: array
+          items:
+            type: string
+          description: Initial sequence tokens. Alias values can be preserved here.
+        sequence:
+          type: array
+          items:
+            type: string
+          description: |
+            Resolved GraphicalMatrix graphical IDs used for authentication when the stored
+            sequence is recoverable and API sequence output is not excluded.
+            Empty when sequenceStorage is hash or graphicalmatrix.api.response.excludeSequences is true.
+        sequenceStorage:
+          type: string
+          enum:
+            - plaintext
+            - keyword
+            - aes-gcm
+            - hash
+            - empty
+          description: Storage format detected from the sequence column.
+        sequenceRecoverable:
+          type: boolean
+          description: false when the stored sequence is hash + salt + pepper.
+        sequencesExcluded:
+          type: boolean
+          description: true when API response sequence output is intentionally suppressed.
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        failedCount:
+          type: integer
+          minimum: 0
+        lockedUntil:
+          type: integer
+          format: int64
+          description: Unix epoch milliseconds. 0 means unlocked.
+        totpStatus:
+          type: string
+          enum:
+            - UNREGISTERED
+            - REGISTERED
+        totpSeedSet:
+          type: boolean
+        totpRegisteredAt:
+          type: integer
+          format: int64
+        lastSuccessAt:
+          type: integer
+          format: int64
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+
+    UserUpsertRequest:
+      type: object
+      properties:
+        mfaMethod:
+          $ref: "#/components/schemas/MfaMethod"
+        forceSequenceChange:
+          oneOf:
+            - type: boolean
+            - type: string
+              enum:
+                - "true"
+                - "false"
+                - "1"
+                - "0"
+                - "yes"
+                - "no"
+                - "on"
+                - "off"
+        initialSequence:
+          $ref: "#/components/schemas/SequenceInput"
+        sequence:
+          $ref: "#/components/schemas/SequenceInput"
+        status:
+          $ref: "#/components/schemas/UserStatus"
+      description: |
+        `initialSequence` and `sequence` can be arrays or comma-separated strings.
+        If sequence is omitted but initialSequence is present, sequence is resolved
+        from initialSequence. New users must end with both values present.
+
+    MethodChangeRequest:
+      type: object
+      required:
+        - mfaMethod
+      properties:
+        mfaMethod:
+          $ref: "#/components/schemas/MfaMethod"
+
+    DeleteResponse:
+      type: object
+      required:
+        - userId
+        - deleted
+      properties:
+        userId:
+          type: string
+        deleted:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+
+    MfaMethod:
+      type: string
+      enum:
+        - GraphicalMatrix
+        - TOTP
+        - WebAuthn
+      description: "`MFA:` prefix is accepted by the implementation but not recommended."
+
+    UserStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - DISABLED
+
+    SequenceInput:
+      oneOf:
+        - type: array
+          items:
+            type: string
+        - type: string
+      example:
+        - A
+        - B
+        - C
+        - D

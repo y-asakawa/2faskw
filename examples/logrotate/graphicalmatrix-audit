@@ -1,0 +1,13 @@
+/opt/shibboleth-idp/logs/graphicalmatrix-audit.log {
+    daily
+    rotate 180
+    missingok
+    notifempty
+    copytruncate
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d
+    create 0640 jetty jetty
+    su jetty jetty
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main class="sequence-page">
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="New GraphicalMatrix">
+    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off" data-confirm="本当に変更しますか。">
+      {{hiddenInputs}}
+      <div class="sequence-layout">
+        <section class="selected-sequence" aria-label="Selected GraphicalMatrix sequence">
+          <h2>選択した画像</h2>
+          <ol id="selected-list" class="selected-list"></ol>
+          <p id="selected-empty" class="selected-empty">未選択</p>
+        </section>
+        <section class="graphical-picker" aria-label="GraphicalMatrix graphical list">
+          <h2>画像一覧</h2>
+          <div class="grid sequence-grid" style="--graphicalmatrix-columns: {{columns}};">
+            {{tiles}}
+          </div>
+        </section>
+      </div>
+      <div id="status" class="status">{{statusText}}</div>
+      <div class="actions">
+        <button class="primary" id="submit-button" type="submit" disabled>変更する</button>
+        <button id="reset-button" type="button">リセット</button>
+        {{backButton}}
+      </div>
+    </form>
+    {{backMenuForm}}
+  </section>
+</main>
+{{scriptBlock}}
+</body>
+</html>

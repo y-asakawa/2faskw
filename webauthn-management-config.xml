@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:util="http://www.springframework.org/schema/util" xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:c="http://www.springframework.org/schema/c" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+
+    default-init-method="initialize" default-destroy-method="destroy" default-lazy-init="true">
+
+    <!-- 
+        The default credential labeller list. Use during the management flow to label user credentials for display in the UI. 
+    -->
+    <util:list id="shibboleth.authn.WebAuthn.CredentialLabellerList">
+    
+        <bean id="SecondFactorOnlyCredentialLabeller" scope="prototype"
+            class="net.shibboleth.idp.plugin.authn.webauthn.admin.impl.SecondFactorOnlyCredentialLabeller"
+            p:secondFactorOnlyAuthenticators="%{idp.authn.webauthn.authenticator.policy.secondFactorOnlyAuthenticators:null}"
+            p:label="SecondFactorOnly"/>
+        
+        <bean id="PasskeyCredentialLabeller" class="net.shibboleth.idp.plugin.authn.webauthn.admin.impl.PasskeyCredentialLabeller"
+            p:label="Passkey"/>
+    </util:list>
+
+</beans>

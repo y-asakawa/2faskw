@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch GraphicalMatrix provisioning CSV directory
+
+[Path]
+PathChanged=/opt/graphicalmatrix-admin/incoming
+Unit=graphicalmatrix-csv-import.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Import GraphicalMatrix provisioning CSV
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=graphicalmatrix-admin
+Group=graphicalmatrix-admin
+SupplementaryGroups=graphicalmatrix-provision
+Environment=GRAPHICALMATRIX_HOME=/opt/graphicalmatrix-admin
+ExecStart=/opt/graphicalmatrix-admin/bin/graphicalmatrix-csv-import-runner.sh
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/graphicalmatrix-admin/incoming /opt/graphicalmatrix-admin/processing /opt/graphicalmatrix-admin/processed /opt/graphicalmatrix-admin/failed /opt/graphicalmatrix-admin/logs

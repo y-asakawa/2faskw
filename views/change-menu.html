@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main class="message-page">
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="MFA setting menu">
+    <p>アカウント: <strong>{{user}}</strong></p>
+    <div class="actions stacked-actions">
+      <form method="post" action="{{formAction}}">
+        <input type="hidden" name="mode" value="choose-sequence">
+        <input type="hidden" name="user" value="{{user}}">
+        <input type="hidden" name="csrfToken" value="{{csrfToken}}">
+        <button class="primary" type="submit">GraphicalMatrix画像を変更</button>
+      </form>
+      <form method="post" action="{{formAction}}">
+        <input type="hidden" name="mode" value="choose-method">
+        <input type="hidden" name="user" value="{{user}}">
+        <input type="hidden" name="csrfToken" value="{{csrfToken}}">
+        <button type="submit">MFA方式を変更</button>
+      </form>
+    </div>
+  </section>
+</main>
+</body>
+</html>

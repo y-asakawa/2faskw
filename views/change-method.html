@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main class="message-page">
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="MFA method change">
+    <p>アカウント: <strong>{{user}}</strong></p>
+    <form class="form-stack" method="post" action="{{formAction}}" autocomplete="off">
+      <input type="hidden" name="mode" value="save-method">
+      <input type="hidden" name="user" value="{{user}}">
+      <input type="hidden" name="csrfToken" value="{{csrfToken}}">
+      <fieldset class="method-options">
+        <legend>MFA方式</legend>
+        <label class="method-option">
+          <input type="radio" name="mfaMethod" value="GraphicalMatrix"{{graphicalMatrixChecked}}>
+          <span>GraphicalMatrix</span>
+        </label>
+        <label class="method-option">
+          <input type="radio" name="mfaMethod" value="TOTP"{{totpChecked}}>
+          <span>TOTP</span>
+        </label>
+        <label class="method-option">
+          <input type="radio" name="mfaMethod" value="WebAuthn"{{webAuthnChecked}}>
+          <span>WebAuthn / Passkey</span>
+        </label>
+      </fieldset>
+      <p>TOTPを選択した場合、次回ログイン時にQRコード登録画面が表示されます。WebAuthnはIdP側のWebAuthnプラグイン導入後に利用します。</p>
+      <div class="actions">
+        <button class="primary" type="submit">変更する</button>
+        <button type="submit" form="back-menu-form">戻る</button>
+      </div>
+    </form>
+    {{backMenuForm}}
+  </section>
+</main>
+</body>
+</html>

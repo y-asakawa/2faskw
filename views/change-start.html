@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main class="message-page">
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="GraphicalMatrix change start">
+    <form class="form-stack" method="post" action="{{changeUrl}}" autocomplete="off">
+      <input type="hidden" name="mode" value="ldap-login">
+      <div class="field">
+        <label for="user">ユーザーID</label>
+        <input id="user" name="user" type="text" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">LDAPパスワード</label>
+        <input id="password" name="password" type="password" required>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit">次へ</button>
+      </div>
+    </form>
+  </section>
+</main>
+</body>
+</html>

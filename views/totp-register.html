@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main class="totp-page">
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="TOTP registration">
+    <div class="layout">
+      <img class="qr" src="{{qrDataUri}}" alt="TOTP登録QRコード">
+      <div>
+        <p>アカウント: <strong>{{user}}</strong></p>
+        <p>QRコードを読めない場合は、認証アプリに次のキーを手入力してください。</p>
+        <p><code>{{seed}}</code></p>
+        <form method="post" action="{{formAction}}" autocomplete="off">
+          <input type="hidden" name="mode" value="totp-register">
+          <input type="hidden" name="key" value="{{key}}">
+          <input type="hidden" name="csrfToken" value="{{csrfToken}}">
+          <label for="tokencode">6桁コード</label>
+          <input id="tokencode" name="tokencode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus>
+          <div class="actions">
+            <button class="primary" type="submit">登録して続行</button>
+            <button type="submit" form="totp-cancel-form">GraphicalMatrixに戻る</button>
+          </div>
+        </form>
+        <form id="totp-cancel-form" method="post" action="{{formAction}}" autocomplete="off">
+          <input type="hidden" name="mode" value="totp-register-cancel">
+          <input type="hidden" name="key" value="{{key}}">
+          <input type="hidden" name="csrfToken" value="{{csrfToken}}">
+        </form>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  {{cssLink}}
+</head>
+<body>
+<main>
+  <h1>{{heading}}</h1>
+  <p class="lead">{{lead}}</p>
+  {{errorBlock}}
+  <section class="panel" aria-label="GraphicalMatrix">
+    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off">
+      {{hiddenInputs}}
+      <div class="grid" style="--graphicalmatrix-columns: {{columns}};">
+        {{tiles}}
+      </div>
+      <div id="status" class="status">{{statusText}}</div>
+      <div class="actions">
+        <button class="primary" id="submit-button" type="submit" disabled>送信</button>
+        <button id="reset-button" type="button">リセット</button>
+      </div>
+    </form>
+  </section>
+</main>
+{{scriptBlock}}
+</body>
+</html>

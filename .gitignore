@@ -1,0 +1,46 @@
+# Build output
+target/
+*.class
+*.jar
+*.zip
+
+# Local IDE/editor files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.DS_Store
+
+# Local secrets and deployment artifacts
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+*.token
+*.secret
+*.password
+*.passwordFile
+*.csr
+*.crt
+*.cert
+*.cert.pem
+*.ca.cert.pem
+secrets.properties
+ldap.properties
+
+# Runtime/export data
+*.log
+*.pid
+*.h2.db
+*.mv.db
+*.trace.db
+*.sql
+*.dump
+*.csv
+*.tsv
+
+# Keep source schema files tracked explicitly.
+!postgresql-schema.sql

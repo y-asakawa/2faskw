@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.yasakawa.faskw.graphicalmatrix</groupId>
+    <artifactId>graphicalmatrix-idp-plugin</artifactId>
+    <version>1.0.1</version>
+    <packaging>jar</packaging>
+
+    <name>GraphicalMatrix MFA for Shibboleth IdP</name>
+    <description>GraphicalMatrix MFA Servlet, repository, TOTP seed source, and management API for Shibboleth IdP 5.</description>
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <organization>
+        <name>Shinshu University</name>
+        <url>https://example.jp/</url>
+    </organization>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>21</maven.compiler.release>
+
+        <shibboleth.idp.version>5.2.2</shibboleth.idp.version>
+        <shibboleth.shared.version>9.2.2</shibboleth.shared.version>
+        <opensaml.version>5.2.2</opensaml.version>
+        <totp.plugin.version>2.3.1</totp.plugin.version>
+        <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
+        <slf4j.version>2.0.13</slf4j.version>
+        <zxing.version>3.5.3</zxing.version>
+        <postgresql.version>42.7.11</postgresql.version>
+        <hikaricp.version>6.3.0</hikaricp.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>shibboleth-releases</id>
+            <name>Shibboleth Releases</name>
+            <url>https://build.shibboleth.net/maven/releases/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- Provided by the IdP / Jetty runtime. Do not bundle these into the plugin jar. -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>${jakarta.servlet.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.shibboleth.idp</groupId>
+            <artifactId>idp-authn-api</artifactId>
+            <version>${shibboleth.idp.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.shibboleth.idp</groupId>
+            <artifactId>idp-admin-api</artifactId>
+            <version>${shibboleth.idp.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.shibboleth.idp</groupId>
+            <artifactId>idp-profile-api</artifactId>
+            <version>${shibboleth.idp.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.opensaml</groupId>
+            <artifactId>opensaml-profile-api</artifactId>
+            <version>${opensaml.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.shibboleth</groupId>
+            <artifactId>shib-support</artifactId>
+            <version>${shibboleth.shared.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.shibboleth.idp.plugin.authn</groupId>
+            <artifactId>idp-plugin-totp-impl</artifactId>
+            <version>${totp.plugin.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Runtime dependency needed by GraphicalMatrixTotpSupport for QR generation. -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>${zxing.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>${hikaricp.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- Current PoC sources are kept flat under remote_graphicalmatrix_src. -->
+        <sourceDirectory>${project.basedir}</sourceDirectory>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                    <includes>
+                        <include>*.java</include>
+                        <include>src/main/java/**/*.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Implementation-Title>${project.name}</Implementation-Title>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Implementation-Vendor>Shinshu University</Implementation-Vendor>
+                            <Automatic-Module-Name>io.github.yasakawa.faskw.graphicalmatrix</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.8.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-runtime-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <outputDirectory>${project.build.directory}/plugin-lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
