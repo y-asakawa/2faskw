@@ -11,7 +11,6 @@ target/
 *.swp
 *.swo
 .DS_Store
-README.local.md
 docs/SIGNED-PLUGIN-PACKAGE.md
 
 # Local secrets and deployment artifacts

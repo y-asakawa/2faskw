@@ -40,6 +40,7 @@ deployments should use PostgreSQL and protected sequence/TOTP seed storage.
 - IdP installation: `docs/INSTALL.md`
 - Security guide: `docs/SECURITY.md`
 - Security checklist: `docs/SECURITY-CHECKLIST.md`
+- Build from source: `docs/build.md`
 - Admin tools: `docs/ADMIN-TOOLS.md`
 - Configuration reference: `docs/CONFIG-REFERENCE.md`
 - Publishing checklist: `PUBLISHING-CHECKLIST.md`

@@ -98,6 +98,7 @@ APIを利用する場合は、Bearer token、接続元IP制限、HTTPS、Firewal
     INSTALL.md
     SECURITY.md
     SECURITY-CHECKLIST.md
+    build.md
     API-TOKEN-ROTATION.md
     API-CURL-TESTS.md
     ADMIN-TOOLS.md
