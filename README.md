@@ -1,6 +1,6 @@
-# 2FAS-KW for Shibboleth IdP
+# 2FAS-KW for Shibboleth IdP　plugin
 
-2FAS-KW is a Shibboleth IdP 5 plugin that adds an GraphicalMatrix graphical-sequence
+2FAS-KW is a Shibboleth IdP plugin that adds an GraphicalMatrix graphical-sequence
 second factor after password authentication. It can route users to one of
 three MFA methods based on database settings:
 
