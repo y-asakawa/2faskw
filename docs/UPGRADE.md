@@ -15,6 +15,31 @@
 既存設定を維持した上書き更新は可能だが、単純に新しいファイルをコピーするだけでは不十分である。
 Plugin JARはバージョンを含むファイル名で配置されるため、旧JARを削除する必要がある。
 
+### v1.2.1からv1.2.2へのplugin.sh更新
+
+v1.2.1を `plugin.sh` で導入済みの場合は、公開metadataを使ってv1.2.2へ更新できる。
+対象IdPの範囲はv5.2.1以上、v5.2.4未満であり、v5.2.3を含む。Shibboleth plugin metadataの
+`idpVersionMax` は上限を含まない。
+
+```bash
+IDP_HOME=/opt/shibboleth-idp
+PLUGIN_ID='io.github.yasakawa.faskw.authn.graphicalmatrix'
+METADATA_URL='https://raw.githubusercontent.com/y-asakawa/2faskw/main/plugin-metadata/graphicalmatrix-plugin.properties'
+
+sudo "$IDP_HOME/bin/plugin.sh" -l
+
+sudo "$IDP_HOME/bin/plugin.sh" \
+  --updateURL "$METADATA_URL" \
+  -u "$PLUGIN_ID"
+
+sudo "$IDP_HOME/bin/plugin.sh" -l
+sudo "$IDP_HOME/bin/plugin.sh" -fl
+```
+
+更新後の一覧には `Current Version: 1.2.2` が表示されることを確認する。`plugin.sh -u` は、
+署名を検証してからWARを再構築する。`--noCheck` は互換性検査を無効化するため、この更新試験では
+指定しない。
+
 ```text
 2faskw-idp-plugin-1.0.1.jar
 2faskw-idp-plugin-1.1.0.jar

@@ -278,13 +278,15 @@ check_package() {
 
   need_dir "$PACKAGE_DIR"
 
-  local package_base package_version plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props openapi_yaml manifest_version bootstrap_version openapi_ver
+  local package_base package_version package_archive_base plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props metadata_base_name openapi_yaml manifest_version bootstrap_version openapi_ver
   package_base="$(basename "$PACKAGE_DIR")"
   if [[ "$package_base" == 2faskw-idp-plugin-* && "$package_base" != "2faskw-idp-plugin-" ]]; then
     package_version="${package_base#2faskw-idp-plugin-}"
+    package_archive_base="${package_base%-$package_version}"
     ok "package version derived from directory: $package_version"
   else
     package_version=""
+    package_archive_base=""
     fail "package directory name must be 2faskw-idp-plugin-VERSION: $package_base"
   fi
 
@@ -369,10 +371,11 @@ check_package() {
     else
       fail "plugin metadata version must include package version: $package_version"
     fi
-    if grep -q "baseName.$package_version[[:space:]]*=[[:space:]]*$package_base" "$metadata_props"; then
-      ok "plugin metadata baseName matches package directory"
+    metadata_base_name="$(properties_value "$metadata_props" "io.github.yasakawa.faskw.authn.graphicalmatrix.baseName.$package_version")"
+    if [[ "$metadata_base_name" == "$package_archive_base" ]]; then
+      ok "plugin metadata baseName matches archive base name: $package_archive_base"
     else
-      fail "plugin metadata baseName mismatch"
+      fail "plugin metadata baseName mismatch: expected $package_archive_base, got ${metadata_base_name:-<missing>}"
     fi
   fi
 
