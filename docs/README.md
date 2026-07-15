@@ -3,8 +3,17 @@
 このディレクトリには、2FAS-KW Plugin for Shibboleth IdP の導入、設定、
 運用、セキュリティに関する文書を配置しています。
 
-## 読む順番
+## Releaseファイル構成
+`2faskw-idp-plugin.tar.gz` と `2faskw-idp-plugin.zip` は、
+同じ配布内容を異なる圧縮形式で提供するファイルです。
 
+- `2faskw-idp-plugin.tar.gz`:
+  Shibboleth IdPのplugin installerによる自動導入・更新用です。
+- `2faskw-idp-plugin.zip`:
+  展開して手動導入する場合、および配布内容を確認する場合に使用します。
+Shibboleth plugin形式ではtar.gzとZIPの両方を配布物として扱えますが、現在の公開metadata経由の更新ではtar.gzが使われます。
+
+## 読む順番
 通常の導入では、以下の順に確認してください。
 
 - [INSTALL.md](./INSTALL.md)
