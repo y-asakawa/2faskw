@@ -158,6 +158,97 @@ graphicalmatrix.change.ldapRateLimit.key = ip-user
 
 `graphicalmatrix.choice` を変更した場合は、既存ユーザーのsequence数も新しい設定に合わせる必要がある。
 
+## SPごと、送信元IPごとにMFAの要否を変更するにはどうすればよいか
+
+次のファイルを編集する。
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
+```
+
+代表的な設定は次のとおり。
+
+```properties
+# 既定では全SPでMFAを要求する。
+graphicalmatrix.mfa.default = require
+
+# 指定したSPではMFAを要求しない。
+graphicalmatrix.mfa.bypassSPs = https://sp-public.example.org/shibboleth
+
+# 指定したSPだけでMFAを要求する。設定時は、それ以外のSPではMFAを要求しない。
+graphicalmatrix.mfa.requiredSPs = https://sp-sensitive.example.org/shibboleth
+
+# 指定した送信元IPまたはIPv4 CIDRではMFAを要求しない。
+graphicalmatrix.mfa.bypassIPs = 192.0.2.10
+graphicalmatrix.mfa.bypassCIDRs = 192.168.10.0/24,10.20.0.0/16
+```
+
+`graphicalmatrix.mfa.requiredSPs` には複数のSP entityIDをカンマ区切りで指定できる。
+
+```properties
+graphicalmatrix.mfa.requiredSPs = https://sp1.example.org/shibboleth,https://sp2.example.org/shibboleth
+```
+
+このプロパティを1つでも指定すると、列挙したSPだけがMFA必須となり、それ以外のSPではMFAを要求しない。
+`graphicalmatrix.mfa.default = require` は、`requiredSPs` が空の場合に適用される既定値である。
+同じ`graphicalmatrix.mfa.requiredSPs`を複数行に重ねて書くと、Java Propertiesの後ろの値で上書きされるため、1つの値にまとめる。
+
+`graphicalmatrix.mfa.bypassSPs` も複数のSP entityIDをカンマ区切りで指定できる。
+
+```properties
+graphicalmatrix.mfa.bypassSPs = https://sp-public1.example.org/shibboleth,https://sp-public2.example.org/shibboleth
+```
+
+`bypassSPs`に一致したSPは、送信元IPおよび`requiredSPs`の判定より先にMFA不要となる。
+同じ`graphicalmatrix.mfa.bypassSPs`も複数行に重ねず、1つの値にまとめる。
+
+`bypassSPs` はSP全体、`bypassIPs` と `bypassCIDRs` は全SPに対して適用される。
+特定のSPに対して、かつローカルIPの場合だけMFAを不要にする場合は、
+`graphicalmatrix.mfa.bypassSpCidrs` を使用する。
+
+```properties
+# <SP entityID>|<IPv4 CIDR>[,<IPv4 CIDR>] をセミコロンで区切る。
+# 単一のIPv4アドレスは /32 で指定する。
+graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24;https://sp2.example.org/shibboleth|10.20.0.0/16,10.21.0.0/16
+```
+
+この設定は、指定したSP entityIDとIPv4 CIDRの両方に一致した場合だけMFAを不要にする。指定していないSPには適用されない。
+
+`bypassSpCidrs`の左側には、利用者がアクセスする画面URLではなく、SPメタデータの`entityID`を指定する。
+IdPのSSOエンドポイントURL、SPのACS URL、利用者向けアプリケーションURLは指定しない。
+
+```xml
+<md:EntityDescriptor entityID="https://sp1.example.org/shibboleth">
+```
+
+この場合の設定は次のとおり。
+
+```properties
+graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24
+```
+
+`https`/`http`、ポート番号、末尾スラッシュ、パスを含めて完全一致するため、SPメタデータの値をそのままコピーする。
+通常のSPログインを実行した後は、IdPログの`sp=`からも実際に判定されたentityIDを確認できる。
+
+```bash
+sudo grep -E 'MFA (default decision|SP required-list decision|method decision)' \
+  /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
+```
+
+次のログの場合、設定へ指定する値は`https://sp1.example.org/shibboleth`である。
+
+```text
+MFA default decision: sp=https://sp1.example.org/shibboleth, ip=192.168.10.20, required=true
+```
+
+例外として、MFAを要求するSPが1つだけの場合は、次の設定で実現できる。他のSPは既定でMFA不要となる。
+
+```properties
+graphicalmatrix.mfa.default = bypass
+graphicalmatrix.mfa.requiredSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.10.0/24
+```
+
 ## 画面のHTMLやCSSを編集するにはどうすればよいか
 
 GraphicalMatrixプラグインの画面テンプレートとCSSは、通常、IdP本体の `views` ではなく次の場所に配置される。
@@ -168,6 +259,32 @@ GraphicalMatrixプラグインの画面テンプレートとCSSは、通常、Id
 ```
 
 IdP本体の `/opt/shibboleth-idp/views` には `login.vm` や `totp.vm` などのShibboleth IdP本体またはIdPプラグイン用テンプレートが配置される。GraphicalMatrixの認証画面や変更画面を編集する場合は、原則として `/opt/shibboleth-idp/conf/graphicalmatrix/views` を編集する。
+
+### IdP本体のログイン画面を編集する場合
+
+ユーザーIDとパスワードを入力する最初のIdPログイン画面は、通常、次のVelocityテンプレートを編集する。
+
+```text
+/opt/shibboleth-idp/views/login.vm
+```
+
+IdP本体の画面全体に適用するCSSやロゴなどの画像は、通常、次の場所を編集または追加する。
+
+```text
+/opt/shibboleth-idp/edit-webapp/css/main.css
+/opt/shibboleth-idp/edit-webapp/images/
+```
+
+`login.vm` では、`$actionUrl`、CSRF関連のhidden input、ユーザーID・パスワードのinput名を削除または変更してはならない。認証要求の送信やCSRF検証に必要である。
+
+IdP本体の`views`、`edit-webapp/css`、`edit-webapp/images`を変更した後は、WARへ反映するため次を実行する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+`/opt/shibboleth-idp/webapp/` 配下は`build.sh`で上書きされるため、直接編集しない。
 
 主な編集対象は次のとおり。
 

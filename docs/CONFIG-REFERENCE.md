@@ -140,6 +140,7 @@ SP単位/IP単位でMFA要否を制御する。
 | --- | --- | --- | --- | --- |
 | `graphicalmatrix.mfa.default` | enum | `require` | 既定のMFA方針。 | `require` または `bypass`。 |
 | `graphicalmatrix.mfa.bypassSPs` | list | empty | MFAを回避するSP entityID。 | カンマ区切り。 |
+| `graphicalmatrix.mfa.bypassSpCidrs` | rule list | empty | 指定SPだけでMFAを回避するIPv4 CIDR。 | `<SP entityID>\|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。単一IPは`/32`を使う。 |
 | `graphicalmatrix.mfa.requiredSPs` | list | empty | MFAを要求するSP entityID。 | 空でなければ対象SPを限定する。 |
 | `graphicalmatrix.mfa.bypassIPs` | IP list | empty | MFAを回避する完全一致IP。 | 管理端末や学内IPなど。 |
 | `graphicalmatrix.mfa.bypassCIDRs` | CIDR list | empty | MFAを回避するCIDR。 | 広すぎる範囲にしない。 |

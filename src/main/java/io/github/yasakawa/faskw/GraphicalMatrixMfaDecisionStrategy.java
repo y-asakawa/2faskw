@@ -47,6 +47,11 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
             return null;
         }
 
+        if (spCidrMatches(policy.getProperty("graphicalmatrix.mfa.bypassSpCidrs"), relyingPartyId, clientIp)) {
+            LOG.info("MFA bypassed by SP/CIDR policy: sp={}, ip={}", relyingPartyId, clientIp);
+            return null;
+        }
+
         if (ipMatches(policy, clientIp)) {
             LOG.info("MFA bypassed by IP policy: {}", clientIp);
             return null;
@@ -214,6 +219,29 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         for (final String cidr : csv(policy.getProperty("graphicalmatrix.mfa.bypassCIDRs"))) {
             if (ipv4CidrMatches(ip, cidr)) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean spCidrMatches(final String rules, final String relyingPartyId, final String ip) {
+        if (rules == null || rules.trim().isEmpty() || relyingPartyId == null || relyingPartyId.isEmpty()
+                || ip == null || ip.isEmpty()) {
+            return false;
+        }
+
+        for (final String rule : rules.split(";")) {
+            final int separator = rule.indexOf('|');
+            if (separator <= 0) {
+                continue;
+            }
+            if (!relyingPartyId.equals(trim(rule.substring(0, separator)))) {
+                continue;
+            }
+            for (final String cidr : rule.substring(separator + 1).split(",")) {
+                if (ipv4CidrMatches(ip, trim(cidr))) {
+                    return true;
+                }
             }
         }
         return false;

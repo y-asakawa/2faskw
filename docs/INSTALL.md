@@ -968,10 +968,19 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 ```properties
 graphicalmatrix.mfa.default = require
 graphicalmatrix.mfa.bypassSPs =
+graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =
 graphicalmatrix.mfa.bypassIPs =
 graphicalmatrix.mfa.bypassCIDRs =
 graphicalmatrix.mfa.useForwardedFor = false
+```
+
+特定のSPだけで送信元IPv4 CIDRによるMFA例外を設定する場合は、
+`graphicalmatrix.mfa.bypassSpCidrs` に `<SP entityID>|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。
+単一IPv4アドレスは`/32`で指定する。
+
+```properties
+graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24;https://sp2.example.org/shibboleth|10.20.0.0/16
 ```
 
 `useForwardedFor=true` は、信頼済みReverse Proxy/LBが送信元IPヘッダを
@@ -1500,6 +1509,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-token.sh rotate --apply --print
 ```properties
 graphicalmatrix.mfa.default = require
 graphicalmatrix.mfa.bypassSPs =
+graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =
 graphicalmatrix.mfa.bypassIPs =
 graphicalmatrix.mfa.bypassCIDRs =
