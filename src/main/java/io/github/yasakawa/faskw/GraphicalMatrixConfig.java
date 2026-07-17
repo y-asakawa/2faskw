@@ -26,9 +26,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_FAILURE_LIMIT = 5;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_WINDOW_SECONDS = 300;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_LOCK_SECONDS = 900;
+    private static final int DEFAULT_SELF_SERVICE_TRANSACTION_SECONDS = 600;
     private static final boolean DEFAULT_ALLOW_DUPLICATE_SELECTIONS = false;
     private static final boolean DEFAULT_FORCE_SEQUENCE_CHANGE_ENABLED = false;
     private static final boolean DEFAULT_CHANGE_LDAP_RATE_LIMIT_ENABLED = true;
+    private static final boolean DEFAULT_SELF_SERVICE_ENABLED = false;
+    private static final boolean DEFAULT_LEGACY_LDAP_LOGIN_ENABLED = true;
     private static final String DEFAULT_CHANGE_LDAP_RATE_LIMIT_KEY = "ip-user";
     private static final String DEFAULT_GRAPHICALS = "img01-25";
     private static final String DEFAULT_GRAPHICAL_DIRECTORY =
@@ -67,6 +70,9 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final int changeLdapRateLimitWindowSeconds;
     private final int changeLdapRateLimitLockSeconds;
     private final String changeLdapRateLimitKey;
+    private final boolean selfServiceEnabled;
+    private final int selfServiceTransactionSeconds;
+    private final boolean legacyLdapLoginEnabled;
     private final boolean duplicateSelectionsAllowed;
     private final boolean forceSequenceChangeEnabled;
     private final List<String> graphicalIds;
@@ -92,6 +98,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final int orderMode, final int challengeSeconds, final boolean changeLdapRateLimitEnabled,
             final int changeLdapRateLimitFailureLimit, final int changeLdapRateLimitWindowSeconds,
             final int changeLdapRateLimitLockSeconds, final String changeLdapRateLimitKey,
+            final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
+            final boolean legacyLdapLoginEnabled,
             final boolean duplicateSelectionsAllowed, final boolean forceSequenceChangeEnabled,
             final List<String> graphicalIds, final Map<String, String> aliases,
             final Path graphicalDirectory,
@@ -112,6 +120,9 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.changeLdapRateLimitWindowSeconds = changeLdapRateLimitWindowSeconds;
         this.changeLdapRateLimitLockSeconds = changeLdapRateLimitLockSeconds;
         this.changeLdapRateLimitKey = changeLdapRateLimitKey;
+        this.selfServiceEnabled = selfServiceEnabled;
+        this.selfServiceTransactionSeconds = selfServiceTransactionSeconds;
+        this.legacyLdapLoginEnabled = legacyLdapLoginEnabled;
         this.duplicateSelectionsAllowed = duplicateSelectionsAllowed;
         this.forceSequenceChangeEnabled = forceSequenceChangeEnabled;
         this.graphicalIds = Collections.unmodifiableList(new ArrayList<>(graphicalIds));
@@ -168,6 +179,13 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final String changeLdapRateLimitKey = properties.getProperty(
             "graphicalmatrix.change.ldapRateLimit.key", DEFAULT_CHANGE_LDAP_RATE_LIMIT_KEY)
             .trim().toLowerCase(Locale.ROOT);
+        final boolean selfServiceEnabled = booleanProperty(properties,
+            "graphicalmatrix.selfservice.enabled", DEFAULT_SELF_SERVICE_ENABLED);
+        final int selfServiceTransactionSeconds = intProperty(properties,
+            "graphicalmatrix.selfservice.transactionTtlSeconds",
+            DEFAULT_SELF_SERVICE_TRANSACTION_SECONDS);
+        final boolean legacyLdapLoginEnabled = booleanProperty(properties,
+            "graphicalmatrix.change.legacyLdapLoginEnabled", DEFAULT_LEGACY_LDAP_LOGIN_ENABLED);
         final boolean duplicateSelectionsAllowed = booleanProperty(properties,
             "graphicalmatrix.allow_duplicates", DEFAULT_ALLOW_DUPLICATE_SELECTIONS);
         final boolean forceSequenceChangeEnabled = booleanProperty(properties,
@@ -209,14 +227,16 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         validate(columns, rows, choiceCount, orderMode, challengeSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
-            changeLdapRateLimitKey, duplicateSelectionsAllowed, graphicalIds);
+            changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
+            legacyLdapLoginEnabled, duplicateSelectionsAllowed, graphicalIds);
         if (cssCacheSeconds < 0) {
             throw new IllegalArgumentException("GraphicalMatrix CSS cache seconds must be zero or positive.");
         }
         return new GraphicalMatrixConfig(columns, rows, choiceCount, orderMode, challengeSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
-            changeLdapRateLimitKey, duplicateSelectionsAllowed, forceSequenceChangeEnabled,
+            changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
+            legacyLdapLoginEnabled, duplicateSelectionsAllowed, forceSequenceChangeEnabled,
             graphicalIds, aliases, graphicalDirectory,
             cssEnabled, cssPath, cssCacheSeconds, templateEnabled, templatePath,
             lockedTemplatePath, unavailableTemplatePath, totpRegisterTemplatePath,
@@ -277,6 +297,22 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             && changeLdapRateLimitFailureLimit > 0
             && changeLdapRateLimitWindowSeconds > 0
             && changeLdapRateLimitLockSeconds > 0;
+    }
+
+    public boolean isSelfServiceEnabled() {
+        return selfServiceEnabled;
+    }
+
+    public int getSelfServiceTransactionSeconds() {
+        return selfServiceTransactionSeconds;
+    }
+
+    public long getSelfServiceTransactionMillis() {
+        return selfServiceTransactionSeconds * 1000L;
+    }
+
+    public boolean isLegacyLdapLoginEnabled() {
+        return legacyLdapLoginEnabled;
     }
 
     public boolean isDuplicateSelectionsAllowed() {
@@ -506,6 +542,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final boolean changeLdapRateLimitEnabled, final int changeLdapRateLimitFailureLimit,
             final int changeLdapRateLimitWindowSeconds, final int changeLdapRateLimitLockSeconds,
             final String changeLdapRateLimitKey,
+            final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
+            final boolean legacyLdapLoginEnabled,
             final boolean duplicateSelectionsAllowed, final List<String> graphicalIds) {
         if (columns < 1 || rows < 1) {
             throw new IllegalArgumentException("GraphicalMatrix columns and rows must be positive.");
@@ -532,6 +570,14 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
                 throw new IllegalArgumentException(
                     "GraphicalMatrix change LDAP rate limit key must be ip, user, or ip-user.");
             }
+        }
+        if (selfServiceTransactionSeconds < 60 || selfServiceTransactionSeconds > 900) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix self-service transaction seconds must be between 60 and 900.");
+        }
+        if (!selfServiceEnabled && !legacyLdapLoginEnabled) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix self-service or legacy LDAP login must be enabled.");
         }
         final int cells = columns * rows;
         if (graphicalIds.size() != cells) {

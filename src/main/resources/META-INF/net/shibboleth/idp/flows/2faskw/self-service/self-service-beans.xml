@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:c="http://www.springframework.org/schema/c"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd"
+    default-init-method="initialize"
+    default-destroy-method="destroy">
+
+    <bean id="shibboleth.AdminProfileId" class="java.lang.String"
+        c:_0="https://github.com/y-asakawa/2faskw/profile/self-service" />
+    <bean id="shibboleth.metrics.ProfileCounter" class="java.lang.String"
+        c:_0="io.github.yasakawa.faskw.profiles.self-service" />
+
+    <bean id="CheckGraphicalMatrixSelfServiceEnabled"
+        class="io.github.yasakawa.faskw.CheckGraphicalMatrixSelfServiceEnabled"
+        scope="prototype" />
+    <bean id="InitializeGraphicalMatrixSelfService"
+        class="io.github.yasakawa.faskw.InitializeGraphicalMatrixSelfService"
+        scope="prototype" />
+
+</beans>

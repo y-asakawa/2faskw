@@ -37,6 +37,11 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         final String relyingPartyId = relyingPartyId(input);
         final String clientIp = clientIp(policy);
 
+        if (isSelfServiceProfile(input)) {
+            LOG.info("MFA required for 2FAS-KW self-service profile: ip={}", clientIp);
+            return selectFlow(input, GraphicalMatrixSelfServiceAuthentication.PROFILE_ID, clientIp);
+        }
+
         if (contains(csv(policy.getProperty("graphicalmatrix.mfa.bypassSPs")), relyingPartyId)) {
             LOG.info("MFA bypassed by SP policy: {}", relyingPartyId);
             return null;
@@ -156,6 +161,11 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         }
         final RelyingPartyContext rpCtx = input.getSubcontext(RelyingPartyContext.class);
         return rpCtx != null && rpCtx.getRelyingPartyId() != null ? rpCtx.getRelyingPartyId() : "";
+    }
+
+    static boolean isSelfServiceProfile(final ProfileRequestContext input) {
+        return input != null
+            && GraphicalMatrixSelfServiceAuthentication.PROFILE_ID.equals(input.getProfileId());
     }
 
     private static String clientIp(final Properties policy) {

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<flow xmlns="http://www.springframework.org/schema/webflow"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/webflow http://www.springframework.org/schema/webflow/spring-webflow.xsd"
+    parent="admin.abstract">
+
+    <action-state id="InitializeProfileRequestContext">
+        <evaluate expression="InitializeProfileRequestContext" />
+        <evaluate expression="FlowStartPopulateAuditContext" />
+        <evaluate expression="CheckGraphicalMatrixSelfServiceEnabled" />
+        <evaluate expression="'proceed'" />
+        <transition on="proceed" to="DoAdminPreamble" />
+    </action-state>
+
+    <action-state id="DoProfileWork">
+        <evaluate expression="InitializeGraphicalMatrixSelfService" />
+        <evaluate expression="'proceed'" />
+        <transition on="proceed" to="RedirectToChange" />
+    </action-state>
+
+    <end-state id="RedirectToChange" view="externalRedirect:#{flowScope.redirectUrl}">
+        <on-entry>
+            <evaluate expression="WriteAuditLog" />
+        </on-entry>
+    </end-state>
+
+    <bean-import resource="self-service-beans.xml" />
+
+</flow>

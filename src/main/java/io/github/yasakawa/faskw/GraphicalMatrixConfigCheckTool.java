@@ -15,6 +15,8 @@ public final class GraphicalMatrixConfigCheckTool {
         "graphicalmatrix.allow_duplicates",
         "graphicalmatrix.force_sequence_change",
         "graphicalmatrix.change.ldapRateLimit.enabled",
+        "graphicalmatrix.selfservice.enabled",
+        "graphicalmatrix.change.legacyLdapLoginEnabled",
         "graphicalmatrix.productionMode",
         "graphicalmatrix.view.template.enabled",
         "graphicalmatrix.view.css.enabled"
@@ -83,6 +85,9 @@ public final class GraphicalMatrixConfigCheckTool {
             + " allow_duplicates=" + config.isDuplicateSelectionsAllowed());
         ok("aliases valid: count=" + config.getAliases().size());
         ok("challenge valid: seconds=" + config.getChallengeSeconds());
+        ok("self-service valid: enabled=" + config.isSelfServiceEnabled()
+            + " transaction_seconds=" + config.getSelfServiceTransactionSeconds()
+            + " legacy_ldap_login=" + config.isLegacyLdapLoginEnabled());
 
         checkGraphicalFiles(config);
         checkViewFiles(config);

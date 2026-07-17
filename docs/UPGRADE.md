@@ -7,6 +7,7 @@
 - v1.0.0 / v1.0.1 から v1.1.0 への更新
 - v1.1.0 から v1.2.0 への更新
 - v1.0.x から v1.2.0 へ更新する場合の段階的な確認
+- v1.2.3 から v1.2.4 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -17,6 +18,7 @@
 | v1.0.0 / v1.0.1 | v1.1.0 | 旧JAR削除、DB schema確認、sequence保存方式の保護、設定差分反映 | 管理API、CSV運用、logrotate設定 |
 | v1.1.0 | v1.2.0 | 旧JAR削除、v1.2.0テンプレート差分反映、config check | LDAP保存、TOTP seed暗号化設定見直し、WebAuthn LDAP StorageService |
 | v1.0.x | v1.2.0 | v1.1.0の必須対応を先に完了し、その後v1.2.0差分を反映 | LDAP保存へ切り替える場合は別途移行計画を作成 |
+| v1.2.3 | v1.2.4 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | IdP自己管理フローの有効化、従来LDAP変更経路の停止 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -32,6 +34,10 @@ v1.2.0の推奨構成:
 - LDAP保存は、既存LDAP運用に登録情報を寄せたい場合のオプション
 - WebAuthn credential保存はDB/JDBC StorageServiceを推奨する
 - WebAuthn credentialをLDAPへ保存する場合は `subtree` 方式を推奨する
+
+v1.2.4では、Password + 現在のMFA方式による強制再認証後に変更画面を開始するIdP自己管理フローを
+追加します。既定では自己管理フローは無効、従来LDAP変更経路は有効であるため、JAR更新だけで
+従来の変更画面が自動的に無効になることはありません。
 
 ## 事前確認
 
@@ -75,7 +81,8 @@ sudo cp -a /opt/shibboleth-idp/credentials \
   /opt/shibboleth-idp/credentials.bak.$TS
 ```
 
-v1.2.0でWebAuthn設定を使う場合は、authn設定もバックアップする。
+v1.2.0でWebAuthn設定を使う場合、またはv1.2.4でIdP自己管理フローを有効にする場合は、
+authn設定もバックアップする。
 
 ```bash
 sudo cp -a /opt/shibboleth-idp/conf/authn \
@@ -342,6 +349,172 @@ graphicalmatrix.webauthn.ldap.attr.version = gmStorageVersion
 既存WebAuthn credentialを別StorageServiceへ自動移行する手順はありません。
 StorageServiceを変更する場合は、既存credentialの移行または利用者の再登録を計画してください。
 
+## v1.2.3からv1.2.4への追加手順
+
+v1.2.4では、IdP内でPassword + 現在のMFA方式を強制再認証してから、GraphicalMatrix sequenceおよび
+MFA方式の変更画面を開始する自己管理フローを追加します。詳細は
+[INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md)を参照してください。
+
+この更新による`graphicalmatrix_enrollment`のスキーマ変更、LDAP schema変更、登録データ移行は
+ありません。更新直後は以下が既定値となり、v1.2.3の従来LDAP変更経路を維持します。
+
+```properties
+graphicalmatrix.selfservice.enabled = false
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = true
+```
+
+### 導入方式を確認する
+
+更新前に、v1.2.3を`plugin.sh`で導入したか、展開ZIPから手動導入したかを確認します。
+
+```bash
+sudo /opt/shibboleth-idp/bin/plugin.sh -l
+
+sudo find \
+  /opt/shibboleth-idp/dist/plugin-webapp/WEB-INF/lib \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 -type f -name '2faskw-idp-plugin-*.jar' -print
+```
+
+`plugin.sh`管理環境では、本書末尾の「v1.2.xからv1.2.xへのplugin.sh更新」を使用します。
+手動導入環境では、本書の「配布物の事前検査」から「Pluginファイルの更新」までを実行します。
+両方式を混在させて、`dist/plugin-webapp`と`edit-webapp`に2FAS-KW JARを重複配置してはなりません。
+
+手動導入環境では、v1.2.4配置後にv1.2.3のJARだけを削除します。
+
+```bash
+sudo rm -f \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.2.3.jar
+
+sudo find \
+  /opt/shibboleth-idp/dist/plugin-webapp/WEB-INF/lib \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 -type f -name '2faskw-idp-plugin-*.jar' -print
+```
+
+v1.2.4のJARだけが表示されることを確認します。Administrative Flow定義はv1.2.4 JAR内に
+含まれるため、flow XMLを`/opt/shibboleth-idp`へ手動コピーする必要はありません。
+
+### 互換設定で更新する
+
+最初に、稼働中の設定ファイル
+`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`へ以下を追加します。
+
+```properties
+graphicalmatrix.selfservice.enabled = false
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = true
+```
+
+この状態で設定検査、WAR再構築、Jetty起動を行い、v1.2.3で使用していた以下の機能が回帰して
+いないことを先に確認します。
+
+- 通常のPassword + MFA認証
+- `/idp/graphicalmatrix/change`の従来LDAPログイン
+- GraphicalMatrix sequence変更
+- 使用中の場合はTOTPおよびWebAuthn認証
+- DB保存またはLDAP保存の読み書き
+
+### IdP自己管理フローを有効にする
+
+`/opt/shibboleth-idp/conf/authn/authn.properties`で、`idp.authn.flows`に`MFA`が含まれることを
+確認し、GraphicalMatrix External flowのForceAuthn対応を有効にします。他の認証Flowを併用して
+いる場合は、既存の`idp.authn.flows`から必要な値を削除しないでください。
+
+```properties
+idp.authn.flows = MFA
+idp.authn.External.externalAuthnPath = contextRelative:/graphicalmatrix/start
+idp.authn.External.nonBrowserSupported = false
+idp.authn.External.passiveAuthenticationSupported = false
+idp.authn.External.forcedAuthenticationSupported = true
+```
+
+次に、`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`を以下へ変更します。
+最初の試験では従来LDAP経路を残します。
+
+```properties
+graphicalmatrix.selfservice.enabled = true
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = true
+```
+
+設定検査を実行します。
+
+```bash
+sudo /path/to/extracted-1.2.4/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+期待値:
+
+```text
+OK: [config] self-service valid: enabled=true transaction_seconds=600 legacy_ldap_login=true
+OK: [config] self-service authentication flow enabled: idp.authn.flows=MFA
+OK: [config] GraphicalMatrix External flow supports forced authentication
+result: OK
+```
+
+WARを再構築してJettyを起動します。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+sudo systemctl is-active jetty-idp.service
+```
+
+新しいブラウザセッションで次へアクセスし、Passwordと現在のMFA方式が毎回要求されることを
+確認します。
+
+```text
+https://idp.example.org/idp/profile/2faskw/self-service
+```
+
+認証成功後は、次のURLへ自動的に遷移して変更メニューが表示されます。handoff URLを直接入力して
+試験してはいけません。
+
+```text
+https://idp.example.org/idp/graphicalmatrix/change?mode=idp-self-service
+```
+
+監査ログで次の順序を確認します。
+
+```bash
+sudo tail -n 50 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+```
+
+```text
+event=SELF_SERVICE_AUTH ... result=OK ...
+event=SELF_SERVICE_HANDOFF ... result=OK ... detail=one_time_handoff_consumed
+```
+
+DB保存またはLDAP保存の利用環境で、sequence変更とMFA方式変更を確認します。TOTPまたはWebAuthnを
+現在のMFA方式として使用する場合は、それぞれのFlowがForceAuthn要求に対応し、同じ自己管理URLから
+再認証できることも確認します。
+
+全試験が完了した後、従来LDAPログインを停止する場合だけ次へ変更します。
+
+```properties
+graphicalmatrix.change.legacyLdapLoginEnabled = false
+```
+
+### v1.2.4自己管理フローだけを無効に戻す
+
+自己管理フローに問題があっても、直ちにv1.2.3へJARを戻す必要はありません。まず
+`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`を次へ戻すことで、
+v1.2.3と同じ従来LDAP変更経路を使用できます。
+
+```properties
+graphicalmatrix.selfservice.enabled = false
+graphicalmatrix.change.legacyLdapLoginEnabled = true
+```
+
+完全にv1.2.3へ戻す場合は、本書のロールバック手順に従ってv1.2.4 JARを削除し、バックアップした
+v1.2.3 JAR、`conf/graphicalmatrix`、`conf/authn`を復元してWARを再構築します。今回の更新では
+DB/LDAP schemaを変更しないため、自己管理フローの導入だけを理由とするデータschemaのロールバックは
+不要です。
+
 ## 設定検査
 
 ユーザーが認証を開始する前に設定検査を実行する。
@@ -401,6 +574,7 @@ sudo tail -n 200 /opt/shibboleth-idp/logs/idp-process.log
 - WebAuthn LDAP保存を使用する場合はStorageService subtreeへの登録、検索、削除
 - 管理APIを使用する場合はread-only疎通確認
 - `graphicalmatrix-audit.log`への監査記録
+- v1.2.4で自己管理フローを有効にした場合は、Password + 現在のMFA方式による再認証、変更画面への遷移、`SELF_SERVICE_AUTH`と`SELF_SERVICE_HANDOFF`の成功記録
 
 設定検査を再実行する。
 
@@ -434,6 +608,13 @@ sudo rm -f \
   /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.2.0.jar
 ```
 
+v1.2.4からv1.2.3へ戻す例:
+
+```bash
+sudo rm -f \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.2.4.jar
+```
+
 バックアップした旧Plugin JARと設定ファイルを復元する。
 復元元のタイムスタンプを確認してから実行すること。
 
@@ -448,7 +629,8 @@ sudo cp -a \
   /opt/shibboleth-idp/conf/graphicalmatrix/
 ```
 
-v1.2.0でauthn設定やglobal.xmlを変更した場合は、それらも復元する。
+v1.2.0でWebAuthn設定を変更した場合、またはv1.2.4で自己管理フロー向けのauthn設定を変更した
+場合は、それらも復元する。
 
 ```bash
 sudo cp -a \
@@ -471,10 +653,6 @@ sudo systemctl start jetty-idp.service
 
 LDAP schemaやLDAP上のユーザー属性を追加した場合、PluginロールバックだけではLDAP側の変更は戻りません。
 必要であればLDAP側のバックアップから復元してください。
-
-
-
-
 
 ## 公式プラグイン化した場合
 
@@ -502,7 +680,8 @@ sudo "$IDP_HOME/bin/plugin.sh" -l
 sudo "$IDP_HOME/bin/plugin.sh" -fl
 ```
 
-更新後の一覧には `Current Version: 1.2.2`以降 が表示されることを確認する。`plugin.sh -u` は、
+更新後の一覧には更新先のバージョンが表示されることを確認する。v1.2.3からv1.2.4への更新では
+`Current Version: 1.2.4`が期待値となる。`plugin.sh -u` は、
 署名を検証してからWARを再構築する。`--noCheck` は互換性検査を無効化するため、この更新試験では
 指定しない。
 

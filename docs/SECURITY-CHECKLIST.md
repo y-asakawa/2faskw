@@ -234,6 +234,10 @@ Plugin更新、設定変更、DB変更を行う前に確認してください。
 - [ ] Jetty restartが成功した
 - [ ] IdPログに起動エラーがない
 - [ ] `/idp/graphicalmatrix/change` が表示できる
+- [ ] 自己管理flowを使う場合、`/idp/profile/2faskw/self-service` がPasswordと現在のMFA方式を毎回要求する
+- [ ] 自己管理flowでは、SP/IPのMFAバイパスポリシーを設定していても第二要素が省略されない
+- [ ] 認証済みhandoffの再読込、期限切れ、別セッションからの利用が拒否される
+- [ ] 移行完了後は `graphicalmatrix.change.legacyLdapLoginEnabled=false` とし、直接LDAPログインを停止する
 - [ ] GraphicalMatrix認証が成功する
 - [ ] 誤ったGraphicalMatrix選択でリトライできる
 - [ ] 5回失敗時にロック画面が出る
