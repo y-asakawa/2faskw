@@ -184,6 +184,9 @@ Environment:
   GRAPHICAL_PROPERTIES default: $GRAPHICALMATRIX_HOME/conf/graphicalmatrix/graphicalmatrix.properties
   H2_JAR          default: $GRAPHICALMATRIX_HOME/lib/h2-*.jar if present,
                   otherwise $IDP_HOME/edit-webapp/WEB-INF/lib/h2-2.2.224.jar
+  GRAPHICALMATRIX_TIME_ZONE
+                  optional IANA time zone used for displayed timestamps.
+                  Defaults to the operating system time zone, then UTC.
   SEQUENCE_TOOL_CP optional explicit classpath for Java sequence/export tools
 
 CSV format:
@@ -825,6 +828,25 @@ postgresql_client() {
   printf '%s\n' "$candidate"
 }
 
+display_time_zone() {
+  local zone="${GRAPHICALMATRIX_TIME_ZONE:-}"
+  if [[ -z "$zone" ]] && command -v timedatectl >/dev/null 2>&1; then
+    zone="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+  fi
+  if [[ -z "$zone" && -r /etc/timezone ]]; then
+    zone="$(head -n 1 /etc/timezone | tr -d '[:space:]')"
+  fi
+  if [[ -z "$zone" && -L /etc/localtime ]]; then
+    zone="$(readlink /etc/localtime 2>/dev/null || true)"
+    zone="${zone#*/zoneinfo/}"
+  fi
+  if [[ -z "$zone" ]]; then
+    zone="UTC"
+  fi
+  [[ "$zone" =~ ^[A-Za-z0-9_+./-]+$ ]] || die "invalid display time zone: $zone"
+  printf '%s\n' "$zone"
+}
+
 run_sql_h2_as_current_user() {
   java -cp "$H2_JAR" org.h2.tools.Shell \
     -url "$db_url" \
@@ -980,24 +1002,26 @@ case "$db_auto_init" in
   *) init_sql="" ;;
 esac
 
+display_timezone="$(display_time_zone)"
+
 if [[ "$db_type" == "postgresql" ]]; then
   now_expr="(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint"
   select_public_columns="
 SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, failed_count,
        CASE WHEN locked_until = 0 THEN NULL
-            ELSE to_char(to_timestamp(locked_until / 1000.0) AT TIME ZONE 'Asia/Tokyo',
-                         'YYYY/MM/DD HH24:MI:SS') END AS locked_until_jst,
+            ELSE to_char(to_timestamp(locked_until / 1000.0) AT TIME ZONE '$display_timezone',
+                         'YYYY/MM/DD HH24:MI:SS') END AS locked_until,
        totp_status,
        CASE WHEN totp_registered_at = 0 THEN NULL
-            ELSE to_char(to_timestamp(totp_registered_at / 1000.0) AT TIME ZONE 'Asia/Tokyo',
-                         'YYYY/MM/DD HH24:MI:SS') END AS totp_registered_at_jst,
+            ELSE to_char(to_timestamp(totp_registered_at / 1000.0) AT TIME ZONE '$display_timezone',
+                         'YYYY/MM/DD HH24:MI:SS') END AS totp_registered,
        CASE WHEN last_success_at = 0 THEN NULL
-            ELSE to_char(to_timestamp(last_success_at / 1000.0) AT TIME ZONE 'Asia/Tokyo',
-                         'YYYY/MM/DD HH24:MI:SS') END AS last_success_at_jst,
-       to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'Asia/Tokyo',
-               'YYYY/MM/DD HH24:MI:SS') AS created_at_jst,
-       to_char(to_timestamp(updated_at / 1000.0) AT TIME ZONE 'Asia/Tokyo',
-               'YYYY/MM/DD HH24:MI:SS') AS updated_at_jst,
+            ELSE to_char(to_timestamp(last_success_at / 1000.0) AT TIME ZONE '$display_timezone',
+                         'YYYY/MM/DD HH24:MI:SS') END AS last_success,
+       to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE '$display_timezone',
+               'YYYY/MM/DD HH24:MI:SS') AS created,
+       to_char(to_timestamp(updated_at / 1000.0) AT TIME ZONE '$display_timezone',
+               'YYYY/MM/DD HH24:MI:SS') AS updated,
        CASE WHEN totp_seed IS NULL OR totp_seed = '' THEN 'NO' ELSE 'YES' END AS totp_seed_set
 FROM graphicalmatrix_enrollment"
   totp_seed_status_expr="CASE WHEN totp_status = 'ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END"
@@ -1007,28 +1031,28 @@ else
 SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, failed_count,
        CASEWHEN(locked_until = 0, NULL,
          FORMATDATETIME(
-           DATEADD('HOUR', 9,
-             DATEADD('MILLISECOND', locked_until, TIMESTAMP '1970-01-01 00:00:00')),
-           'yyyy/MM/dd HH:mm:ss')) AS locked_until_jst,
+           DATEADD('MILLISECOND', locked_until,
+             TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+           'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS locked_until,
        totp_status,
        CASEWHEN(totp_registered_at = 0, NULL,
          FORMATDATETIME(
-           DATEADD('HOUR', 9,
-             DATEADD('MILLISECOND', totp_registered_at, TIMESTAMP '1970-01-01 00:00:00')),
-           'yyyy/MM/dd HH:mm:ss')) AS totp_registered_at_jst,
+           DATEADD('MILLISECOND', totp_registered_at,
+             TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+           'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS totp_registered,
        CASEWHEN(last_success_at = 0, NULL,
          FORMATDATETIME(
-           DATEADD('HOUR', 9,
-             DATEADD('MILLISECOND', last_success_at, TIMESTAMP '1970-01-01 00:00:00')),
-           'yyyy/MM/dd HH:mm:ss')) AS last_success_at_jst,
+           DATEADD('MILLISECOND', last_success_at,
+             TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+           'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS last_success,
        FORMATDATETIME(
-         DATEADD('HOUR', 9,
-           DATEADD('MILLISECOND', created_at, TIMESTAMP '1970-01-01 00:00:00')),
-         'yyyy/MM/dd HH:mm:ss') AS created_at_jst,
+         DATEADD('MILLISECOND', created_at,
+           TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+         'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone') AS created,
        FORMATDATETIME(
-         DATEADD('HOUR', 9,
-           DATEADD('MILLISECOND', updated_at, TIMESTAMP '1970-01-01 00:00:00')),
-         'yyyy/MM/dd HH:mm:ss') AS updated_at_jst,
+         DATEADD('MILLISECOND', updated_at,
+           TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+         'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone') AS updated,
        CASEWHEN(totp_seed IS NULL OR totp_seed = '', 'NO', 'YES') AS totp_seed_set
 FROM graphicalmatrix_enrollment"
   totp_seed_status_expr="CASEWHEN(totp_status = 'ACTIVE', 'ACTIVE', 'PENDING')"
@@ -1439,10 +1463,10 @@ SELECT
   elem ->> 'userVerified' AS user_verified,
   CASE
     WHEN elem ->> 'registrationTime' ~ '^[0-9]+(\\.[0-9]+)?$'
-    THEN to_char(to_timestamp((elem ->> 'registrationTime')::double precision) AT TIME ZONE 'Asia/Tokyo',
+    THEN to_char(to_timestamp((elem ->> 'registrationTime')::double precision) AT TIME ZONE '$display_timezone',
                  'YYYY/MM/DD HH24:MI:SS')
     ELSE NULL
-  END AS registration_time_jst,
+  END AS registration_time,
   version,
   value_length
 FROM expanded s
