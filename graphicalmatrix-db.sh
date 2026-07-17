@@ -800,6 +800,31 @@ jdbc_to_psql_url() {
   printf "%s" "$url"
 }
 
+postgresql_client() {
+  local candidate
+  if [[ -n "${PSQL_BIN:-}" ]]; then
+    if [[ "$PSQL_BIN" == */* ]]; then
+      [[ -x "$PSQL_BIN" ]] || die "psql not executable: $PSQL_BIN"
+      printf '%s\n' "$PSQL_BIN"
+      return
+    fi
+    candidate="$(command -v "$PSQL_BIN" 2>/dev/null || true)"
+    [[ -n "$candidate" ]] || die "psql not found: $PSQL_BIN"
+    printf '%s\n' "$candidate"
+    return
+  fi
+
+  candidate="$(command -v psql 2>/dev/null || true)"
+  if [[ -n "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return
+  fi
+
+  candidate="$(compgen -G '/usr/pgsql-*/bin/psql' | sort -V | tail -n 1 || true)"
+  [[ -n "$candidate" && -x "$candidate" ]] || die "psql not found"
+  printf '%s\n' "$candidate"
+}
+
 run_sql_h2_as_current_user() {
   java -cp "$H2_JAR" org.h2.tools.Shell \
     -url "$db_url" \
@@ -819,9 +844,10 @@ run_sql_h2() {
 }
 
 run_sql_postgresql() {
-  command -v psql >/dev/null 2>&1 || die "psql not found"
+  local psql_bin
+  psql_bin="$(postgresql_client)"
   PGPASSWORD="$db_password" PGOPTIONS="--client-min-messages=warning" \
-    psql -q "$(jdbc_to_psql_url "$db_url")" \
+    "$psql_bin" -q "$(jdbc_to_psql_url "$db_url")" \
     -U "$db_user" \
     -v ON_ERROR_STOP=1 \
     -P null=null \
@@ -857,9 +883,10 @@ run_sql_file_h2() {
 
 run_sql_file_postgresql() {
   local sql_file="$1"
-  command -v psql >/dev/null 2>&1 || die "psql not found"
+  local psql_bin
+  psql_bin="$(postgresql_client)"
   PGPASSWORD="$db_password" PGOPTIONS="--client-min-messages=warning" \
-    psql -q "$(jdbc_to_psql_url "$db_url")" \
+    "$psql_bin" -q "$(jdbc_to_psql_url "$db_url")" \
     -U "$db_user" \
     -v ON_ERROR_STOP=1 \
     -P null=null \
@@ -875,9 +902,10 @@ run_sql_file() {
 }
 
 run_scalar_postgresql() {
-  command -v psql >/dev/null 2>&1 || die "psql not found"
+  local psql_bin
+  psql_bin="$(postgresql_client)"
   PGPASSWORD="$db_password" PGOPTIONS="--client-min-messages=warning" \
-    psql -qAt "$(jdbc_to_psql_url "$db_url")" \
+    "$psql_bin" -qAt "$(jdbc_to_psql_url "$db_url")" \
     -U "$db_user" \
     -v ON_ERROR_STOP=1 \
     -c "$1"
