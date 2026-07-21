@@ -29,9 +29,19 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         noStore(response);
 
         final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
+        if ("idp-self-service".equals(trim(request.getParameter("mode")))) {
+            startFromSelfService(request, response, config);
+            return;
+        }
+
         final HttpSession session = request.getSession(false);
         if (session != null) {
             clearChange(session);
+        }
+        if (config.isSelfServiceEnabled() && !config.isLegacyLdapLoginEnabled()) {
+            response.sendRedirect(request.getContextPath()
+                + GraphicalMatrixSelfServiceAuthentication.PROFILE_PATH);
+            return;
         }
         renderStart(request, response, config, null);
     }
@@ -79,6 +89,17 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             final HttpServletResponse response, final GraphicalMatrixConfig config) throws IOException {
         final GraphicalMatrixAuditLogger audit = GraphicalMatrixRuntime.auditLogger();
         final String user = trim(request.getParameter("user"));
+        if (!config.isLegacyLdapLoginEnabled()) {
+            audit.log("CHANGE_LDAP_AUTH", user, "DENIED", null, "legacy_ldap_login_disabled", request);
+            if (config.isSelfServiceEnabled()) {
+                response.sendRedirect(request.getContextPath()
+                    + GraphicalMatrixSelfServiceAuthentication.PROFILE_PATH);
+            } else {
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "変更画面を利用できません。", "管理者に連絡してください。");
+            }
+            return;
+        }
         final String password = request.getParameter("password");
         if (!validUser(user) || password == null || password.isEmpty()) {
             audit.log("CHANGE_LDAP_AUTH", user, "BAD_REQUEST", null, "invalid_input", request);
@@ -114,6 +135,55 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         clearLdapFailures(request, user, config);
         audit.log("CHANGE_LDAP_AUTH", user, "OK", null, "bind_success", request);
         startCurrentChallenge(request, response, config, user, null);
+    }
+
+    private static void startFromSelfService(final HttpServletRequest request,
+            final HttpServletResponse response, final GraphicalMatrixConfig config) throws IOException {
+        final GraphicalMatrixAuditLogger audit = GraphicalMatrixRuntime.auditLogger();
+        final HttpSession session = request.getSession(false);
+        final GraphicalMatrixSelfServiceSession.Handoff handoff =
+            GraphicalMatrixSelfServiceSession.consume(session, System.currentTimeMillis());
+        if (!config.isSelfServiceEnabled() || handoff == null) {
+            audit.log("SELF_SERVICE_HANDOFF", null, "DENIED", null,
+                config.isSelfServiceEnabled() ? "missing_or_expired" : "self_service_disabled", request);
+            if (session != null) {
+                clearChange(session);
+            }
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "自己管理画面を開始できません。",
+                "認証の有効期限が切れた可能性があります。最初からやり直してください。");
+            return;
+        }
+
+        final String user = handoff.getUser();
+        final GraphicalMatrixEnrollment enrollment;
+        try {
+            enrollment = GraphicalMatrixRuntime.repository().findEnrollment(user);
+        } catch (Exception ex) {
+            audit.log("SELF_SERVICE_HANDOFF", user, "DB_ERROR", null,
+                ex.getClass().getSimpleName(), request);
+            clearChange(session);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "登録情報を確認できません。",
+                "時間をおいて再度試すか、管理者に連絡してください。");
+            return;
+        }
+
+        final long now = System.currentTimeMillis();
+        if (enrollment == null || !enrollment.isActive() || enrollment.getLockedUntil() > now) {
+            audit.log("SELF_SERVICE_HANDOFF", user, "ENROLL_REQUIRED", null,
+                "missing_inactive_or_locked", request);
+            clearChange(session);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "GraphicalMatrixを変更できません。",
+                "このアカウントの登録状態を確認できません。管理者に連絡してください。");
+            return;
+        }
+
+        initializeVerifiedSession(session, config, user, enrollment, now);
+        audit.log("SELF_SERVICE_HANDOFF", user, "OK", null, "one_time_handoff_consumed", request);
+        renderMenu(request, response, config, user,
+            (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken"), null);
     }
 
     private static boolean ldapRateLimited(final HttpServletRequest request, final String user,
@@ -331,15 +401,9 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
                     "登録状態が変更されました。最初からやり直してください。");
                 return;
             }
-            final String saveCsrfToken = GraphicalMatrixSupport.token();
-            session.setAttribute("graphicalmatrixChange.verified", Boolean.TRUE);
-            session.setAttribute("graphicalmatrixChange.stateVersion",
-                Long.valueOf(verifiedEnrollment.getStateVersion()));
-            session.setAttribute("graphicalmatrixChange.saveCsrfToken", saveCsrfToken);
-            session.setAttribute("graphicalmatrixChange.forceSequenceRequired",
-                Boolean.valueOf(verifiedEnrollment.isForceSequenceChange()));
-            session.setAttribute("graphicalmatrixChange.sequenceChanged", Boolean.FALSE);
-            session.setAttribute("graphicalmatrixChange.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
+            initializeVerifiedSession(session, config, user, verifiedEnrollment, now);
+            final String saveCsrfToken =
+                (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken");
             renderMenu(request, response, config, user, saveCsrfToken, null);
             return;
         }
@@ -701,6 +765,11 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
     private static void renderStart(final HttpServletRequest request, final HttpServletResponse response,
             final GraphicalMatrixConfig config, final String errorMessage) throws IOException {
+        if (config.isSelfServiceEnabled() && !config.isLegacyLdapLoginEnabled()) {
+            response.sendRedirect(request.getContextPath()
+                + GraphicalMatrixSelfServiceAuthentication.PROFILE_PATH);
+            return;
+        }
         if (GraphicalMatrixViewRenderer.renderSequenceChangeStart(request, response, config, errorMessage)) {
             return;
         }
@@ -772,6 +841,23 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         session.removeAttribute("graphicalmatrixChange.saveCsrfToken");
         session.removeAttribute("graphicalmatrixChange.forceSequenceRequired");
         session.removeAttribute("graphicalmatrixChange.sequenceChanged");
+    }
+
+    private static void initializeVerifiedSession(final HttpSession session,
+            final GraphicalMatrixConfig config, final String user,
+            final GraphicalMatrixEnrollment enrollment, final long now) {
+        clearChange(session);
+        session.setAttribute("graphicalmatrixChange.user", user);
+        session.setAttribute("graphicalmatrixChange.config", config);
+        session.setAttribute("graphicalmatrixChange.verified", Boolean.TRUE);
+        session.setAttribute("graphicalmatrixChange.stateVersion",
+            Long.valueOf(enrollment.getStateVersion()));
+        session.setAttribute("graphicalmatrixChange.saveCsrfToken", GraphicalMatrixSupport.token());
+        session.setAttribute("graphicalmatrixChange.forceSequenceRequired",
+            Boolean.valueOf(enrollment.isForceSequenceChange()));
+        session.setAttribute("graphicalmatrixChange.sequenceChanged", Boolean.FALSE);
+        session.setAttribute("graphicalmatrixChange.expiresAt",
+            Long.valueOf(now + config.getChallengeMillis()));
     }
 
     private static boolean validVerifiedSession(final String user, final Boolean verified,

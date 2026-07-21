@@ -1,0 +1,149 @@
+# MFAポリシー優先順位 設計書
+
+## 1. 目的
+
+SP、送信元IP、送信元CIDRに対するMFA要否ルールの評価順を、運用者が安全に変更できるようにする。
+
+主な利用例は、学内または社内CIDRでは通常SPのMFAを省略しつつ、機微なSPでは同じCIDRからでも
+MFAを必須にする構成である。
+
+```properties
+graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+```
+
+この構成では、機微なSPに対する`forceSPs`をCIDR bypassより先に評価する。
+
+## 2. 設計方針
+
+- 自己管理flowは、設定に関係なく常にPasswordと現在のMFA方式を要求する。
+- 既存の`requiredSPs`の意味や、`graphicalmatrix.mfa.policyOrder`未設定時の動作は変更しない。
+- 強制MFAを表す新規設定`forceSPs`を追加する。既存の`requiredSPs`の優先順位を変更しない。
+- 任意の式、スクリプト、正規表現は設定できない。許可したルール名だけを並び替える。
+- 無効な優先順位は設定検査を失敗させる。実行時に無効設定を検出した場合は、
+  bypassルールを適用せずMFA必須へ倒す。
+
+## 3. 新規設定
+
+### 3.1 強制SP
+
+```properties
+# SP entityIDをカンマ区切りで指定する。指定SPは後続のbypassルールより優先してMFAを要求する。
+graphicalmatrix.mfa.forceSPs =
+```
+
+- 値はSAML SPの正確なentityIDである。アプリケーションURL、ACS URL、IdP URLではない。
+- 空値は一致しない。
+- `forceSPs`と`bypassSPs`、`bypassSpCidrs`、`bypassIPs`、`bypassCIDRs`が重複しても許可する。
+  実際の結果は`policyOrder`で決まる。
+
+### 3.2 評価順序
+
+```properties
+# 左から評価し、最初に結論を返したルールを採用する。
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+```
+
+`policyOrder`未設定時も、上記を既定値として使用する。したがって、新版導入後も既存設定の
+判定結果は変わらない。`forceSPs`は空が既定値である。
+
+指定可能なルール名は次に限定する。
+
+| Rule | 判定内容 | 一致時の結果 |
+| --- | --- | --- |
+| `forceSPs` | `graphicalmatrix.mfa.forceSPs`にSP entityIDが含まれる。 | MFA必須 |
+| `bypassSPs` | `graphicalmatrix.mfa.bypassSPs`にSP entityIDが含まれる。 | MFA不要 |
+| `bypassSpCidrs` | SP entityIDとCIDRが両方一致する。 | MFA不要 |
+| `bypassNetwork` | `bypassIPs`または`bypassCIDRs`がクライアントIPと一致する。 | MFA不要 |
+| `requiredSPs` | リストが空でなければ、SPが含まれる場合はMFA必須、それ以外はMFA不要。 | MFA必須または不要 |
+| `default` | `graphicalmatrix.mfa.default`を評価する。 | MFA必須または不要 |
+
+`requiredSPs`は空の場合、結論を返さず次のルールへ進む。空でない場合はSP許可リストとして
+結論を返すため、後続の`default`には到達しない。
+
+## 4. 評価仕様
+
+### 4.1 固定前提
+
+`/idp/profile/2faskw/self-service`は`policyOrder`の対象外である。SP/IP bypassを適用せず、
+常にMFAを選択する。
+
+### 4.2 通常SP
+
+通常のSP認証では、`policyOrder`を左から評価する。ルールは次のいずれかを返す。
+
+- `REQUIRE`: MFAを選択して終了する。
+- `BYPASS`: MFAを選択せず終了する。
+- `NO_MATCH`: 次のルールを評価する。
+
+例として、次の順序では機微なSPが学内CIDR bypassより優先する。
+
+```properties
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.default = require
+```
+
+| Client IP | SP | 結果 | 一致ルール |
+| --- | --- | --- | --- |
+| `192.168.0.1` | `sp-sensitive` | MFA必須 | `forceSPs` |
+| `192.168.0.1` | 通常SP | MFA不要 | `bypassNetwork` |
+| 学外IP | 通常SP | MFA必須 | `default` |
+
+## 5. 設定検査
+
+`graphicalmatrix-plugin-check.sh --config-only`は、次を検査する。
+
+- `policyOrder`が空の場合は既定順序を採用する。
+- 空でない場合、許可済みの6ルールを各1回ずつ含むこと。
+- 重複、未知のルール名、欠落したルール名を拒否する。
+- `default`が最後であることを必須にする。
+- `forceSPs`、`bypassSPs`、`requiredSPs`のentityIDリストを空またはCSVとして解釈できること。
+- `bypassSpCidrs`、`bypassIPs`、`bypassCIDRs`の既存書式検査を維持する。
+- `useForwardedFor`は`true`または`false`だけを受け付ける。
+
+重複設定はエラーにしない。順序を意図して競合設定する運用を許可する。設定検査では、
+`forceSPs`と`bypassSPs`、`forceSPs`と`bypassSpCidrs`、`bypassSPs`と`requiredSPs`で
+同じSP entityIDを検出した場合に警告し、`policyOrder`によって結果が決まることを表示する。
+`forceSPs`と全SP向けの`bypassCIDRs`の併用は本設計の主要用途であるため、それだけでは警告しない。
+
+実行時に設定検査を経ず無効な`policyOrder`が配置された場合、IdPログへ設定エラーを記録し、
+その認証要求ではMFAを必須とする。既定順序への暗黙の置換やMFA bypassは行わない。
+
+## 6. ログと監査
+
+通常SPの判定ログには、少なくとも次を記録する。
+
+```text
+MFA policy decision: rule=forceSPs, result=require, sp=<entityID>, ip=<clientIP>
+MFA policy decision: rule=bypassNetwork, result=bypass, sp=<entityID>, ip=<clientIP>
+```
+
+- `policyOrder`自体やCIDR設定全体はログへ出力しない。
+- `useForwardedFor=true`の場合も、採用したクライアントIPだけを記録する。
+- 自己管理flowは既存どおり、MFA必須であることを記録する。
+
+## 7. 実装範囲
+
+1. `GraphicalMatrixMfaDecisionStrategy`を、固定したif文から順序付きルール評価へ変更する。
+2. `forceSPs`と`policyOrder`のパーサおよび検証を追加する。
+3. `mfa-policy.properties`テンプレートへ設定と説明を追加する。
+4. `graphicalmatrix-plugin-check.sh`の設定検査へ優先順位検証を追加する。
+5. `CONFIG-REFERENCE.md`、`FAQ.md`、`INSTALL.md`へ運用例と優先順位を追記する。
+6. 単体テストで既定順序、並び替え、重複設定、無効設定、自己管理flowの固定MFAを確認する。
+
+## 8. 互換性と移行
+
+- 新規プロパティの既定値は`forceSPs=`、`policyOrder`未設定とする。
+- 既存の`mfa-policy.properties`は変更しなくても、現行と同じ順序で動作する。
+- 優先順位を明示管理したい環境だけが`policyOrder`を追記する。
+- 設定を変更した後は、通常SPの新規認証で検証する。`mfa-policy.properties`は判定ごとに読み込むため、
+  プロパティのみの変更では通常Jetty再起動は不要である。
+
+## 9. 将来検討
+
+- SP groupを別ファイルへ定義し、複数の`forceSPs`や`bypassSPs`設定で再利用できるようにする。
+- `bypassIPs`のIPv6単一アドレス完全一致は維持する。IPv6 CIDR対応は別設計として扱う。
+- 管理UI/APIからのポリシー編集は、設定ファイルと監査手順を確立した後に検討する。

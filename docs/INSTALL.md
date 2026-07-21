@@ -967,11 +967,35 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 
 ```properties
 graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs =
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
 graphicalmatrix.mfa.bypassSPs =
+graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =
 graphicalmatrix.mfa.bypassIPs =
 graphicalmatrix.mfa.bypassCIDRs =
 graphicalmatrix.mfa.useForwardedFor = false
+```
+
+`policyOrder`は左から評価し、最初にMFA必須またはMFA不要を決定したルールを採用する。
+学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけはMFAを強制する例:
+
+```properties
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+graphicalmatrix.mfa.default = require
+```
+
+自己管理フローは`policyOrder`の対象外で、常にMFAを要求する。無効な順序やCIDRは
+`graphicalmatrix-plugin-check.sh --config-only`で検出する。
+
+特定のSPだけで送信元IPv4 CIDRによるMFA例外を設定する場合は、
+`graphicalmatrix.mfa.bypassSpCidrs` に `<SP entityID>|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。
+単一IPv4アドレスは`/32`で指定する。
+
+```properties
+graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24;https://sp2.example.org/shibboleth|10.20.0.0/16
 ```
 
 `useForwardedFor=true` は、信頼済みReverse Proxy/LBが送信元IPヘッダを
@@ -1135,13 +1159,17 @@ External認証の遷移先を、Shibbolethのデフォルト `/external.jsp` で
 idp.authn.External.externalAuthnPath = contextRelative:/graphicalmatrix/start
 idp.authn.External.nonBrowserSupported = false
 idp.authn.External.passiveAuthenticationSupported = false
-idp.authn.External.forcedAuthenticationSupported = false
+idp.authn.External.forcedAuthenticationSupported = true
 ```
+
+`forcedAuthenticationSupported=true` は、自己管理profileが要求するForceAuthn時にも
+GraphicalMatrix External flowを実行可能にする設定である。この設定だけで通常のSP認証を
+常に再認証へ変更するものではない。自己管理profileではPasswordと現在のMFA方式を毎回実行する。
 
 確認:
 
 ```bash
-sudo grep -nE '^idp.authn.flows|idp.authn.External.externalAuthnPath|external.jsp|/graphicalmatrix/start' \
+sudo grep -nE '^idp.authn.flows|idp.authn.External.externalAuthnPath|idp.authn.External.forcedAuthenticationSupported|external.jsp|/graphicalmatrix/start' \
   /opt/shibboleth-idp/conf/authn/authn.properties \
   /opt/shibboleth-idp/conf/idp.properties
 ```
@@ -1163,13 +1191,55 @@ sudo grep -nE 'GraphicalMatrixStart|/graphicalmatrix/start|GraphicalMatrixVerify
 `/idp/graphicalmatrix/start` への直接アクセスは、External認証のconversation keyが無いため
 HTTP 500になる場合がある。直接確認では404でないことを確認する。
 
-## 12. IdP WAR再構築
+## 12. パスワード変更の認証方式
+
+GraphicalMatrix sequenceおよびMFA方式の変更画面には、次の二つの認証経路がある。
+
+| 経路 | URL | 本人確認 |
+| --- | --- | --- |
+| 従来経路 | `/idp/graphicalmatrix/change` | LDAP ID・パスワード、現在のGraphicalMatrix |
+| IdP自己管理経路 | `/idp/profile/2faskw/self-service` | Shibboleth Password認証、現在のMFA方式 |
+
+配布時の既定値は、前提設定が未完了の環境でパスワード変更を利用不能にしないため、
+従来経路を維持する。
+
+```properties
+# /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+graphicalmatrix.selfservice.enabled = false
+graphicalmatrix.change.legacyLdapLoginEnabled = true
+```
+
+新規本番導入、または自己管理フローの試験が完了した既存環境では、Shibboleth再認証を必須にする
+次の設定を推奨する。
+
+```properties
+# /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+graphicalmatrix.selfservice.enabled = true
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = false
+```
+
+この状態では`/idp/graphicalmatrix/change`へ直接アクセスしても、
+`/idp/profile/2faskw/self-service`へ移動する。利用者はShibbolethのPassword認証と現在のMFA方式を
+毎回完了してから変更メニューへ進む。
+
+段階導入では、まず`graphicalmatrix.selfservice.enabled = true`と
+`graphicalmatrix.change.legacyLdapLoginEnabled = true`を設定し、自己管理URLの動作を確認する。
+試験完了後に`legacyLdapLoginEnabled`だけを`false`へ変更する。両方を`false`には設定できない。
+
+自己管理フローを有効にする場合は、11章の
+`idp.authn.External.forcedAuthenticationSupported = true`も必要である。設定後は
+`graphicalmatrix-plugin-check.sh --config-only`、WAR再構築、Jetty再起動を実行する。
+詳細な導入・受入試験・トラブルシューティングは
+[INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md)を参照する。
+
+## 13. IdP WAR再構築
 
 ```bash
 sudo /opt/shibboleth-idp/bin/build.sh
 ```
 
-## 13. Jetty再起動
+## 14. Jetty再起動
 
 systemd例:
 
@@ -1180,7 +1250,7 @@ sudo systemctl restart jetty-idp.service
 
 環境固有の起動方式がある場合は、その手順に従ってください。
 
-## 14. 動作確認
+## 15. 動作確認
 
 変更画面:
 
@@ -1236,13 +1306,13 @@ MFA flow確認:
 
 ```bash
 sudo tail -n 300 /opt/shibboleth-idp/logs/idp-process.log | grep -iE \
-  'MFA default decision|MFA method decision|GraphicalMatrixMfaDecisionStrategy|authn/MFA|authn/External|authn/TOTP|authn/WebAuthn|bypassed'
+  'MFA policy decision|MFA method decision|GraphicalMatrixMfaDecisionStrategy|authn/MFA|authn/External|authn/TOTP|authn/WebAuthn'
 ```
 
-`MFA default decision` または `MFA method decision` が出れば、
+`MFA policy decision` または `MFA method decision` が出れば、
 2FAS-KWのMFA分岐に入っている。
 
-## 15. ログ確認
+## 16. ログ確認
 
 ```bash
 sudo tail /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
@@ -1255,7 +1325,7 @@ docs/LOGROTATE.md
 examples/logrotate/graphicalmatrix-audit
 ```
 
-## 16. Admin Tools単体インストール
+## 17. Admin Tools単体インストール
 
 管理CLIだけをDBサーバまたは管理端末へ導入する場合は、
 `2faskw-admin-tools-1.0.1.zip` を利用する。
@@ -1301,7 +1371,7 @@ DB接続設定:
 docs/ADMIN-TOOLS.md
 ```
 
-## 17. 主要設定例
+## 18. 主要設定例
 
 この章は設定ファイルの最終確認用です。
 導入作業中に作成したsecret fileやDB接続設定と矛盾がないことを確認してください。
@@ -1334,6 +1404,12 @@ graphicalmatrix.change.ldapRateLimit.failureLimit = 5
 graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
 graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
+
+# IdP内のShibboleth再認証済み自己管理flow。導入確認後にtrueへ変更する。
+graphicalmatrix.selfservice.enabled = false
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+# 自己管理flowへ移行後、従来のLDAPログイン画面を停止する場合はfalseにする。
+graphicalmatrix.change.legacyLdapLoginEnabled = true
 
 graphicalmatrix.sequence.storage = auto
 # graphicalmatrix.sequence.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
@@ -1447,7 +1523,10 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-token.sh rotate --apply --print
 
 ```properties
 graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs =
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
 graphicalmatrix.mfa.bypassSPs =
+graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =
 graphicalmatrix.mfa.bypassIPs =
 graphicalmatrix.mfa.bypassCIDRs =
@@ -1577,7 +1656,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export /secure/path/graph
 
 詳細は `docs/ADMIN-TOOLS.md` と `docs/CSV-EXPORT.md` を参照してください。
 
-## 18. 運用補足
+## 19. 運用補足
 
 ### アンインストール
 
@@ -1665,7 +1744,7 @@ logrotateはOS側の設定です。
 - Jetty restartは自動実行しません
 - sequence保存方式は設定で切替できますが、既存データの一括再保存は `docs/SEQUENCE-STORAGE-MIGRATION.md` の手順で行います
 
-## 19. rollback
+## 20. rollback
 
 1. Jettyを停止する
 2. `graphicalmatrix-plugin-webxml.sh --remove --apply` を実行する
@@ -1709,7 +1788,7 @@ sudo ./bin/graphicalmatrix-plugin-uninstall.sh \
   --remove-runtime-deps
 ```
 
-## 20. install記録テンプレート
+## 21. install記録テンプレート
 
 ```text
 作業日:

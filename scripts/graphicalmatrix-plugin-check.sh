@@ -124,6 +124,29 @@ need_dir() {
   fi
 }
 
+check_idp_plugin_jar_duplicates() {
+  local jars=()
+  local directory jar_file
+  for directory in \
+    "$IDP_HOME/dist/plugin-webapp/WEB-INF/lib" \
+    "$IDP_HOME/edit-webapp/WEB-INF/lib"; do
+    [[ -d "$directory" ]] || continue
+    shopt -s nullglob
+    for jar_file in "$directory"/2faskw-idp-plugin-*.jar; do
+      jars+=("$jar_file")
+    done
+    shopt -u nullglob
+  done
+
+  if [[ "${#jars[@]}" -gt 1 ]]; then
+    fail "multiple 2FAS-KW plugin jars would be merged into the IdP WAR: ${jars[*]}"
+  elif [[ "${#jars[@]}" -eq 1 ]]; then
+    ok "single 2FAS-KW plugin jar in IdP overlays: ${jars[0]}"
+  else
+    warn "2FAS-KW plugin jar not found in IdP overlays"
+  fi
+}
+
 first_match() {
   local pattern="$1"
   local matches=()
@@ -178,6 +201,18 @@ manifest_value() {
       awk -F': ' -v key="$key" '$1 == key { gsub(/\r$/, "", $2); print $2; exit }' "$tmpdir/META-INF/MANIFEST.MF"
     fi
     rm -rf "$tmpdir"
+  fi
+}
+
+jar_has_entry() {
+  local jar_file="$1"
+  local entry="$2"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -Z1 "$jar_file" 2>/dev/null | grep -Fx "$entry" >/dev/null
+  elif command -v jar >/dev/null 2>&1; then
+    jar tf "$jar_file" 2>/dev/null | grep -Fx "$entry" >/dev/null
+  else
+    return 127
   fi
 }
 
@@ -259,7 +294,7 @@ print_summary_and_exit() {
       echo "action: run this command on the target IdP server, or specify the correct --idp-home DIR."
       ;;
     CONFIG_CHECK_FAILED)
-      echo "action: fix graphicalmatrix.properties or its referenced files before allowing user authentication."
+      echo "action: fix graphicalmatrix.properties, conf/authn/authn.properties, or referenced files before allowing user authentication."
       ;;
     CHECK_FAILED)
       echo "action: fix package failures first, then re-run against the target IdP."
@@ -329,6 +364,7 @@ check_package() {
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew"
+  need_file "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/postgresql-schema.sql"
   need_file "$PACKAGE_DIR/conf/authn/webauthn.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/authn/webauthn-registration.properties.idpnew"
@@ -344,10 +380,13 @@ check_package() {
   need_file "$PACKAGE_DIR/docs/INSTALL.md"
   need_file "$PACKAGE_DIR/docs/INSTALL_Manual_Installation.md"
   need_file "$PACKAGE_DIR/docs/INSTALL_LDAP.md"
+  need_file "$PACKAGE_DIR/docs/INSTALL_Passchange_IdP.md"
+  need_file "$PACKAGE_DIR/docs/INSTALL_Passchange_SP.md"
   need_file "$PACKAGE_DIR/docs/SECURITY.md"
   need_file "$PACKAGE_DIR/docs/SECURITY-CHECKLIST.md"
   need_file "$PACKAGE_DIR/docs/API-TOKEN-ROTATION.md"
   need_file "$PACKAGE_DIR/docs/API-CURL-TESTS.md"
+  need_file "$PACKAGE_DIR/docs/MFA-POLICY-ORDER-DESIGN.md"
   need_file "$PACKAGE_DIR/docs/FAQ.md"
   need_file "$PACKAGE_DIR/docs/UPGRADE.md"
   need_file "$PACKAGE_DIR/docs/CSV-EXPORT.md"
@@ -356,12 +395,48 @@ check_package() {
   need_file "$PACKAGE_DIR/docs/LOGROTATE.md"
   need_file "$openapi_yaml"
 
+  if [[ -n "$plugin_jar" ]]; then
+    local flow_entry
+    for flow_entry in \
+      "META-INF/net.shibboleth.idp/postconfig.xml" \
+      "META-INF/net/shibboleth/idp/flows/2faskw/self-service/self-service-flow.xml" \
+      "META-INF/net/shibboleth/idp/flows/2faskw/self-service/self-service-beans.xml"; do
+      if jar_has_entry "$plugin_jar" "$flow_entry"; then
+        ok "self-service JAR resource exists: $flow_entry"
+      else
+        case "$?" in
+          127) warn "unzip/jar not found; skipped self-service JAR resource checks"; break ;;
+          *) fail "self-service JAR resource missing: $flow_entry" ;;
+        esac
+      fi
+    done
+  fi
+
   if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew" ]]; then
     if grep -Eq '^[[:space:]]*graphicalmatrix[.]api[.]enabled[[:space:]]*=[[:space:]]*false[[:space:]]*$' \
         "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew"; then
       ok "API template is disabled by default"
     else
       fail "API template must have graphicalmatrix.api.enabled = false"
+    fi
+  fi
+
+  if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" ]]; then
+    local policy_order
+    policy_order="$(properties_value \
+      "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" \
+      "graphicalmatrix.mfa.policyOrder")"
+    if [[ "$policy_order" == "forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default" ]]; then
+      ok "MFA policy template has the safe default rule order"
+    else
+      fail "MFA policy template has an unexpected rule order: $policy_order"
+    fi
+    if grep -Eq \
+        '^[[:space:]]*graphicalmatrix[.]mfa[.]forceSPs[[:space:]]*=' \
+        "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"; then
+      ok "MFA policy template contains forceSPs"
+    else
+      fail "MFA policy template is missing graphicalmatrix.mfa.forceSPs"
     fi
   fi
 
@@ -427,6 +502,7 @@ check_idp() {
 
   need_file "$IDP_HOME/bin/build.sh"
   need_file "$IDP_HOME/edit-webapp/WEB-INF/web.xml"
+  check_idp_plugin_jar_duplicates
 
   if [[ -x "$IDP_HOME/bin/module.sh" ]]; then
     local module_output
@@ -464,6 +540,8 @@ check_config() {
   echo "== Configuration checks =="
 
   local plugin_jar java_bin output line tool_status failures_before
+  local graphical_properties self_service authn_properties authn_flows external_forced
+  check_idp_plugin_jar_duplicates
   plugin_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar")"
   if [[ -z "$plugin_jar" ]]; then
     plugin_jar="$(first_match "$IDP_HOME/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar")"
@@ -505,6 +583,36 @@ check_config() {
 
   if [[ "$tool_status" -ne 0 && "$config_failures" -eq "$failures_before" ]]; then
     fail "configuration checker exited with status $tool_status"
+  fi
+
+  graphical_properties="$IDP_HOME/conf/graphicalmatrix/graphicalmatrix.properties"
+  if [[ -f "$graphical_properties" ]]; then
+    self_service="$(properties_value "$graphical_properties" "graphicalmatrix.selfservice.enabled")"
+  else
+    self_service=""
+  fi
+  self_service="$(printf '%s' "$self_service" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$self_service" == "true" || "$self_service" == "1" \
+      || "$self_service" == "yes" || "$self_service" == "on" ]]; then
+    authn_properties="$IDP_HOME/conf/authn/authn.properties"
+    if [[ ! -r "$authn_properties" ]]; then
+      fail "self-service requires readable authn.properties: $authn_properties"
+      return
+    fi
+    authn_flows="$(properties_value "$authn_properties" "idp.authn.flows")"
+    external_forced="$(properties_value "$authn_properties" \
+      "idp.authn.External.forcedAuthenticationSupported")"
+    external_forced="$(printf '%s' "$external_forced" | tr '[:upper:]' '[:lower:]')"
+    if tr ',' ' ' <<<"$authn_flows" | grep -Eq '(^|[[:space:]])MFA($|[[:space:]])'; then
+      ok "self-service authentication flow enabled: idp.authn.flows=$authn_flows"
+    else
+      fail "self-service requires MFA in idp.authn.flows: actual=$authn_flows"
+    fi
+    if [[ "$external_forced" == "true" ]]; then
+      ok "GraphicalMatrix External flow supports forced authentication"
+    else
+      fail "self-service requires idp.authn.External.forcedAuthenticationSupported=true"
+    fi
   fi
 }
 

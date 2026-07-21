@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:c="http://www.springframework.org/schema/c"
+    xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd"
+    default-init-method="initialize"
+    default-destroy-method="destroy">
+
+    <bean parent="shibboleth.AdminFlow"
+        c:id="https://github.com/y-asakawa/2faskw/profile/self-service"
+        p:loggingId="2FASKWSelfService"
+        p:nonBrowserSupported="false"
+        p:authenticated="true"
+        p:forceAuthn="true"
+        p:resolveAttributes="false">
+        <property name="authenticationFlows">
+            <list>
+                <value>MFA</value>
+            </list>
+        </property>
+    </bean>
+
+</beans>

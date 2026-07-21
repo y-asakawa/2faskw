@@ -1,9 +1,6 @@
 package io.github.yasakawa.faskw;
 
 import java.io.FileInputStream;
-import java.net.InetAddress;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Function;
@@ -37,28 +34,25 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         final String relyingPartyId = relyingPartyId(input);
         final String clientIp = clientIp(policy);
 
-        if (contains(csv(policy.getProperty("graphicalmatrix.mfa.bypassSPs")), relyingPartyId)) {
-            LOG.info("MFA bypassed by SP policy: {}", relyingPartyId);
-            return null;
+        if (isSelfServiceProfile(input)) {
+            LOG.info("MFA required for 2FAS-KW self-service profile: ip={}", clientIp);
+            return selectFlow(input, GraphicalMatrixSelfServiceAuthentication.PROFILE_ID, clientIp);
         }
 
-        if (ipMatches(policy, clientIp)) {
-            LOG.info("MFA bypassed by IP policy: {}", clientIp);
-            return null;
+        final GraphicalMatrixMfaPolicy mfaPolicy;
+        try {
+            mfaPolicy = GraphicalMatrixMfaPolicy.parse(policy);
+        } catch (IllegalArgumentException ex) {
+            LOG.error("MFA policy is invalid; requiring MFA: sp={}, ip={}, error={}",
+                relyingPartyId, clientIp, ex.getMessage());
+            return selectFlow(input, relyingPartyId, clientIp);
         }
 
-        final Set<String> requiredSPs = csv(policy.getProperty("graphicalmatrix.mfa.requiredSPs"));
-        if (!requiredSPs.isEmpty()) {
-            final boolean required = contains(requiredSPs, relyingPartyId);
-            LOG.info("MFA SP required-list decision: sp={}, required={}", relyingPartyId, required);
-            return required ? selectFlow(input, relyingPartyId, clientIp) : null;
-        }
-
-        final String defaultPolicy = trim(policy.getProperty("graphicalmatrix.mfa.default", "require"));
-        final boolean requireByDefault = !"bypass".equalsIgnoreCase(defaultPolicy);
-        LOG.info("MFA default decision: sp={}, ip={}, required={}",
-            relyingPartyId, clientIp, requireByDefault);
-        return requireByDefault ? selectFlow(input, relyingPartyId, clientIp) : null;
+        final GraphicalMatrixMfaPolicy.Decision decision = mfaPolicy.evaluate(relyingPartyId, clientIp);
+        LOG.info("MFA policy decision: rule={}, result={}, sp={}, ip={}",
+            decision.rule(), decision.outcome().name().toLowerCase(), relyingPartyId, clientIp);
+        return decision.outcome() == GraphicalMatrixMfaPolicy.Outcome.REQUIRE
+            ? selectFlow(input, relyingPartyId, clientIp) : null;
     }
 
     private static String selectFlow(final ProfileRequestContext input, final String relyingPartyId,
@@ -158,6 +152,11 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         return rpCtx != null && rpCtx.getRelyingPartyId() != null ? rpCtx.getRelyingPartyId() : "";
     }
 
+    static boolean isSelfServiceProfile(final ProfileRequestContext input) {
+        return input != null
+            && GraphicalMatrixSelfServiceAuthentication.PROFILE_ID.equals(input.getProfileId());
+    }
+
     private static String clientIp(final Properties policy) {
         final HttpServletRequest request = HttpServletRequestResponseContext.getRequest();
         if (request == null) {
@@ -192,67 +191,8 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         return uri.contains("/profile/admin/webauthn-registration");
     }
 
-    private static boolean ipMatches(final Properties policy, final String ip) {
-        if (ip == null || ip.isEmpty()) {
-            return false;
-        }
-
-        if (contains(csv(policy.getProperty("graphicalmatrix.mfa.bypassIPs")), ip)) {
-            return true;
-        }
-
-        for (final String cidr : csv(policy.getProperty("graphicalmatrix.mfa.bypassCIDRs"))) {
-            if (ipv4CidrMatches(ip, cidr)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean ipv4CidrMatches(final String ip, final String cidr) {
-        try {
-            final String[] parts = cidr.split("/");
-            if (parts.length != 2) {
-                return false;
-            }
-            final int prefix = Integer.parseInt(parts[1]);
-            if (prefix < 0 || prefix > 32) {
-                return false;
-            }
-            final int ipValue = ipv4ToInt(ip);
-            final int networkValue = ipv4ToInt(parts[0]);
-            final int mask = prefix == 0 ? 0 : (int) (0xFFFFFFFFL << (32 - prefix));
-            return (ipValue & mask) == (networkValue & mask);
-        } catch (Exception ex) {
-            return false;
-        }
-    }
-
-    private static int ipv4ToInt(final String value) throws Exception {
-        final byte[] bytes = InetAddress.getByName(value).getAddress();
-        if (bytes.length != 4) {
-            throw new IllegalArgumentException("not IPv4");
-        }
-        return ((bytes[0] & 0xff) << 24)
-            | ((bytes[1] & 0xff) << 16)
-            | ((bytes[2] & 0xff) << 8)
-            | (bytes[3] & 0xff);
-    }
-
-    private static Set<String> csv(final String value) {
-        final Set<String> out = new HashSet<>();
-        if (value == null || value.trim().isEmpty()) {
-            return out;
-        }
-        Arrays.stream(value.split(","))
-            .map(GraphicalMatrixMfaDecisionStrategy::trim)
-            .filter(s -> !s.isEmpty())
-            .forEach(out::add);
-        return out;
-    }
-
-    private static boolean contains(final Set<String> values, final String value) {
-        return value != null && values.contains(value);
+    static boolean spCidrMatches(final String rules, final String relyingPartyId, final String ip) {
+        return GraphicalMatrixMfaPolicy.spCidrMatches(rules, relyingPartyId, ip);
     }
 
     private static String trim(final String value) {
