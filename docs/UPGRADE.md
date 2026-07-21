@@ -370,6 +370,27 @@ graphicalmatrix.selfservice.transactionTtlSeconds = 600
 graphicalmatrix.change.legacyLdapLoginEnabled = true
 ```
 
+v1.2.4のMFAポリシー優先順位を利用する場合は、既存の
+`/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties`へ次を追加する。
+未追加でも同じ既定順序で動作するが、運用上の優先順位を明示するため追加を推奨する。
+
+```properties
+graphicalmatrix.mfa.forceSPs =
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+```
+
+学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけMFAを強制する例:
+
+```properties
+graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+```
+
+`policyOrder`は6ルールを各1回含め、`default`を最後にする。設定反映前に
+`graphicalmatrix-plugin-check.sh --config-only`を実行し、`MFA policy valid`が表示されることを確認する。
+
 ### 導入方式を確認する
 
 更新前に、v1.2.3を`plugin.sh`で導入したか、展開ZIPから手動導入したかを確認します。

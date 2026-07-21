@@ -139,12 +139,18 @@ SP単位/IP単位でMFA要否を制御する。
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
 | `graphicalmatrix.mfa.default` | enum | `require` | 既定のMFA方針。 | `require` または `bypass`。 |
+| `graphicalmatrix.mfa.forceSPs` | list | empty | MFAを強制するSP entityID。 | `policyOrder`上の位置で優先度を決定する。カンマ区切り。 |
+| `graphicalmatrix.mfa.policyOrder` | ordered list | `forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default` | MFAルールの評価順序。 | 左から最初に結論を返したルールを採用する。6ルールを各1回含め、`default`を最後にする。 |
 | `graphicalmatrix.mfa.bypassSPs` | list | empty | MFAを回避するSP entityID。 | カンマ区切り。 |
 | `graphicalmatrix.mfa.bypassSpCidrs` | rule list | empty | 指定SPだけでMFAを回避するIPv4 CIDR。 | `<SP entityID>\|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。単一IPは`/32`を使う。 |
 | `graphicalmatrix.mfa.requiredSPs` | list | empty | MFAを要求するSP entityID。 | 空でなければ対象SPを限定する。 |
-| `graphicalmatrix.mfa.bypassIPs` | IP list | empty | MFAを回避する完全一致IP。 | 管理端末や学内IPなど。 |
+| `graphicalmatrix.mfa.bypassIPs` | IP list | empty | MFAを回避する完全一致IP。 | IPv4/IPv6の単一IP。ホスト名は不可。 |
 | `graphicalmatrix.mfa.bypassCIDRs` | CIDR list | empty | MFAを回避するCIDR。 | 広すぎる範囲にしない。 |
-| `graphicalmatrix.mfa.useForwardedFor` | boolean | `false` | `X-Forwarded-For` / `X-Real-IP` を参照。 | リバースプロキシ/LB経由のみの接続が保証され、プロキシが送信元IPヘッダを上書きする場合のみtrue。直接接続が可能ならfalse固定。 |
+| `graphicalmatrix.mfa.useForwardedFor` | boolean | `false` | `X-Forwarded-For` / `X-Real-IP` を参照。 | `true`または`false`。リバースプロキシ/LB経由のみの接続が保証され、プロキシが送信元IPヘッダを上書きする場合のみtrue。直接接続が可能ならfalse固定。 |
+
+`policyOrder`はプロパティファイルの行順ではなく、この値に列挙した左から順に評価する。
+`bypassNetwork`は`bypassIPs`と`bypassCIDRs`を1つの評価単位として扱う。
+IdP自己管理フローはこの順序の対象外で、常にMFAを要求する。
 
 ## admin.properties
 

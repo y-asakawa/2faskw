@@ -172,11 +172,17 @@ graphicalmatrix.change.ldapRateLimit.key = ip-user
 # 既定では全SPでMFAを要求する。
 graphicalmatrix.mfa.default = require
 
+# 指定したSPでは、後続のbypassルールより優先してMFAを要求する。
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+
+# 左から評価し、最初に結論を返したルールを採用する。
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+
 # 指定したSPではMFAを要求しない。
 graphicalmatrix.mfa.bypassSPs = https://sp-public.example.org/shibboleth
 
 # 指定したSPだけでMFAを要求する。設定時は、それ以外のSPではMFAを要求しない。
-graphicalmatrix.mfa.requiredSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.requiredSPs =
 
 # 指定した送信元IPまたはIPv4 CIDRではMFAを要求しない。
 graphicalmatrix.mfa.bypassIPs = 192.0.2.10
@@ -189,8 +195,9 @@ graphicalmatrix.mfa.bypassCIDRs = 192.168.10.0/24,10.20.0.0/16
 graphicalmatrix.mfa.requiredSPs = https://sp1.example.org/shibboleth,https://sp2.example.org/shibboleth
 ```
 
-このプロパティを1つでも指定すると、列挙したSPだけがMFA必須となり、それ以外のSPではMFAを要求しない。
-`graphicalmatrix.mfa.default = require` は、`requiredSPs` が空の場合に適用される既定値である。
+このプロパティを1つでも指定すると、`requiredSPs`ルールを評価した時点で、列挙したSPだけがMFA必須となり、
+それ以外のSPではMFAを要求しない。既定順序では、先行するbypassルールに一致せず、かつ
+`requiredSPs`が空の場合だけ後続の`default`へ進む。
 同じ`graphicalmatrix.mfa.requiredSPs`を複数行に重ねて書くと、Java Propertiesの後ろの値で上書きされるため、1つの値にまとめる。
 
 `graphicalmatrix.mfa.bypassSPs` も複数のSP entityIDをカンマ区切りで指定できる。
@@ -199,8 +206,24 @@ graphicalmatrix.mfa.requiredSPs = https://sp1.example.org/shibboleth,https://sp2
 graphicalmatrix.mfa.bypassSPs = https://sp-public1.example.org/shibboleth,https://sp-public2.example.org/shibboleth
 ```
 
-`bypassSPs`に一致したSPは、送信元IPおよび`requiredSPs`の判定より先にMFA不要となる。
+既定の`policyOrder`では、`bypassSPs`に一致したSPは、送信元IPおよび`requiredSPs`の判定より先にMFA不要となる。
 同じ`graphicalmatrix.mfa.bypassSPs`も複数行に重ねず、1つの値にまとめる。
+
+`policyOrder`はプロパティファイルの行順ではなく、カンマ区切りで指定した左から順に評価する。
+最初にMFA必須またはMFA不要を決定したルールで評価を終了する。指定できるルールは次の6つである。
+
+| ルール | 意味 |
+| --- | --- |
+| `forceSPs` | 指定SPでMFAを強制する。 |
+| `bypassSPs` | 指定SPでMFAを不要にする。 |
+| `bypassSpCidrs` | 指定SPとCIDRの両方が一致した場合にMFAを不要にする。 |
+| `bypassNetwork` | `bypassIPs`または`bypassCIDRs`が一致した場合にMFAを不要にする。 |
+| `requiredSPs` | リストが空でなければ、対象SPだけをMFA必須にする。 |
+| `default` | 最終的な既定値を適用する。 |
+
+6ルールを各1回含め、`default`を最後にする。未知の名前、重複、欠落、末尾以外の`default`は
+設定エラーとなる。`requiredSPs`が空でない場合は必ずMFA必須またはMFA不要を決定するため、
+その後ろのルールには到達しない。自己管理フローはこの順序の対象外で、常にMFAを要求する。
 
 `bypassSPs` はSP全体、`bypassIPs` と `bypassCIDRs` は全SPに対して適用される。
 特定のSPに対して、かつローカルIPの場合だけMFAを不要にする場合は、
@@ -231,23 +254,33 @@ graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.1
 通常のSPログインを実行した後は、IdPログの`sp=`からも実際に判定されたentityIDを確認できる。
 
 ```bash
-sudo grep -E 'MFA (default decision|SP required-list decision|method decision)' \
+sudo grep -E 'MFA (policy decision|method decision)' \
   /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
 ```
 
 次のログの場合、設定へ指定する値は`https://sp1.example.org/shibboleth`である。
 
 ```text
-MFA default decision: sp=https://sp1.example.org/shibboleth, ip=192.168.10.20, required=true
+MFA policy decision: rule=default, result=require, sp=https://sp1.example.org/shibboleth, ip=192.168.10.20
 ```
 
-例外として、MFAを要求するSPが1つだけの場合は、次の設定で実現できる。他のSPは既定でMFA不要となる。
+学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけは同じCIDRからでもMFAを強制する場合は、
+`forceSPs`を`bypassNetwork`より前に置く。
 
 ```properties
-graphicalmatrix.mfa.default = bypass
-graphicalmatrix.mfa.requiredSPs = https://sp-sensitive.example.org/shibboleth
-graphicalmatrix.mfa.bypassCIDRs = 192.168.10.0/24
+graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
 ```
+
+この例では、`192.168.0.1`から機微なSPへアクセスすると`forceSPs`でMFA必須となり、通常SPへ
+アクセスすると`bypassNetwork`でMFA不要となる。学外IPから通常SPへアクセスした場合は
+`default=require`が適用される。
+
+優先順位を変更する場合は6ルールを残したまま並び替える。例えば`bypassNetwork`を`forceSPs`より
+前に置くと、学内・社内CIDRから機微なSPへアクセスした場合もMFA不要になるため、変更前に
+`graphicalmatrix-plugin-check.sh --config-only`と検証用SPで確認する。
 
 ## 画面のHTMLやCSSを編集するにはどうすればよいか
 

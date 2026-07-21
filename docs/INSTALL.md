@@ -967,6 +967,8 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 
 ```properties
 graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs =
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
 graphicalmatrix.mfa.bypassSPs =
 graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =
@@ -974,6 +976,19 @@ graphicalmatrix.mfa.bypassIPs =
 graphicalmatrix.mfa.bypassCIDRs =
 graphicalmatrix.mfa.useForwardedFor = false
 ```
+
+`policyOrder`は左から評価し、最初にMFA必須またはMFA不要を決定したルールを採用する。
+学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけはMFAを強制する例:
+
+```properties
+graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
+graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+graphicalmatrix.mfa.default = require
+```
+
+自己管理フローは`policyOrder`の対象外で、常にMFAを要求する。無効な順序やCIDRは
+`graphicalmatrix-plugin-check.sh --config-only`で検出する。
 
 特定のSPだけで送信元IPv4 CIDRによるMFA例外を設定する場合は、
 `graphicalmatrix.mfa.bypassSpCidrs` に `<SP entityID>|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。
@@ -1291,10 +1306,10 @@ MFA flow確認:
 
 ```bash
 sudo tail -n 300 /opt/shibboleth-idp/logs/idp-process.log | grep -iE \
-  'MFA default decision|MFA method decision|GraphicalMatrixMfaDecisionStrategy|authn/MFA|authn/External|authn/TOTP|authn/WebAuthn|bypassed'
+  'MFA policy decision|MFA method decision|GraphicalMatrixMfaDecisionStrategy|authn/MFA|authn/External|authn/TOTP|authn/WebAuthn'
 ```
 
-`MFA default decision` または `MFA method decision` が出れば、
+`MFA policy decision` または `MFA method decision` が出れば、
 2FAS-KWのMFA分岐に入っている。
 
 ## 16. ログ確認
@@ -1508,6 +1523,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-token.sh rotate --apply --print
 
 ```properties
 graphicalmatrix.mfa.default = require
+graphicalmatrix.mfa.forceSPs =
+graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
 graphicalmatrix.mfa.bypassSPs =
 graphicalmatrix.mfa.bypassSpCidrs =
 graphicalmatrix.mfa.requiredSPs =

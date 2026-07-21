@@ -364,6 +364,7 @@ check_package() {
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/ldap.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew"
+  need_file "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/postgresql-schema.sql"
   need_file "$PACKAGE_DIR/conf/authn/webauthn.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/authn/webauthn-registration.properties.idpnew"
@@ -385,6 +386,7 @@ check_package() {
   need_file "$PACKAGE_DIR/docs/SECURITY-CHECKLIST.md"
   need_file "$PACKAGE_DIR/docs/API-TOKEN-ROTATION.md"
   need_file "$PACKAGE_DIR/docs/API-CURL-TESTS.md"
+  need_file "$PACKAGE_DIR/docs/MFA-POLICY-ORDER-DESIGN.md"
   need_file "$PACKAGE_DIR/docs/FAQ.md"
   need_file "$PACKAGE_DIR/docs/UPGRADE.md"
   need_file "$PACKAGE_DIR/docs/CSV-EXPORT.md"
@@ -416,6 +418,25 @@ check_package() {
       ok "API template is disabled by default"
     else
       fail "API template must have graphicalmatrix.api.enabled = false"
+    fi
+  fi
+
+  if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" ]]; then
+    local policy_order
+    policy_order="$(properties_value \
+      "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" \
+      "graphicalmatrix.mfa.policyOrder")"
+    if [[ "$policy_order" == "forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default" ]]; then
+      ok "MFA policy template has the safe default rule order"
+    else
+      fail "MFA policy template has an unexpected rule order: $policy_order"
+    fi
+    if grep -Eq \
+        '^[[:space:]]*graphicalmatrix[.]mfa[.]forceSPs[[:space:]]*=' \
+        "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"; then
+      ok "MFA policy template contains forceSPs"
+    else
+      fail "MFA policy template is missing graphicalmatrix.mfa.forceSPs"
     fi
   fi
 

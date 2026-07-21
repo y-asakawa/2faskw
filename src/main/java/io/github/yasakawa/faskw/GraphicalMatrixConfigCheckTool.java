@@ -4,9 +4,11 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Set;
 
 public final class GraphicalMatrixConfigCheckTool {
     private static final List<String> GRAPHICAL_EXTENSIONS =
@@ -93,6 +95,7 @@ public final class GraphicalMatrixConfigCheckTool {
         checkViewFiles(config);
         checkSaveData(idpHome, properties);
         checkStorage(idpHome, config, properties);
+        checkMfaPolicy(idpHome);
 
         summary();
         return failures == 0 ? 0 : 1;
@@ -229,6 +232,50 @@ public final class GraphicalMatrixConfigCheckTool {
         } catch (Exception ex) {
             fail("LDAP storage config invalid: " + rootMessage(ex));
         }
+    }
+
+    private void checkMfaPolicy(final String idpHome) {
+        final Path policyPath = Path.of(idpHome, "conf", "graphicalmatrix", "mfa-policy.properties");
+        if (!Files.isRegularFile(policyPath) || !Files.isReadable(policyPath)) {
+            fail("MFA policy file missing or unreadable: " + policyPath);
+            return;
+        }
+
+        final Properties policyProperties = new Properties();
+        try (InputStream in = Files.newInputStream(policyPath)) {
+            policyProperties.load(in);
+        } catch (Exception ex) {
+            fail("MFA policy file load failed: " + rootMessage(ex));
+            return;
+        }
+
+        final GraphicalMatrixMfaPolicy policy;
+        try {
+            policy = GraphicalMatrixMfaPolicy.parse(policyProperties);
+        } catch (Exception ex) {
+            fail("MFA policy invalid: " + rootMessage(ex));
+            return;
+        }
+
+        ok("MFA policy valid: default=" + policy.defaultPolicy() + " order=" + policy.orderText());
+        warnMfaPolicyOverlap("forceSPs and bypassSPs",
+            intersection(policy.forceSPs(), policy.bypassSPs()));
+        warnMfaPolicyOverlap("forceSPs and bypassSpCidrs",
+            intersection(policy.forceSPs(), policy.bypassSpEntityIds()));
+        warnMfaPolicyOverlap("bypassSPs and requiredSPs",
+            intersection(policy.bypassSPs(), policy.requiredSPs()));
+    }
+
+    private void warnMfaPolicyOverlap(final String label, final Set<String> overlap) {
+        if (!overlap.isEmpty()) {
+            warn("MFA policy overlap in " + label + "; policyOrder decides: " + overlap);
+        }
+    }
+
+    private static Set<String> intersection(final Set<String> left, final Set<String> right) {
+        final Set<String> overlap = new LinkedHashSet<>(left);
+        overlap.retainAll(right);
+        return overlap;
     }
 
     private static List<String> sampleSequence(final GraphicalMatrixConfig config) {
