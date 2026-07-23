@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
@@ -23,6 +39,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final int DEFAULT_CHOICE_COUNT = 4;
     private static final int DEFAULT_ORDER_MODE = 1;
     private static final int DEFAULT_CHALLENGE_SECONDS = 180;
+    private static final int DEFAULT_LOCKOUT_FAILURE_LIMIT = 5;
+    private static final int DEFAULT_LOCKOUT_LOCK_SECONDS = 900;
+    private static final int DEFAULT_LOCKOUT_MAX_LOCK_FAILURE_COUNT = 10;
+    private static final int DEFAULT_LOCKOUT_MAX_LOCK_SECONDS = 2592000;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_FAILURE_LIMIT = 5;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_WINDOW_SECONDS = 300;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_LOCK_SECONDS = 900;
@@ -65,6 +85,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final int choiceCount;
     private final int orderMode;
     private final int challengeSeconds;
+    private final int lockoutFailureLimit;
+    private final int lockoutLockSeconds;
+    private final int lockoutMaxLockFailureCount;
+    private final int lockoutMaxLockSeconds;
     private final boolean changeLdapRateLimitEnabled;
     private final int changeLdapRateLimitFailureLimit;
     private final int changeLdapRateLimitWindowSeconds;
@@ -95,7 +119,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final Path changeCompleteTemplatePath;
 
     private GraphicalMatrixConfig(final int columns, final int rows, final int choiceCount,
-            final int orderMode, final int challengeSeconds, final boolean changeLdapRateLimitEnabled,
+            final int orderMode, final int challengeSeconds,
+            final int lockoutFailureLimit, final int lockoutLockSeconds,
+            final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
+            final boolean changeLdapRateLimitEnabled,
             final int changeLdapRateLimitFailureLimit, final int changeLdapRateLimitWindowSeconds,
             final int changeLdapRateLimitLockSeconds, final String changeLdapRateLimitKey,
             final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
@@ -115,6 +142,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.choiceCount = choiceCount;
         this.orderMode = orderMode;
         this.challengeSeconds = challengeSeconds;
+        this.lockoutFailureLimit = lockoutFailureLimit;
+        this.lockoutLockSeconds = lockoutLockSeconds;
+        this.lockoutMaxLockFailureCount = lockoutMaxLockFailureCount;
+        this.lockoutMaxLockSeconds = lockoutMaxLockSeconds;
         this.changeLdapRateLimitEnabled = changeLdapRateLimitEnabled;
         this.changeLdapRateLimitFailureLimit = changeLdapRateLimitFailureLimit;
         this.changeLdapRateLimitWindowSeconds = changeLdapRateLimitWindowSeconds;
@@ -165,6 +196,14 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final int orderMode = intProperty(properties, "graphicalmatrix.order", DEFAULT_ORDER_MODE);
         final int challengeSeconds =
             intProperty(properties, "graphicalmatrix.challenge.seconds", DEFAULT_CHALLENGE_SECONDS);
+        final int lockoutFailureLimit = intProperty(properties,
+            "graphicalmatrix.lockout.failureLimit", DEFAULT_LOCKOUT_FAILURE_LIMIT);
+        final int lockoutLockSeconds = intProperty(properties,
+            "graphicalmatrix.lockout.lockSeconds", DEFAULT_LOCKOUT_LOCK_SECONDS);
+        final int lockoutMaxLockFailureCount = intProperty(properties,
+            "graphicalmatrix.lockout.maxLockFailureCount", DEFAULT_LOCKOUT_MAX_LOCK_FAILURE_COUNT);
+        final int lockoutMaxLockSeconds = intProperty(properties,
+            "graphicalmatrix.lockout.maxLockSeconds", DEFAULT_LOCKOUT_MAX_LOCK_SECONDS);
         final boolean changeLdapRateLimitEnabled = booleanProperty(properties,
             "graphicalmatrix.change.ldapRateLimit.enabled", DEFAULT_CHANGE_LDAP_RATE_LIMIT_ENABLED);
         final int changeLdapRateLimitFailureLimit = intProperty(properties,
@@ -225,6 +264,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             "graphicalmatrix.view.changeCompleteTemplate", DEFAULT_CHANGE_COMPLETE_TEMPLATE_PATH)).normalize();
 
         validate(columns, rows, choiceCount, orderMode, challengeSeconds,
+            lockoutFailureLimit, lockoutLockSeconds,
+            lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
             changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
@@ -233,6 +274,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             throw new IllegalArgumentException("GraphicalMatrix CSS cache seconds must be zero or positive.");
         }
         return new GraphicalMatrixConfig(columns, rows, choiceCount, orderMode, challengeSeconds,
+            lockoutFailureLimit, lockoutLockSeconds,
+            lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
             changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
@@ -270,6 +313,39 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     public long getChallengeMillis() {
         return challengeSeconds * 1000L;
+    }
+
+    public int getLockoutFailureLimit() {
+        return lockoutFailureLimit;
+    }
+
+    public int getLockoutLockSeconds() {
+        return lockoutLockSeconds;
+    }
+
+    public long getLockoutLockMillis() {
+        return lockoutLockSeconds * 1000L;
+    }
+
+    public int getLockoutMaxLockFailureCount() {
+        return lockoutMaxLockFailureCount;
+    }
+
+    public int getLockoutMaxLockSeconds() {
+        return lockoutMaxLockSeconds;
+    }
+
+    public long getLockoutMaxLockMillis() {
+        return lockoutMaxLockSeconds * 1000L;
+    }
+
+    public GraphicalMatrixLockoutPolicy getLockoutPolicy() {
+        return new GraphicalMatrixLockoutPolicy(
+            lockoutFailureLimit,
+            getLockoutLockMillis(),
+            lockoutMaxLockFailureCount,
+            getLockoutMaxLockMillis()
+        );
     }
 
     public boolean isChangeLdapRateLimitEnabled() {
@@ -447,7 +523,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         if (value == null || value.trim().isEmpty()) {
             return defaultValue;
         }
-        return Integer.parseInt(value.trim());
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix property must be an integer: " + key, ex);
+        }
     }
 
     private static boolean booleanProperty(final Properties properties, final String key,
@@ -539,6 +620,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     private static void validate(final int columns, final int rows, final int choiceCount,
             final int orderMode, final int challengeSeconds,
+            final int lockoutFailureLimit, final int lockoutLockSeconds,
+            final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
             final boolean changeLdapRateLimitEnabled, final int changeLdapRateLimitFailureLimit,
             final int changeLdapRateLimitWindowSeconds, final int changeLdapRateLimitLockSeconds,
             final String changeLdapRateLimitKey,
@@ -556,6 +639,26 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         }
         if (challengeSeconds < 30 || challengeSeconds > 900) {
             throw new IllegalArgumentException("GraphicalMatrix challenge seconds must be between 30 and 900.");
+        }
+        if (lockoutFailureLimit < 1 || lockoutFailureLimit > 100) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix lockout failure limit must be between 1 and 100.");
+        }
+        if (lockoutLockSeconds < 1 || lockoutLockSeconds > 2592000) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix lockout seconds must be between 1 and 2592000.");
+        }
+        if (lockoutMaxLockFailureCount <= lockoutFailureLimit
+                || lockoutMaxLockFailureCount > 1000) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix maximum lock failure count must be greater than "
+                + "the normal failure limit and at most 1000.");
+        }
+        if (lockoutMaxLockSeconds < lockoutLockSeconds
+                || lockoutMaxLockSeconds > 2592000) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix maximum lock seconds must be between "
+                + "the normal lock seconds and 2592000.");
         }
         if (changeLdapRateLimitEnabled) {
             if (changeLdapRateLimitFailureLimit < 1) {

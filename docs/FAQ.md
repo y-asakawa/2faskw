@@ -134,6 +134,31 @@ graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
 ```
 
+### GraphicalMatrixロックアウト設定が不正
+
+GraphicalMatrix画像列照合のロックアウト設定は、以下の条件をすべて満たす必要がある。
+
+- `graphicalmatrix.lockout.failureLimit` は `1`から`100`
+- `graphicalmatrix.lockout.lockSeconds` は `1`から`2592000`
+- `graphicalmatrix.lockout.maxLockFailureCount` は `failureLimit`より大きく`1000`以下
+- `graphicalmatrix.lockout.maxLockSeconds` は `lockSeconds`以上、最大`2592000`
+
+既定設定:
+
+```properties
+graphicalmatrix.lockout.failureLimit = 5
+graphicalmatrix.lockout.lockSeconds = 900
+graphicalmatrix.lockout.maxLockFailureCount = 10
+graphicalmatrix.lockout.maxLockSeconds = 2592000
+```
+
+既定では1回目から4回目はロックせず、5回目から9回目は15分ロック、10回目以降は
+30日ロックする。ロック期限の経過だけでは `failed_count` は0へ戻らない。
+認証成功または管理者のunlock・RESET等でリセットされる。
+
+`maxLockSeconds=0` を永久ロックとして指定することはできない。設定検査で
+`CONFIG_CHECK_FAILED` になった場合は、4設定の大小関係をまとめて確認する。
+
 ### プロパティファイル自体を読み込めない
 
 以下の場合も設定読込に失敗する可能性がある。

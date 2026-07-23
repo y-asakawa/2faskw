@@ -175,19 +175,6 @@ properties_value() {
   ' "$file"
 }
 
-openapi_version() {
-  local file="$1"
-  awk '
-    /^[[:space:]]*version:[[:space:]]*/ {
-      value=$0
-      sub(/^[[:space:]]*version:[[:space:]]*/, "", value)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
-
 manifest_value() {
   local jar="$1"
   local key="$2"
@@ -313,7 +300,7 @@ check_package() {
 
   need_dir "$PACKAGE_DIR"
 
-  local package_base package_version package_archive_base plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props metadata_base_name openapi_yaml manifest_version bootstrap_version openapi_ver
+  local package_base package_version package_archive_base plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props metadata_base_name manifest_version bootstrap_version
   package_base="$(basename "$PACKAGE_DIR")"
   if [[ "$package_base" == 2faskw-idp-plugin-* && "$package_base" != "2faskw-idp-plugin-" ]]; then
     package_version="${package_base#2faskw-idp-plugin-}"
@@ -352,11 +339,9 @@ check_package() {
 
   bootstrap_props="$PACKAGE_DIR/bootstrap/plugin.properties"
   metadata_props="$PACKAGE_DIR/plugin-metadata/graphicalmatrix-plugin.properties"
-  openapi_yaml="$PACKAGE_DIR/docs/openapi.yaml"
-
+  need_file "$PACKAGE_DIR/README.md"
   need_file "$bootstrap_props"
   need_file "$metadata_props"
-  need_file "$PACKAGE_DIR/plugin-metadata/README.md"
   need_file "$PACKAGE_DIR/plugin-metadata/PACKAGE-CONTENTS.txt"
   need_file "$PACKAGE_DIR/plugin-metadata/PACKAGE-MANIFEST.sha256"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
@@ -376,24 +361,11 @@ check_package() {
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-api-curl-test.sh"
   need_file "$PACKAGE_DIR/examples/webauthn-ldap-storage-config.xml"
   need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-audit"
-  need_file "$PACKAGE_DIR/docs/README.md"
-  need_file "$PACKAGE_DIR/docs/INSTALL.md"
-  need_file "$PACKAGE_DIR/docs/INSTALL_Manual_Installation.md"
-  need_file "$PACKAGE_DIR/docs/INSTALL_LDAP.md"
-  need_file "$PACKAGE_DIR/docs/INSTALL_Passchange_IdP.md"
-  need_file "$PACKAGE_DIR/docs/INSTALL_Passchange_SP.md"
-  need_file "$PACKAGE_DIR/docs/SECURITY.md"
-  need_file "$PACKAGE_DIR/docs/SECURITY-CHECKLIST.md"
-  need_file "$PACKAGE_DIR/docs/API-TOKEN-ROTATION.md"
-  need_file "$PACKAGE_DIR/docs/API-CURL-TESTS.md"
-  need_file "$PACKAGE_DIR/docs/MFA-POLICY-ORDER-DESIGN.md"
-  need_file "$PACKAGE_DIR/docs/FAQ.md"
-  need_file "$PACKAGE_DIR/docs/UPGRADE.md"
-  need_file "$PACKAGE_DIR/docs/CSV-EXPORT.md"
-  need_file "$PACKAGE_DIR/docs/DB-MIGRATION.md"
-  need_file "$PACKAGE_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
-  need_file "$PACKAGE_DIR/docs/LOGROTATE.md"
-  need_file "$openapi_yaml"
+  if [[ -e "$PACKAGE_DIR/docs" ]]; then
+    fail "package must not contain detailed docs directory: $PACKAGE_DIR/docs"
+  else
+    ok "package excludes detailed docs directory"
+  fi
 
   if [[ -n "$plugin_jar" ]]; then
     local flow_entry
@@ -419,6 +391,19 @@ check_package() {
     else
       fail "API template must have graphicalmatrix.api.enabled = false"
     fi
+  fi
+
+  if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew" ]]; then
+    local graphicalmatrix_template
+    graphicalmatrix_template="$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
+    check_equals "lockout normal failure limit" \
+      "$(properties_value "$graphicalmatrix_template" "graphicalmatrix.lockout.failureLimit")" "5"
+    check_equals "lockout normal duration" \
+      "$(properties_value "$graphicalmatrix_template" "graphicalmatrix.lockout.lockSeconds")" "900"
+    check_equals "lockout maximum failure count" \
+      "$(properties_value "$graphicalmatrix_template" "graphicalmatrix.lockout.maxLockFailureCount")" "10"
+    check_equals "lockout maximum duration" \
+      "$(properties_value "$graphicalmatrix_template" "graphicalmatrix.lockout.maxLockSeconds")" "2592000"
   fi
 
   if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" ]]; then
@@ -457,11 +442,6 @@ check_package() {
   if [[ -n "$package_version" && -f "$bootstrap_props" ]]; then
     bootstrap_version="$(properties_value "$bootstrap_props" "plugin.version")"
     check_equals "bootstrap plugin.version" "$bootstrap_version" "$package_version"
-  fi
-
-  if [[ -n "$package_version" && -f "$openapi_yaml" ]]; then
-    openapi_ver="$(openapi_version "$openapi_yaml")"
-    check_equals "OpenAPI info.version" "$openapi_ver" "$package_version"
   fi
 
   if [[ -n "$package_version" && -n "$plugin_jar" ]]; then

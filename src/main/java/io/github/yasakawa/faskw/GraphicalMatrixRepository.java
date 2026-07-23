@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.sql.Connection;
@@ -188,8 +204,10 @@ public final class GraphicalMatrixRepository {
                 if (!"ACTIVE".equals(rs.getString("status"))) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_enrollment");
                 }
-                if (rs.getLong("locked_until") > now) {
-                    return GraphicalMatrixVerifyResult.locked("locked_until=" + rs.getLong("locked_until"));
+                final long lockedUntil = rs.getLong("locked_until");
+                if (lockedUntil > now) {
+                    return GraphicalMatrixVerifyResult.locked(
+                        "locked_until=" + lockedUntil, lockedUntil);
                 }
                 if (!"TOTP".equals(normalizeMethod(rs.getString("mfa_method")))) {
                     return GraphicalMatrixVerifyResult.enrollRequired("not_totp_method");
@@ -223,12 +241,13 @@ public final class GraphicalMatrixRepository {
     }
 
     public GraphicalMatrixVerifyResult verify(final String user, final List<String> selected,
-            final List<String> displayOrder, final long now, final int maxFailures,
-            final long lockMillis, final boolean orderedSelectionRequired,
+            final List<String> displayOrder, final long now,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) {
         if (ldapStore != null) {
             try {
-                return ldapStore.verify(user, selected, displayOrder, now, maxFailures, lockMillis,
+                return ldapStore.verify(user, selected, displayOrder, now, lockoutPolicy,
                     orderedSelectionRequired, duplicateSelectionsAllowed);
             } catch (Exception ex) {
                 return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
@@ -239,7 +258,7 @@ public final class GraphicalMatrixRepository {
             c.setAutoCommit(false);
             try {
                 final GraphicalMatrixVerifyResult result = verifyInTransaction(
-                    c, user, selected, displayOrder, now, maxFailures, lockMillis,
+                    c, user, selected, displayOrder, now, lockoutPolicy,
                     orderedSelectionRequired, duplicateSelectionsAllowed);
                 c.commit();
                 return result;
@@ -253,13 +272,14 @@ public final class GraphicalMatrixRepository {
     }
 
     public GraphicalMatrixVerifyResult verifyForSequenceChange(final String user, final List<String> selected,
-            final List<String> displayOrder, final long now, final int maxFailures,
-            final long lockMillis, final boolean orderedSelectionRequired,
+            final List<String> displayOrder, final long now,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) {
         if (ldapStore != null) {
             try {
-                return ldapStore.verifyForSequenceChange(user, selected, displayOrder, now, maxFailures,
-                    lockMillis, orderedSelectionRequired, duplicateSelectionsAllowed);
+                return ldapStore.verifyForSequenceChange(user, selected, displayOrder, now,
+                    lockoutPolicy, orderedSelectionRequired, duplicateSelectionsAllowed);
             } catch (Exception ex) {
                 return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
             }
@@ -269,7 +289,7 @@ public final class GraphicalMatrixRepository {
             c.setAutoCommit(false);
             try {
                 final GraphicalMatrixVerifyResult result = verifyForSequenceChangeInTransaction(
-                    c, user, selected, displayOrder, now, maxFailures, lockMillis,
+                    c, user, selected, displayOrder, now, lockoutPolicy,
                     orderedSelectionRequired, duplicateSelectionsAllowed);
                 c.commit();
                 return result;
@@ -444,7 +464,7 @@ public final class GraphicalMatrixRepository {
 
     private GraphicalMatrixVerifyResult verifyInTransaction(final Connection c, final String user,
             final List<String> selected, final List<String> displayOrder, final long now,
-            final int maxFailures, final long lockMillis,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
             throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
@@ -469,7 +489,8 @@ public final class GraphicalMatrixRepository {
                         "sequence_storage_migration_required");
                 }
                 if (lockedUntil > now) {
-                    return GraphicalMatrixVerifyResult.locked("locked_until=" + lockedUntil);
+                    return GraphicalMatrixVerifyResult.locked(
+                        "locked_until=" + lockedUntil, lockedUntil);
                 }
 
                 final int expectedCount = sequenceStorage.count(sequence);
@@ -493,8 +514,12 @@ public final class GraphicalMatrixRepository {
                     return GraphicalMatrixVerifyResult.success();
                 }
 
-                final int failed = failedCount + 1;
-                final long newLockedUntil = (failed >= maxFailures) ? now + lockMillis : 0L;
+                final int failed = incrementFailureCount(failedCount);
+                final GraphicalMatrixLockoutPolicy.LockDecision lockDecision =
+                    lockoutPolicy.afterFailure(failed);
+                final long newLockedUntil = lockDecision.isLocked()
+                    ? now + lockDecision.getLockMillis()
+                    : 0L;
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET failed_count = ?, locked_until = ?, updated_at = ? "
@@ -507,9 +532,12 @@ public final class GraphicalMatrixRepository {
                 }
 
                 final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
-                    + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered");
-                return (failed >= maxFailures)
-                    ? GraphicalMatrixVerifyResult.locked(detail)
+                    + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
+                    + ",lock_level=" + lockDecision.getLevel().getAuditValue()
+                    + ",lock_seconds=" + lockDecision.getLockSeconds()
+                    + ",locked_until=" + newLockedUntil;
+                return lockDecision.isLocked()
+                    ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
                     : GraphicalMatrixVerifyResult.failed(detail);
             }
         }
@@ -517,7 +545,7 @@ public final class GraphicalMatrixRepository {
 
     private GraphicalMatrixVerifyResult verifyForSequenceChangeInTransaction(final Connection c,
             final String user, final List<String> selected, final List<String> displayOrder,
-            final long now, final int maxFailures, final long lockMillis,
+            final long now, final GraphicalMatrixLockoutPolicy lockoutPolicy,
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
             throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
@@ -542,7 +570,8 @@ public final class GraphicalMatrixRepository {
                         "sequence_storage_migration_required");
                 }
                 if (lockedUntil > now) {
-                    return GraphicalMatrixVerifyResult.locked("locked_until=" + lockedUntil);
+                    return GraphicalMatrixVerifyResult.locked(
+                        "locked_until=" + lockedUntil, lockedUntil);
                 }
 
                 final int expectedCount = sequenceStorage.count(sequence);
@@ -565,8 +594,12 @@ public final class GraphicalMatrixRepository {
                     return GraphicalMatrixVerifyResult.success("sequence_change_verified");
                 }
 
-                final int failed = failedCount + 1;
-                final long newLockedUntil = (failed >= maxFailures) ? now + lockMillis : 0L;
+                final int failed = incrementFailureCount(failedCount);
+                final GraphicalMatrixLockoutPolicy.LockDecision lockDecision =
+                    lockoutPolicy.afterFailure(failed);
+                final long newLockedUntil = lockDecision.isLocked()
+                    ? now + lockDecision.getLockMillis()
+                    : 0L;
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET failed_count = ?, locked_until = ?, updated_at = ? "
@@ -580,9 +613,12 @@ public final class GraphicalMatrixRepository {
 
                 final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
                     + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
+                    + ",lock_level=" + lockDecision.getLevel().getAuditValue()
+                    + ",lock_seconds=" + lockDecision.getLockSeconds()
+                    + ",locked_until=" + newLockedUntil
                     + ",purpose=sequence_change";
-                return (failed >= maxFailures)
-                    ? GraphicalMatrixVerifyResult.locked(detail)
+                return lockDecision.isLocked()
+                    ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
                     : GraphicalMatrixVerifyResult.failed(detail);
             }
         }
@@ -597,6 +633,10 @@ public final class GraphicalMatrixRepository {
             return multiset(expected).equals(multiset(selected));
         }
         return new HashSet<>(expected).equals(new HashSet<>(selected));
+    }
+
+    private static int incrementFailureCount(final int failedCount) {
+        return failedCount < Integer.MAX_VALUE ? failedCount + 1 : Integer.MAX_VALUE;
     }
 
     private static java.util.Map<String, Integer> multiset(final List<String> values) {

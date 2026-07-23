@@ -224,6 +224,27 @@ PoCで公開画像を使う場合:
 これは第2要素としては、LDAPパスワード認証後に利用し、5回失敗ロックを併用する前提で許容します。
 ただし、単独のパスワードや高強度の秘密情報として扱ってはいけません。
 
+## GraphicalMatrixロックアウト
+
+GraphicalMatrix画像列照合は、ユーザー単位の二段階ロックアウトで保護します。
+既定値では5回目から15分、10回目以降は30日ロックします。
+
+```properties
+graphicalmatrix.lockout.failureLimit = 5
+graphicalmatrix.lockout.lockSeconds = 900
+graphicalmatrix.lockout.maxLockFailureCount = 10
+graphicalmatrix.lockout.maxLockSeconds = 2592000
+```
+
+通常ログインと変更画面は同じ保存済み `failed_count` を使用します。ロック期限が経過しても
+失敗回数は0へ戻らず、認証成功または管理者のunlock・RESET等でリセットされます。
+10回目以降の失敗では、最大ロック期限の経過後も再失敗すると再び30日ロックされます。
+
+最大ロックはオンライン推測への耐性を高めますが、第三者によるアカウント停止攻撃にも
+利用され得ます。`lock_level=maximum` の監査ログを監視し、本人確認後に管理者が解除できる
+運用を用意してください。`maxLockSeconds=0` による永久ロックは許可されません。
+送信元IP単位の大量アクセスは、このユーザー単位ロックとは別にリバースプロキシやWAFで制御します。
+
 運用方針:
 
 - GraphicalMatrixは必ずLDAP等の一次認証後の第2要素として利用する

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.util.HashSet;
@@ -94,7 +110,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
                 return GraphicalMatrixVerifyResult.enrollRequired("inactive_enrollment");
             }
             if (entry.record.lockedUntil > now) {
-                return GraphicalMatrixVerifyResult.locked("locked_until=" + entry.record.lockedUntil);
+                return GraphicalMatrixVerifyResult.locked(
+                    "locked_until=" + entry.record.lockedUntil, entry.record.lockedUntil);
             }
             if (!"TOTP".equals(normalizeMethod(entry.record.mfaMethod))) {
                 return GraphicalMatrixVerifyResult.enrollRequired("not_totp_method");
@@ -119,8 +136,9 @@ final class GraphicalMatrixLdapEnrollmentStore {
     }
 
     GraphicalMatrixVerifyResult verify(final String user, final List<String> selected,
-            final List<String> displayOrder, final long now, final int maxFailures,
-            final long lockMillis, final boolean orderedSelectionRequired,
+            final List<String> displayOrder, final long now,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
@@ -129,14 +147,15 @@ final class GraphicalMatrixLdapEnrollmentStore {
             if (precheck != null) {
                 return precheck;
             }
-            return verifySelection(context, entry, selected, displayOrder, now, maxFailures, lockMillis,
+            return verifySelection(context, entry, selected, displayOrder, now, lockoutPolicy,
                 orderedSelectionRequired, duplicateSelectionsAllowed, false);
         }
     }
 
     GraphicalMatrixVerifyResult verifyForSequenceChange(final String user, final List<String> selected,
-            final List<String> displayOrder, final long now, final int maxFailures,
-            final long lockMillis, final boolean orderedSelectionRequired,
+            final List<String> displayOrder, final long now,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
@@ -145,7 +164,7 @@ final class GraphicalMatrixLdapEnrollmentStore {
             if (precheck != null) {
                 return precheck;
             }
-            return verifySelection(context, entry, selected, displayOrder, now, maxFailures, lockMillis,
+            return verifySelection(context, entry, selected, displayOrder, now, lockoutPolicy,
                 orderedSelectionRequired, duplicateSelectionsAllowed, true);
         }
     }
@@ -259,14 +278,16 @@ final class GraphicalMatrixLdapEnrollmentStore {
             return GraphicalMatrixVerifyResult.enrollRequired("sequence_storage_migration_required");
         }
         if (entry.record.lockedUntil > now) {
-            return GraphicalMatrixVerifyResult.locked("locked_until=" + entry.record.lockedUntil);
+            return GraphicalMatrixVerifyResult.locked(
+                "locked_until=" + entry.record.lockedUntil, entry.record.lockedUntil);
         }
         return null;
     }
 
     private GraphicalMatrixVerifyResult verifySelection(final LdapContext context, final Entry entry,
             final List<String> selected, final List<String> displayOrder, final long now,
-            final int maxFailures, final long lockMillis, final boolean orderedSelectionRequired,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired,
             final boolean duplicateSelectionsAllowed, final boolean sequenceChange) throws Exception {
         final int expectedCount = sequenceStorage.count(entry.record.sequence);
         final Set<String> unique = new HashSet<>(selected);
@@ -294,8 +315,12 @@ final class GraphicalMatrixLdapEnrollmentStore {
             return GraphicalMatrixVerifyResult.success();
         }
 
-        final int failed = entry.record.failedCount + 1;
-        final long newLockedUntil = (failed >= maxFailures) ? now + lockMillis : 0L;
+        final int failed = incrementFailureCount(entry.record.failedCount);
+        final GraphicalMatrixLockoutPolicy.LockDecision lockDecision =
+            lockoutPolicy.afterFailure(failed);
+        final long newLockedUntil = lockDecision.isLocked()
+            ? now + lockDecision.getLockMillis()
+            : 0L;
         modify(context, entry.dn,
             replace(config.failedCountAttr(), String.valueOf(failed)),
             replace(config.lockedUntilAttr(), String.valueOf(newLockedUntil)),
@@ -304,9 +329,12 @@ final class GraphicalMatrixLdapEnrollmentStore {
 
         final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
             + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
+            + ",lock_level=" + lockDecision.getLevel().getAuditValue()
+            + ",lock_seconds=" + lockDecision.getLockSeconds()
+            + ",locked_until=" + newLockedUntil
             + (sequenceChange ? ",purpose=sequence_change" : "");
-        return (failed >= maxFailures)
-            ? GraphicalMatrixVerifyResult.locked(detail)
+        return lockDecision.isLocked()
+            ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
             : GraphicalMatrixVerifyResult.failed(detail);
     }
 
@@ -331,6 +359,10 @@ final class GraphicalMatrixLdapEnrollmentStore {
             throw new NamingException("LDAP user search returned multiple entries for user=" + user);
         }
         return new Entry(first.getNameInNamespace(), Record.from(first.getAttributes(), config));
+    }
+
+    private static int incrementFailureCount(final int failedCount) {
+        return failedCount < Integer.MAX_VALUE ? failedCount + 1 : Integer.MAX_VALUE;
     }
 
     private LdapSession context() throws NamingException {
