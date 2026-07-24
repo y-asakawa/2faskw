@@ -1399,6 +1399,13 @@ graphicalmatrix.challenge.seconds = 180
 graphicalmatrix.allow_duplicates = 0
 graphicalmatrix.force_sequence_change = 1
 
+# 5回目から通常ロック
+graphicalmatrix.lockout.failureLimit = 5
+graphicalmatrix.lockout.lockSeconds = 900
+# 10回目から最大ロック
+graphicalmatrix.lockout.maxLockFailureCount = 10
+graphicalmatrix.lockout.maxLockSeconds = 2592000
+
 graphicalmatrix.change.ldapRateLimit.enabled = true
 graphicalmatrix.change.ldapRateLimit.failureLimit = 5
 graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
@@ -1439,6 +1446,10 @@ graphicalmatrix.view.css.cacheSeconds = 0
 
 `graphicalmatrix.challenge.seconds` はGraphicalMatrix、TOTP登録、強制sequence変更、
 ユーザー自身の変更画面で利用するチャレンジ有効期限です。設定可能範囲は30〜900秒です。
+
+GraphicalMatrix画像列照合のロック期限が経過しても、`failed_count` は自動的に0へ戻りません。
+既定では5回目から9回目は15分ロック、10回目以降は30日ロックです。認証成功または
+管理者のunlock・RESET等で失敗回数をリセットします。
 
 Sequence保存方式:
 

@@ -8,6 +8,7 @@
 - v1.1.0 から v1.2.0 への更新
 - v1.0.x から v1.2.0 へ更新する場合の段階的な確認
 - v1.2.3 から v1.2.4 への更新
+- v1.2.4 から v1.2.5 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -19,6 +20,7 @@
 | v1.1.0 | v1.2.0 | 旧JAR削除、v1.2.0テンプレート差分反映、config check | LDAP保存、TOTP seed暗号化設定見直し、WebAuthn LDAP StorageService |
 | v1.0.x | v1.2.0 | v1.1.0の必須対応を先に完了し、その後v1.2.0差分を反映 | LDAP保存へ切り替える場合は別途移行計画を作成 |
 | v1.2.3 | v1.2.4 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | IdP自己管理フローの有効化、従来LDAP変更経路の停止 |
+| v1.2.4 | v1.2.5 | 旧JAR削除、ロックアウト4設定の追加、WAR再構築、設定検査 | 通常・最大ロック時間の調整 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -38,6 +40,9 @@ v1.2.0の推奨構成:
 v1.2.4では、Password + 現在のMFA方式による強制再認証後に変更画面を開始するIdP自己管理フローを
 追加します。既定では自己管理フローは無効、従来LDAP変更経路は有効であるため、JAR更新だけで
 従来の変更画面が自動的に無効になることはありません。
+
+v1.2.5では、GraphicalMatrix画像列照合のロック条件を設定化し、通常ロックと最大ロックの
+二段階制御を追加します。既定では5回目から15分、10回目以降は30日ロックされます。
 
 ## 事前確認
 
@@ -541,6 +546,80 @@ graphicalmatrix.change.legacyLdapLoginEnabled = true
 v1.2.3 JAR、`conf/graphicalmatrix`、`conf/authn`を復元してWARを再構築します。今回の更新では
 DB/LDAP schemaを変更しないため、自己管理フローの導入だけを理由とするデータschemaのロールバックは
 不要です。
+
+## v1.2.4からv1.2.5への追加手順
+
+v1.2.5では、通常ログインと変更画面のGraphicalMatrix画像列照合に、共通の二段階
+ロックアウト設定を適用します。DB schemaおよびLDAP schemaの変更はありません。
+
+`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`へ以下を追加します。
+
+```properties
+# 5回目から通常ロック
+graphicalmatrix.lockout.failureLimit = 5
+graphicalmatrix.lockout.lockSeconds = 900
+
+# 10回目から最大ロック
+graphicalmatrix.lockout.maxLockFailureCount = 10
+graphicalmatrix.lockout.maxLockSeconds = 2592000
+```
+
+設定を省略した場合も同じ既定値が使われますが、運用値を明確にするため既存設定ファイルへの
+追記を推奨します。許容条件は以下です。
+
+- `failureLimit`: `1`から`100`
+- `lockSeconds`: `1`から`2592000`
+- `maxLockFailureCount`: `failureLimit`より大きく`1000`以下
+- `maxLockSeconds`: `lockSeconds`以上、`2592000`以下
+- `0`による永久ロックは使用できない
+
+`failed_count`はロック期限の経過だけでは0へ戻りません。既定値では5回目から9回目の
+失敗は15分ロック、10回目以降は30日ロックです。30日経過後の最初の認証にも失敗すると、
+その時点から再び30日ロックされます。正しい画像列での認証成功、または管理者による
+unlock・RESET等で0へ戻ります。
+
+設定検査を実行します。
+
+```bash
+sudo ./bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+期待値:
+
+```text
+OK: [config] GraphicalMatrix lockout valid: failure_limit=5 lock_seconds=900 max_lock_failure_count=10 max_lock_seconds=2592000
+result: OK
+```
+
+更新後は専用のテストユーザーで、通常ログインと変更画面の両方が同じ
+`failed_count`を使用することを確認します。本番ユーザーを故意にロックしてはなりません。
+
+```bash
+sudo tail -f /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+```
+
+監査detailで以下を確認します。
+
+```text
+failed_count=4,...,lock_level=none,lock_seconds=0,locked_until=0
+failed_count=5,...,lock_level=normal,lock_seconds=900,locked_until=<epoch_millis>
+failed_count=10,...,lock_level=maximum,lock_seconds=2592000,locked_until=<epoch_millis>
+```
+
+DB保存の場合は管理CLIでも状態を確認できます。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show test-user
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh unlock test-user
+```
+
+LDAP保存の場合は、設定した失敗回数属性とロック期限属性をLDAP管理手順で確認・解除します。
+
+v1.2.4へロールバックしても、DBまたはLDAPに保存済みの `failed_count` と
+`locked_until` は自動的に短縮されません。v1.2.5で30日ロックされたテストユーザーは、
+必要に応じて管理者がunlockしてからロールバックします。v1.2.4は新しい4設定を無視します。
 
 ***
 ***

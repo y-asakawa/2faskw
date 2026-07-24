@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
@@ -13,8 +29,6 @@ import net.shibboleth.idp.authn.ExternalAuthentication;
 
 public final class GraphicalMatrixVerifyServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
-    private static final int MAX_FAILURES = 5;
-    private static final long LOCK_MILLIS = 15L * 60L * 1000L;
 
     @Override
     protected void doPost(final HttpServletRequest request, final HttpServletResponse response)
@@ -83,8 +97,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 GraphicalMatrixSupport.csv(request.getParameter("selected")),
                 displayOrder,
                 now,
-                MAX_FAILURES,
-                LOCK_MILLIS,
+                config.getLockoutPolicy(),
                 config.isOrderedSelectionRequired(),
                 config.isDuplicateSelectionsAllowed()
             );
@@ -145,13 +158,14 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                     + ",rows=" + config.getRows() + ",choice=" + config.getChoiceCount()
                     + ",retry_after_fail", request);
                 GraphicalMatrixStartServlet.render(request, response, key, retryChallengeId,
-                    retryCsrfToken, retryDisplayOrder, config, retryMessage(result));
+                    retryCsrfToken, retryDisplayOrder, config, retryMessage(result, config));
                 return;
             }
 
             if ("LOCKED".equals(result.getAuditResult())) {
                 clearChallenge(session);
-                GraphicalMatrixStartServlet.renderLocked(request, response, now + LOCK_MILLIS);
+                GraphicalMatrixStartServlet.renderLocked(
+                    request, response, result.getLockedUntil());
                 return;
             }
 
@@ -504,9 +518,10 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             && result.getAuditDetail().startsWith("failed_count=");
     }
 
-    private static String retryMessage(final GraphicalMatrixVerifyResult result) {
+    private static String retryMessage(final GraphicalMatrixVerifyResult result,
+            final GraphicalMatrixConfig config) {
         final int failedCount = failedCount(result.getAuditDetail());
-        final int remaining = MAX_FAILURES - failedCount;
+        final int remaining = config.getLockoutFailureLimit() - failedCount;
         if (remaining > 0) {
             return "画像の順番が正しくありません。もう一度選択してください。あと"
                 + remaining + "回間違えると一時的にロックされます。";

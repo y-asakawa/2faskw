@@ -1,0 +1,39 @@
+# 2FAS-KW for Shibboleth IdP @VERSION@
+
+この配布物には、2FAS-KW Plugin本体、設定テンプレート、管理スクリプトを含みます。
+詳細な文書はアーカイブに含めていません。
+
+## tar.gzによる導入
+
+Shibboleth IdPのplugin installerを使用する場合は、公開済みのtar.gzを指定します。
+初回は表示される公開鍵fingerprintを、信頼できる経路で確認してから受け入れてください。
+
+```bash
+sudo /opt/shibboleth-idp/bin/plugin.sh \
+  -i @DOWNLOAD_URL@@PLUGIN_ARCHIVE_BASE_NAME@.tar.gz
+```
+
+## ZIPによる手動導入
+
+ZIPを展開したディレクトリで、まずdry-runを確認してから反映します。
+
+```bash
+sudo ./bin/graphicalmatrix-plugin-check.sh --package-only
+
+sudo ./bin/graphicalmatrix-plugin-config.sh \
+  --idp-home /opt/shibboleth-idp
+
+sudo ./bin/graphicalmatrix-plugin-config.sh \
+  --idp-home /opt/shibboleth-idp \
+  --apply
+
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+## 詳細文書
+
+- 導入: https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL.md
+- 設定一覧: https://github.com/y-asakawa/2faskw/blob/main/docs/CONFIG-REFERENCE.md
+- 更新: https://github.com/y-asakawa/2faskw/blob/main/docs/UPGRADE.md
+- セキュリティ運用: https://github.com/y-asakawa/2faskw/blob/main/docs/SECURITY.md

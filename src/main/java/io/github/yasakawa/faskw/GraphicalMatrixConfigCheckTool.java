@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.io.InputStream;
@@ -87,6 +103,7 @@ public final class GraphicalMatrixConfigCheckTool {
             + " allow_duplicates=" + config.isDuplicateSelectionsAllowed());
         ok("aliases valid: count=" + config.getAliases().size());
         ok("challenge valid: seconds=" + config.getChallengeSeconds());
+        checkLockout(config);
         ok("self-service valid: enabled=" + config.isSelfServiceEnabled()
             + " transaction_seconds=" + config.getSelfServiceTransactionSeconds()
             + " legacy_ldap_login=" + config.isLegacyLdapLoginEnabled());
@@ -111,6 +128,32 @@ public final class GraphicalMatrixConfigCheckTool {
             if (!List.of("true", "false", "1", "0", "yes", "no", "on", "off").contains(normalized)) {
                 warn("unrecognized boolean value is treated as false: " + key + "=" + value.trim());
             }
+        }
+    }
+
+    private void checkLockout(final GraphicalMatrixConfig config) {
+        ok("GraphicalMatrix lockout valid: failure_limit=" + config.getLockoutFailureLimit()
+            + " lock_seconds=" + config.getLockoutLockSeconds()
+            + " max_lock_failure_count=" + config.getLockoutMaxLockFailureCount()
+            + " max_lock_seconds=" + config.getLockoutMaxLockSeconds());
+
+        if (config.getLockoutFailureLimit() < 3) {
+            warn("GraphicalMatrix lockout failure limit is lower than recommended: failure_limit="
+                + config.getLockoutFailureLimit());
+        } else if (config.getLockoutFailureLimit() > 10) {
+            warn("GraphicalMatrix lockout failure limit is higher than recommended: failure_limit="
+                + config.getLockoutFailureLimit());
+        }
+        if (config.getLockoutLockSeconds() < 300) {
+            warn("GraphicalMatrix lockout duration is shorter than recommended: lock_seconds="
+                + config.getLockoutLockSeconds());
+        } else if (config.getLockoutLockSeconds() > 3600) {
+            warn("GraphicalMatrix lockout duration is longer than recommended: lock_seconds="
+                + config.getLockoutLockSeconds());
+        }
+        if (config.getLockoutMaxLockFailureCount() > 100) {
+            warn("GraphicalMatrix maximum lock threshold is higher than recommended: "
+                + "max_lock_failure_count=" + config.getLockoutMaxLockFailureCount());
         }
     }
 

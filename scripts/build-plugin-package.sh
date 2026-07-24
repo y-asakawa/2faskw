@@ -190,12 +190,12 @@ mkdir -p \
   "$DIST_DIR/examples" \
   "$DIST_DIR/examples/logrotate" \
   "$DIST_DIR/examples/systemd" \
-  "$DIST_DIR/plugin-metadata" \
-  "$DIST_DIR/docs"
+  "$DIST_DIR/plugin-metadata"
 
 cp LICENSE "$DIST_DIR/LICENSE"
 cp NOTICE "$DIST_DIR/NOTICE"
 cp THIRD-PARTY-NOTICES.md "$DIST_DIR/THIRD-PARTY-NOTICES.md"
+render_template plugin-metadata/PACKAGE-README.md.in "$DIST_DIR/README.md"
 
 cp "target/$BASE_NAME.jar" "$DIST_DIR/webapp/WEB-INF/lib/"
 cp target/plugin-lib/*.jar "$DIST_DIR/webapp/WEB-INF/lib/"
@@ -257,30 +257,6 @@ cp examples/systemd/graphicalmatrix-csv-import.path "$DIST_DIR/examples/systemd/
 cp examples/systemd/graphicalmatrix-csv-import.service "$DIST_DIR/examples/systemd/graphicalmatrix-csv-import.service"
 
 render_template plugin-metadata/graphicalmatrix-plugin.properties.in "$DIST_DIR/plugin-metadata/graphicalmatrix-plugin.properties"
-render_template plugin-metadata/README.md.in "$DIST_DIR/plugin-metadata/README.md"
-copy_versioned docs/README.md "$DIST_DIR/docs/README.md"
-copy_versioned docs/build.md "$DIST_DIR/docs/build.md"
-copy_versioned docs/INSTALL.md "$DIST_DIR/docs/INSTALL.md"
-copy_versioned docs/INSTALL_Manual_Installation.md "$DIST_DIR/docs/INSTALL_Manual_Installation.md"
-copy_versioned docs/INSTALL_LDAP.md "$DIST_DIR/docs/INSTALL_LDAP.md"
-copy_versioned docs/INSTALL_Passchange_IdP.md "$DIST_DIR/docs/INSTALL_Passchange_IdP.md"
-copy_versioned docs/INSTALL_Passchange_SP.md "$DIST_DIR/docs/INSTALL_Passchange_SP.md"
-copy_versioned docs/SECURITY.md "$DIST_DIR/docs/SECURITY.md"
-copy_versioned docs/SECURITY-CHECKLIST.md "$DIST_DIR/docs/SECURITY-CHECKLIST.md"
-copy_versioned docs/API-TOKEN-ROTATION.md "$DIST_DIR/docs/API-TOKEN-ROTATION.md"
-copy_versioned docs/API-CURL-TESTS.md "$DIST_DIR/docs/API-CURL-TESTS.md"
-copy_versioned docs/ADMIN-TOOLS.md "$DIST_DIR/docs/ADMIN-TOOLS.md"
-copy_versioned docs/CONFIG-REFERENCE.md "$DIST_DIR/docs/CONFIG-REFERENCE.md"
-copy_versioned docs/MFA-POLICY-ORDER-DESIGN.md "$DIST_DIR/docs/MFA-POLICY-ORDER-DESIGN.md"
-copy_versioned docs/FAQ.md "$DIST_DIR/docs/FAQ.md"
-copy_versioned docs/UPGRADE.md "$DIST_DIR/docs/UPGRADE.md"
-copy_versioned docs/CSV-EXPORT.md "$DIST_DIR/docs/CSV-EXPORT.md"
-copy_versioned docs/DB-MIGRATION.md "$DIST_DIR/docs/DB-MIGRATION.md"
-copy_versioned docs/SEQUENCE-STORAGE-MIGRATION.md "$DIST_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
-copy_versioned docs/SECURITY-UPGRADE-1.1.0.md "$DIST_DIR/docs/SECURITY-UPGRADE-1.1.0.md"
-copy_versioned docs/LOGROTATE.md "$DIST_DIR/docs/LOGROTATE.md"
-copy_versioned docs/INSTALL_LOADTEST.md "$DIST_DIR/docs/INSTALL_LOADTEST.md"
-copy_versioned docs/openapi.yaml "$DIST_DIR/docs/openapi.yaml"
 
 (
   cd "$DIST_DIR"

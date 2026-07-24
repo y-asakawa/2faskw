@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Yoshifumi ASAKAWA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
@@ -19,8 +35,6 @@ import jakarta.servlet.http.HttpSession;
 
 public final class GraphicalMatrixChangeServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
-    private static final int MAX_FAILURES = 5;
-    private static final long LOCK_MILLIS = 15L * 60L * 1000L;
     private static final Map<String, RateLimitState> LDAP_FAILURES = new ConcurrentHashMap<>();
 
     @Override
@@ -369,8 +383,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
                 GraphicalMatrixSupport.csv(request.getParameter("selected")),
                 displayOrder,
                 now,
-                MAX_FAILURES,
-                LOCK_MILLIS,
+                config.getLockoutPolicy(),
                 config.isOrderedSelectionRequired(),
                 config.isDuplicateSelectionsAllowed()
             );
@@ -409,13 +422,14 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         if (isRetryableFailure(result)) {
-            startCurrentChallenge(request, response, config, user, retryMessage(result));
+            startCurrentChallenge(request, response, config, user, retryMessage(result, config));
             return;
         }
 
         if ("LOCKED".equals(result.getAuditResult())) {
             clearChange(session);
-            GraphicalMatrixStartServlet.renderLocked(request, response, now + LOCK_MILLIS);
+            GraphicalMatrixStartServlet.renderLocked(
+                request, response, result.getLockedUntil());
             return;
         }
 
@@ -887,9 +901,10 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             && result.getAuditDetail().startsWith("failed_count=");
     }
 
-    private static String retryMessage(final GraphicalMatrixVerifyResult result) {
+    private static String retryMessage(final GraphicalMatrixVerifyResult result,
+            final GraphicalMatrixConfig config) {
         final int failedCount = failedCount(result.getAuditDetail());
-        final int remaining = MAX_FAILURES - failedCount;
+        final int remaining = config.getLockoutFailureLimit() - failedCount;
         if (remaining > 0) {
             return "現在のGraphicalMatrixが正しくありません。あと"
                 + remaining + "回間違えると一時的にロックされます。";
