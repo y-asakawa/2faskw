@@ -1,0 +1,33 @@
+# 2FAS-KW Admin Tools @VERSION@
+
+この配布物には、2FAS-KWのDB管理CLI、設定テンプレート、CSV処理用スクリプトを含みます。
+Shibboleth IdPプラグイン本体ではなく、`plugin.sh`では導入できません。
+詳細な文書はアーカイブに含めていません。
+
+## 導入
+
+署名とchecksumを検証してZIPを展開した後、最初にdry-runを実行します。
+
+```bash
+sudo ./bin/graphicalmatrix-admin-install.sh \
+  --prefix /opt/graphicalmatrix-admin
+```
+
+内容を確認してから反映します。
+
+```bash
+sudo ./bin/graphicalmatrix-admin-install.sh \
+  --prefix /opt/graphicalmatrix-admin \
+  --apply
+```
+
+導入後、DB接続情報、credential、`admin.properties`を環境に合わせて設定してください。
+
+## 詳細文書
+
+- 導入・運用: https://github.com/y-asakawa/2faskw/blob/main/docs/ADMIN-TOOLS.md
+- 設定一覧: https://github.com/y-asakawa/2faskw/blob/main/docs/CONFIG-REFERENCE.md
+- CSV export: https://github.com/y-asakawa/2faskw/blob/main/docs/CSV-EXPORT.md
+- DB migration: https://github.com/y-asakawa/2faskw/blob/main/docs/DB-MIGRATION.md
+- 更新: https://github.com/y-asakawa/2faskw/blob/main/docs/UPGRADE.md
+- セキュリティ運用: https://github.com/y-asakawa/2faskw/blob/main/docs/SECURITY.md

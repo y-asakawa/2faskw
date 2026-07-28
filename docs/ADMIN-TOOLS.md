@@ -17,8 +17,9 @@ DB管理CLIだけをDBサーバまたは管理端末へ導入するための配�
 
 ### 1.1 IdPプラグイン本体との関係
 
-IdPサーバには `2faskw-idp-plugin-1.0.1.zip` を導入する。
-DBサーバまたは管理端末には `2faskw-admin-tools-1.0.1.zip` を導入する。
+IdPサーバには `2faskw-idp-plugin-<VERSION>.zip` またはShibboleth plugin形式の
+`2faskw-idp-plugin.tar.gz`を導入する。DBサーバまたは管理端末には、署名検証済みの
+`2faskw-admin-tools.zip`を導入する。
 
 両者は同じJARを利用するが、役割は分離する。
 
@@ -45,14 +46,19 @@ PostgreSQL client toolsの配置を環境に合わせて読み替える必要が
 ### 2.2 配布物
 
 ```text
-2faskw-admin-tools-1.0.1/
+2faskw-admin-tools-<VERSION>/
+  README.md
+  LICENSE
+  NOTICE
+  THIRD-PARTY-NOTICES.md
+
   bin/
     graphicalmatrix-db.sh
     graphicalmatrix-db-migration.sh
     graphicalmatrix-admin-install.sh
 
   lib/
-    2faskw-idp-plugin-1.0.1.jar
+    2faskw-idp-plugin-<VERSION>.jar
     HikariCP-*.jar
     postgresql-*.jar
     core-*.jar
@@ -67,15 +73,73 @@ PostgreSQL client toolsの配置を環境に合わせて読み替える必要が
     graphicalmatrix-csv-import.path
     graphicalmatrix-csv-import.service
 
-  docs/
-    ADMIN-TOOLS.md
-    CSV-EXPORT.md
-    DB-MIGRATION.md
-    SEQUENCE-STORAGE-MIGRATION.md
-    SECURITY.md
+  package-metadata/
+    PACKAGE-CONTENTS.txt
+    PACKAGE-MANIFEST.sha256
 ```
 
-### 2.3 必須アプリ
+詳細文書はZIPへ同梱しない。配布専用`README.md`に、GitHub上の導入、設定、更新、
+セキュリティ文書へのURLを記載する。
+
+### 2.3 署名とchecksumの検証
+
+Admin ToolsはShibboleth pluginではないため、`plugin.sh`では導入しない。GitHub Releaseから
+次のファイルを同じディレクトリへ取得する。
+
+```text
+2faskw-admin-tools.zip
+2faskw-admin-tools.zip.asc
+SHA256SUMS
+SHA256SUMS.asc
+```
+
+リポジトリから`bootstrap/keys.txt`と
+`release/keys/RELEASE-KEY-FINGERPRINT.txt`も取得する。fingerprintは、リポジトリとは独立した
+信頼経路でも確認する。空の一時鍵リングへ公開鍵だけを読み込み、Admin Tools ZIPと
+`SHA256SUMS`のdetached signatureを検証する。さらに、`SHA256SUMS`からAdmin Toolsの行だけを
+抽出してZIPのSHA-256を確認する。
+
+```bash
+(
+set -euo pipefail
+
+EXPECTED_FPR="$(tr -d '[:space:]' \
+  < release/keys/RELEASE-KEY-FINGERPRINT.txt | tr '[:lower:]' '[:upper:]')"
+[[ "$EXPECTED_FPR" =~ ^[0-9A-F]{40}$ ]] || {
+  echo "ERROR: invalid release-key fingerprint" >&2
+  exit 1
+}
+VERIFY_HOME="$(mktemp -d)"
+trap 'rm -rf "$VERIFY_HOME"' EXIT HUP INT TERM
+chmod 700 "$VERIFY_HOME"
+
+gpg --homedir "$VERIFY_HOME" --batch --import bootstrap/keys.txt
+IMPORTED_FPR="$(gpg --homedir "$VERIFY_HOME" --with-colons --fingerprint \
+  | awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+[[ "$IMPORTED_FPR" == "$EXPECTED_FPR" ]] || {
+  echo "ERROR: release-key fingerprint mismatch" >&2
+  exit 1
+}
+
+gpg --homedir "$VERIFY_HOME" --verify \
+  2faskw-admin-tools.zip.asc 2faskw-admin-tools.zip
+gpg --homedir "$VERIFY_HOME" --verify SHA256SUMS.asc SHA256SUMS
+
+grep -E '^[0-9a-fA-F]{64}  2faskw-admin-tools[.]zip$' \
+  SHA256SUMS > SHA256SUMS.admin
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c SHA256SUMS.admin
+else
+  shasum -a 256 -c SHA256SUMS.admin
+fi
+rm -f SHA256SUMS.admin
+)
+```
+
+一時鍵リングで表示される未知の信頼度に関する警告は、署名の暗号学的検証結果とは別である。
+fingerprint不一致、署名検証失敗、checksum不一致のいずれかが発生した場合は展開・実行しない。
+
+### 2.4 必須アプリ
 
 PostgreSQL運用の場合:
 
@@ -94,8 +158,8 @@ Admin Tools単体運用では、PostgreSQL接続を標準とする。
 
 ```bash
 cd /tmp
-unzip 2faskw-admin-tools-1.0.1.zip
-cd 2faskw-admin-tools-1.0.1
+unzip 2faskw-admin-tools.zip
+cd 2faskw-admin-tools-<VERSION>
 ```
 
 dry-run:
@@ -316,7 +380,9 @@ export GRAPHICALMATRIX_HOME=/opt/graphicalmatrix-admin
 /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh config-help graphicalmatrix.admin.csv.autoApply
 ```
 
-詳細は `docs/CONFIG-REFERENCE.md` を参照する。
+詳細は
+https://github.com/y-asakawa/2faskw/blob/main/docs/CONFIG-REFERENCE.md
+を参照する。
 
 ### 5.2 管理CLI例
 
@@ -600,8 +666,13 @@ CLIスクリプト
 サンプルdb.properties
 サンプルgraphicalmatrix.properties
 サンプルDDL
-README / SECURITY / ADMIN-TOOLS
+配布専用README
+LICENSE / NOTICE / THIRD-PARTY-NOTICES
+package manifest
 ```
+
+詳細な`docs/`一式は同梱しない。配布専用READMEから、GitHub上の`ADMIN-TOOLS.md`、
+`CONFIG-REFERENCE.md`、`UPGRADE.md`、`SECURITY.md`へ案内する。
 
 同梱してはいけないもの:
 
@@ -1085,7 +1156,7 @@ sudo useradd -r -s /sbin/nologin -g graphicalmatrix-admin graphicalmatrix-admin
 sudo useradd -r -s /sbin/nologin -g graphicalmatrix-provision -G graphicalmatrix-admin graphicalmatrix-provision
 sudo usermod -a -G graphicalmatrix-provision graphicalmatrix-admin
 
-sudo bash /tmp/graphicalmatrix-admin-extract/2faskw-admin-tools-1.0.1/bin/graphicalmatrix-admin-install.sh \
+sudo bash /tmp/graphicalmatrix-admin-extract/2faskw-admin-tools-<VERSION>/bin/graphicalmatrix-admin-install.sh \
   --prefix /opt/graphicalmatrix-admin \
   --apply
 
