@@ -44,3 +44,6 @@ jobs:
 
       - name: Build release ZIPs
         run: ./scripts/build-plugin-package.sh
+
+      - name: Validate release packages
+        run: ./scripts/tests/package-regression.sh

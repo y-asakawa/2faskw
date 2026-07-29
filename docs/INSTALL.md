@@ -956,6 +956,9 @@ sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/api.properties
 graphicalmatrix.api.enabled = false
 ```
 
+### graphicalsフォルダのイメージファイルは利用しないでください。
+
+graphicalsフォルダにあるイメージファイルは公開用のものです。本番環境では絶対に利用しないでください。また、イメージファイルはどこにも公開しないでください。
 
 ### MFAポリシーは `mfa-policy.properties` で設定します。
 

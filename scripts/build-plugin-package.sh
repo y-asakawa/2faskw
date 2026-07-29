@@ -6,7 +6,42 @@ cd "$ROOT_DIR"
 
 MVN="${MVN:-mvn}"
 PYTHON="${PYTHON:-python3}"
+GPG="${GPG:-gpg}"
 VERSION_CONFIG="${VERSION_CONFIG:-$ROOT_DIR/version.ini}"
+SIGN_RELEASE=0
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/build-plugin-package.sh [--sign]
+
+Options:
+  --sign  Sign all fixed-name and versioned release archives plus SHA256SUMS.
+          This option is for release maintainers with the configured secret key.
+  -h, --help
+          Show this help.
+
+Without --sign, the script builds unsigned archives and SHA256SUMS.
+EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --sign)
+      SIGN_RELEASE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 load_version_config() {
   if [[ ! -f "$VERSION_CONFIG" ]]; then
@@ -114,10 +149,6 @@ target.write_text(data, encoding="utf-8")
 PY
 }
 
-copy_versioned() {
-  render_template "$1" "$2"
-}
-
 load_version_config
 require_var VERSION
 require_var ARTIFACT_ID
@@ -128,10 +159,79 @@ require_var RELEASE_TAG
 require_var PLUGIN_METADATA_URL
 
 PUBLIC_SIGNING_KEY_FILE="$ROOT_DIR/bootstrap/keys.txt"
+RELEASE_FINGERPRINT_FILE="${RELEASE_FINGERPRINT_FILE:-$ROOT_DIR/release/keys/RELEASE-KEY-FINGERPRINT.txt}"
 if [[ ! -s "$PUBLIC_SIGNING_KEY_FILE" ]] \
   || ! grep -q -- '-----BEGIN PGP PUBLIC KEY BLOCK-----' "$PUBLIC_SIGNING_KEY_FILE"; then
   echo "ERROR: public signing key not found or invalid: $PUBLIC_SIGNING_KEY_FILE" >&2
   exit 1
+fi
+
+RELEASE_FINGERPRINT=""
+
+primary_fingerprint_from_keyring() {
+  local homedir="$1"
+  "$GPG" --homedir "$homedir" --batch --with-colons --fingerprint 2>/dev/null \
+    | awk -F: '
+        $1 == "pub" { want = 1; next }
+        want && $1 == "fpr" { print toupper($10); exit }
+      '
+}
+
+validate_signing_configuration() {
+  command -v "$GPG" >/dev/null 2>&1 || {
+    echo "ERROR: gpg is required for --sign" >&2
+    exit 1
+  }
+  [[ -s "$RELEASE_FINGERPRINT_FILE" ]] || {
+    echo "ERROR: release fingerprint file is missing or empty: $RELEASE_FINGERPRINT_FILE" >&2
+    exit 1
+  }
+
+  RELEASE_FINGERPRINT="$(tr -d '[:space:]' < "$RELEASE_FINGERPRINT_FILE" | tr '[:lower:]' '[:upper:]')"
+  [[ "$RELEASE_FINGERPRINT" =~ ^[0-9A-F]{40}$ ]] || {
+    echo "ERROR: release fingerprint must be exactly 40 hexadecimal characters" >&2
+    exit 1
+  }
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if ! git diff --quiet --ignore-submodules -- \
+      || ! git diff --cached --quiet --ignore-submodules --; then
+      echo "ERROR: tracked working-tree changes must be committed before --sign" >&2
+      exit 1
+    fi
+  fi
+
+  local verify_home public_fingerprint secret_fingerprint
+  verify_home="$(mktemp -d)"
+  chmod 0700 "$verify_home"
+  if ! "$GPG" --homedir "$verify_home" --batch --import "$PUBLIC_SIGNING_KEY_FILE" >/dev/null 2>&1; then
+    rm -rf "$verify_home"
+    echo "ERROR: unable to import the public release key: $PUBLIC_SIGNING_KEY_FILE" >&2
+    exit 1
+  fi
+  public_fingerprint="$(primary_fingerprint_from_keyring "$verify_home")"
+  rm -rf "$verify_home"
+  if [[ "$public_fingerprint" != "$RELEASE_FINGERPRINT" ]]; then
+    echo "ERROR: public release key fingerprint does not match the configured fingerprint" >&2
+    echo "expected=$RELEASE_FINGERPRINT" >&2
+    echo "actual=${public_fingerprint:-missing}" >&2
+    exit 1
+  fi
+
+  secret_fingerprint="$("$GPG" --batch --with-colons --list-secret-keys "$RELEASE_FINGERPRINT" 2>/dev/null \
+    | awk -F: '
+        $1 == "sec" { want = 1; next }
+        want && $1 == "fpr" { print toupper($10); exit }
+      ')"
+  if [[ "$secret_fingerprint" != "$RELEASE_FINGERPRINT" ]]; then
+    echo "ERROR: matching secret release key is not available" >&2
+    echo "expected=$RELEASE_FINGERPRINT" >&2
+    exit 1
+  fi
+}
+
+if [[ "$SIGN_RELEASE" == "1" ]]; then
+  validate_signing_configuration
 fi
 
 "$MVN" -B -ntp -Drevision="$VERSION" -Dplugin.metadata.url="$PLUGIN_METADATA_URL" clean package
@@ -164,6 +264,7 @@ CHECKSUM_SIGNATURE_FILE="$CHECKSUM_FILE.asc"
 ADMIN_DIST_ROOT="$ROOT_DIR/target/admin-dist"
 ADMIN_DIST_DIR="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME"
 ADMIN_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME.zip"
+ADMIN_PUBLIC_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_ARTIFACT_ID.zip"
 
 rm -rf \
   "$DIST_DIR" \
@@ -178,7 +279,10 @@ rm -rf \
   "$CHECKSUM_FILE" \
   "$CHECKSUM_SIGNATURE_FILE" \
   "$ADMIN_DIST_DIR" \
-  "$ADMIN_ZIP_FILE"
+  "$ADMIN_ZIP_FILE" \
+  "$ADMIN_ZIP_FILE.asc" \
+  "$ADMIN_PUBLIC_ZIP_FILE" \
+  "$ADMIN_PUBLIC_ZIP_FILE.asc"
 mkdir -p \
   "$DIST_DIR/webapp/WEB-INF/lib" \
   "$DIST_DIR/bootstrap" \
@@ -311,7 +415,6 @@ mkdir -p \
   "$ADMIN_DIST_DIR/bin" \
   "$ADMIN_DIST_DIR/lib" \
   "$ADMIN_DIST_DIR/conf/graphicalmatrix" \
-  "$ADMIN_DIST_DIR/docs" \
   "$ADMIN_DIST_DIR/examples/systemd" \
   "$ADMIN_DIST_DIR/package-metadata"
 
@@ -340,28 +443,7 @@ cp postgresql-schema.sql "$ADMIN_DIST_DIR/conf/graphicalmatrix/postgresql-schema
 cp examples/systemd/graphicalmatrix-csv-import.path "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.path"
 cp examples/systemd/graphicalmatrix-csv-import.service "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.service"
 
-copy_versioned docs/ADMIN-TOOLS.md "$ADMIN_DIST_DIR/docs/ADMIN-TOOLS.md"
-copy_versioned docs/CONFIG-REFERENCE.md "$ADMIN_DIST_DIR/docs/CONFIG-REFERENCE.md"
-copy_versioned docs/FAQ.md "$ADMIN_DIST_DIR/docs/FAQ.md"
-copy_versioned docs/UPGRADE.md "$ADMIN_DIST_DIR/docs/UPGRADE.md"
-copy_versioned docs/CSV-EXPORT.md "$ADMIN_DIST_DIR/docs/CSV-EXPORT.md"
-copy_versioned docs/DB-MIGRATION.md "$ADMIN_DIST_DIR/docs/DB-MIGRATION.md"
-copy_versioned docs/SEQUENCE-STORAGE-MIGRATION.md "$ADMIN_DIST_DIR/docs/SEQUENCE-STORAGE-MIGRATION.md"
-copy_versioned docs/SECURITY-UPGRADE-1.1.0.md "$ADMIN_DIST_DIR/docs/SECURITY-UPGRADE-1.1.0.md"
-copy_versioned docs/SECURITY.md "$ADMIN_DIST_DIR/docs/SECURITY.md"
-copy_versioned docs/SECURITY-CHECKLIST.md "$ADMIN_DIST_DIR/docs/SECURITY-CHECKLIST.md"
-
-cat > "$ADMIN_DIST_DIR/README.md" <<EOF
-# 2FAS-KW Admin Tools ${VERSION}
-
-This package installs only the 2FAS-KW management CLI.
-It does not modify Shibboleth IdP web.xml, Jetty, or IdP plugin files.
-
-License and third-party notices are included in LICENSE, NOTICE, and
-THIRD-PARTY-NOTICES.md.
-
-See docs/ADMIN-TOOLS.md.
-EOF
+render_template plugin-metadata/ADMIN-PACKAGE-README.md.in "$ADMIN_DIST_DIR/README.md"
 
 (
   cd "$ADMIN_DIST_DIR"
@@ -393,5 +475,242 @@ with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr(info, handle.read())
 PY
 
+cp "$ADMIN_ZIP_FILE" "$ADMIN_PUBLIC_ZIP_FILE"
+if ! cmp -s "$ADMIN_ZIP_FILE" "$ADMIN_PUBLIC_ZIP_FILE"; then
+  echo "ERROR: fixed-name and versioned Admin Tools ZIP files differ" >&2
+  exit 1
+fi
+
+"$PYTHON" - "$ADMIN_PUBLIC_ZIP_FILE" "$ADMIN_BASE_NAME" <<'PY'
+import pathlib
+import re
+import stat
+import sys
+import zipfile
+
+archive = pathlib.Path(sys.argv[1])
+expected_root = sys.argv[2]
+required = {
+    f"{expected_root}/README.md",
+    f"{expected_root}/LICENSE",
+    f"{expected_root}/NOTICE",
+    f"{expected_root}/THIRD-PARTY-NOTICES.md",
+    f"{expected_root}/bin/graphicalmatrix-db.sh",
+    f"{expected_root}/bin/graphicalmatrix-admin-install.sh",
+    f"{expected_root}/bin/graphicalmatrix-csv-import-runner.sh",
+    f"{expected_root}/package-metadata/PACKAGE-CONTENTS.txt",
+    f"{expected_root}/package-metadata/PACKAGE-MANIFEST.sha256",
+}
+forbidden_parts = {".git", ".github", "credentials", "target", "__MACOSX"}
+forbidden_suffixes = (".csv", ".log", ".swp", ".tmp", ".bak")
+private_markers = (
+    b"-----BEGIN PRIVATE KEY-----",
+    b"-----BEGIN RSA PRIVATE KEY-----",
+    b"-----BEGIN EC PRIVATE KEY-----",
+    b"-----BEGIN OPENSSH PRIVATE KEY-----",
+    b"-----BEGIN PGP PRIVATE KEY BLOCK-----",
+)
+direct_secret = re.compile(
+    rb"(?m)^[ \t]*(?![#;])"
+    rb"(?:graphicalmatrix[.]db[.]password"
+    rb"|graphicalmatrix[.]sequence[.](?:keyword|aesKey|pepper)"
+    rb"|graphicalmatrix[.]totp[.]seed[.](?:keyword|aesKey)"
+    rb"|graphicalmatrix[.](?:webauthn[.])?ldap[.]bindCredential)"
+    rb"[ \t]*=[ \t]*\S+"
+)
+
+seen = set()
+with zipfile.ZipFile(archive) as zf:
+    infos = zf.infolist()
+    if len(infos) > 512:
+        raise SystemExit("Admin Tools ZIP contains too many entries")
+    if sum(info.file_size for info in infos) > 256 * 1024 * 1024:
+        raise SystemExit("Admin Tools ZIP uncompressed size exceeds 256 MiB")
+    for info in infos:
+        name = info.filename
+        path = pathlib.PurePosixPath(name)
+        if name in seen:
+            raise SystemExit(f"duplicate ZIP entry: {name}")
+        seen.add(name)
+        if path.is_absolute() or ".." in path.parts:
+            raise SystemExit(f"unsafe ZIP entry: {name}")
+        if not path.parts or path.parts[0] != expected_root:
+            raise SystemExit(f"unexpected ZIP root: {name}")
+        if len(path.parts) > 1 and path.parts[1] == "docs":
+            raise SystemExit(f"detailed documentation must not be bundled: {name}")
+        if any(part in forbidden_parts for part in path.parts):
+            raise SystemExit(f"forbidden ZIP path: {name}")
+        if path.name in {".DS_Store", "Thumbs.db"} or path.name.startswith("._"):
+            raise SystemExit(f"local filesystem artifact in ZIP: {name}")
+        if path.name.lower().endswith(forbidden_suffixes):
+            raise SystemExit(f"forbidden file type in ZIP: {name}")
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(mode):
+            raise SystemExit(f"symlink is not allowed in ZIP: {name}")
+        data = zf.read(info)
+        if any(marker in data for marker in private_markers):
+            raise SystemExit(f"private key material marker found in ZIP: {name}")
+        if "/conf/graphicalmatrix/" in name and direct_secret.search(data):
+            raise SystemExit(f"direct secret property found in ZIP: {name}")
+
+missing = sorted(required - seen)
+if missing:
+    raise SystemExit("required Admin Tools ZIP entries are missing: " + ", ".join(missing))
+
+with zipfile.ZipFile(archive) as zf:
+    readme = zf.read(f"{expected_root}/README.md").decode("utf-8")
+required_document_urls = {
+    "https://github.com/y-asakawa/2faskw/blob/main/docs/ADMIN-TOOLS.md",
+    "https://github.com/y-asakawa/2faskw/blob/main/docs/CONFIG-REFERENCE.md",
+    "https://github.com/y-asakawa/2faskw/blob/main/docs/UPGRADE.md",
+    "https://github.com/y-asakawa/2faskw/blob/main/docs/SECURITY.md",
+}
+missing_urls = sorted(url for url in required_document_urls if url not in readme)
+if missing_urls:
+    raise SystemExit("Admin Tools README is missing document URLs: " + ", ".join(missing_urls))
+PY
+
+sha256_digest() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    shasum -a 256 "$file" | awk '{print $1}'
+  fi
+}
+
+{
+  printf '%s  %s\n' "$(sha256_digest "$TAR_GZ_FILE")" "$(basename "$TAR_GZ_FILE")"
+  printf '%s  %s\n' "$(sha256_digest "$ZIP_FILE")" "$(basename "$ZIP_FILE")"
+  printf '%s  %s\n' "$(sha256_digest "$ADMIN_PUBLIC_ZIP_FILE")" "$(basename "$ADMIN_PUBLIC_ZIP_FILE")"
+} > "$CHECKSUM_FILE"
+
+verify_checksums() {
+  local check_dir
+  check_dir="$(mktemp -d)"
+  cp "$TAR_GZ_FILE" "$ZIP_FILE" "$ADMIN_PUBLIC_ZIP_FILE" "$CHECKSUM_FILE" "$check_dir/"
+  (
+    cd "$check_dir"
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c SHA256SUMS
+    else
+      shasum -a 256 -c SHA256SUMS
+    fi
+  )
+  rm -rf "$check_dir"
+}
+
+sign_artifact() {
+  local artifact="$1"
+  rm -f "$artifact.asc"
+  "$GPG" \
+    --armor \
+    --detach-sign \
+    --local-user "$RELEASE_FINGERPRINT" \
+    --output "$artifact.asc" \
+    "$artifact"
+}
+
+verify_signature() {
+  local verify_home="$1"
+  local artifact="$2"
+  local status_file valid_fingerprint
+  status_file="$(mktemp "$verify_home/status.XXXXXX")"
+  if ! "$GPG" \
+    --homedir "$verify_home" \
+    --batch \
+    --status-fd 3 \
+    --verify "$artifact.asc" "$artifact" \
+    3>"$status_file"; then
+    echo "ERROR: detached signature verification failed: $artifact" >&2
+    return 1
+  fi
+  valid_fingerprint="$(awk '
+      $1 == "[GNUPG:]" && $2 == "VALIDSIG" {
+        fingerprint = (length($12) == 40 ? $12 : $3)
+        print toupper(fingerprint)
+        exit
+      }
+    ' "$status_file")"
+  if [[ "$valid_fingerprint" != "$RELEASE_FINGERPRINT" ]]; then
+    echo "ERROR: signature fingerprint mismatch: $artifact" >&2
+    echo "expected=$RELEASE_FINGERPRINT" >&2
+    echo "actual=${valid_fingerprint:-missing}" >&2
+    return 1
+  fi
+}
+
+verify_release_signatures() {
+  local verify_home artifact
+  verify_home="$(mktemp -d)"
+  chmod 0700 "$verify_home"
+  if ! "$GPG" --homedir "$verify_home" --batch --import "$PUBLIC_SIGNING_KEY_FILE" >/dev/null 2>&1; then
+    rm -rf "$verify_home"
+    echo "ERROR: unable to import public release key for verification" >&2
+    exit 1
+  fi
+  for artifact in \
+    "$TAR_GZ_FILE" \
+    "$ZIP_FILE" \
+    "$ADMIN_PUBLIC_ZIP_FILE" \
+    "$VERSIONED_TAR_GZ_FILE" \
+    "$VERSIONED_ZIP_FILE" \
+    "$ADMIN_ZIP_FILE" \
+    "$CHECKSUM_FILE"; do
+    if ! verify_signature "$verify_home" "$artifact"; then
+      rm -rf "$verify_home"
+      exit 1
+    fi
+  done
+  rm -rf "$verify_home"
+}
+
+verify_checksums
+
+if [[ "$SIGN_RELEASE" == "1" ]]; then
+  SIGNING_ARTIFACTS=(
+    "$TAR_GZ_FILE"
+    "$ZIP_FILE"
+    "$ADMIN_PUBLIC_ZIP_FILE"
+    "$VERSIONED_TAR_GZ_FILE"
+    "$VERSIONED_ZIP_FILE"
+    "$ADMIN_ZIP_FILE"
+    "$CHECKSUM_FILE"
+  )
+  SIGNING_COMPLETE=0
+  cleanup_failed_signing() {
+    if [[ "$SIGNING_COMPLETE" != "1" ]]; then
+      local artifact
+      for artifact in "${SIGNING_ARTIFACTS[@]}"; do
+        rm -f "$artifact.asc"
+      done
+    fi
+  }
+  trap cleanup_failed_signing EXIT
+  trap 'exit 1' HUP INT TERM
+
+  for artifact in "${SIGNING_ARTIFACTS[@]}"; do
+    sign_artifact "$artifact"
+  done
+  verify_release_signatures
+  SIGNING_COMPLETE=1
+  trap - EXIT HUP INT TERM
+
+  for artifact in "${SIGNING_ARTIFACTS[@]}"; do
+    printf 'signed_artifact=%s size_bytes=%s sha256=%s\n' \
+      "$artifact" \
+      "$(wc -c < "$artifact" | tr -d '[:space:]')" \
+      "$(sha256_digest "$artifact")"
+  done
+fi
+
 echo "admin_dist_dir=$ADMIN_DIST_DIR"
 echo "admin_zip=$ADMIN_ZIP_FILE"
+echo "admin_public_zip=$ADMIN_PUBLIC_ZIP_FILE"
+echo "release_checksums=$CHECKSUM_FILE"
+if [[ "$SIGN_RELEASE" == "1" ]]; then
+  echo "release_signatures=generated_and_verified"
+  echo "release_signing_fingerprint=$RELEASE_FINGERPRINT"
+else
+  echo "release_signatures=not_generated"
+fi
