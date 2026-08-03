@@ -1,0 +1,31 @@
+# Disabled until node ID, source, Dashboard URL, and mTLS files are reviewed.
+agent.enabled = false
+agent.nodeId = idp-node-01
+agent.source = /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+agent.statePath = /var/lib/2faskw-dashboard-agent/state
+agent.spoolPath = /var/lib/2faskw-dashboard-agent/spool
+agent.spoolMaxBytes = 268435456
+agent.pollMillis = 500
+# Send collection-path health even when no authentication event is generated.
+agent.heartbeatSeconds = 60
+
+agent.dashboardUrl = https://dashboard.example.org:9443/2faskw-dashboard/ingest/v1/events
+agent.tls.keyStore = /etc/2faskw-dashboard-agent/credentials/idp-node-01.p12
+agent.tls.keyStorePasswordFile = /etc/2faskw-dashboard-agent/credentials/idp-node-01.password
+agent.tls.trustStore = /etc/2faskw-dashboard-agent/credentials/dashboard-ca.p12
+agent.tls.trustStorePasswordFile = /etc/2faskw-dashboard-agent/credentials/dashboard-ca.password
+
+agent.batch.maxEvents = 250
+agent.batch.flushMillis = 2000
+agent.connectTimeoutMillis = 3000
+agent.requestTimeoutMillis = 10000
+agent.retry.initialMillis = 1000
+agent.retry.maxMillis = 60000
+
+# User IDs are sent over mTLS for operational identification. Use hmac or drop if required.
+agent.privacy.userMode = plain
+# Source IP addresses are sent over mTLS. Use prefix or drop if required.
+agent.privacy.ipMode = plain
+# Required only when userMode=hmac. Use a Dashboard-specific random key.
+#agent.privacy.hmacKeyFile = /etc/2faskw-dashboard-agent/credentials/user-hmac.key
+agent.reasonMappingFile = /etc/2faskw-dashboard-agent/reason-mapping.properties

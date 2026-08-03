@@ -1,0 +1,45 @@
+# Disabled until authentication, storage, and mTLS settings are reviewed.
+dashboard.enabled = false
+
+dashboard.http.bindAddress = 127.0.0.1
+dashboard.http.port = 9080
+dashboard.http.basePath = /2faskw-dashboard
+
+dashboard.storage.path = /var/lib/2faskw-dashboard/dashboard
+dashboard.storage.retentionDays = 30
+dashboard.storage.aggregateRetentionDays = 90
+
+dashboard.query.defaultHours = 24
+dashboard.query.maxRangeDays = 100
+dashboard.query.pageSize = 100
+dashboard.query.maxPageSize = 500
+dashboard.query.maxExportRows = 10000
+dashboard.export.enabled = false
+
+# Production default: trust authentication headers only from the local reverse proxy.
+dashboard.auth.mode = proxy
+dashboard.auth.trustedProxies = 127.0.0.1/32,::1/128
+dashboard.auth.remoteUserHeader = X-Remote-User
+dashboard.auth.roleHeader = X-2FASKW-Role
+dashboard.auth.rolesFile = /etc/2faskw-dashboard/roles.properties
+
+# Local management-network mode. These values are ignored unless auth.mode=local.
+# Bind to a specific interface address and list every permitted IPv4/IPv6 CIDR.
+dashboard.auth.localAllowedCIDRs =
+dashboard.auth.localRole = DASHBOARD_VIEWER
+
+# Ingest uses a separate HTTPS listener and always requires a client certificate.
+dashboard.ingest.enabled = true
+dashboard.ingest.bindAddress = 0.0.0.0
+dashboard.ingest.port = 9443
+dashboard.ingest.requireMtls = true
+dashboard.ingest.maxBatchEvents = 500
+dashboard.ingest.maxRequestBytes = 1048576
+dashboard.ingest.allowedClockSkewSeconds = 300
+dashboard.ingest.keyStore = /etc/2faskw-dashboard/credentials/dashboard-server.p12
+dashboard.ingest.keyStorePasswordFile = /etc/2faskw-dashboard/credentials/dashboard-server.password
+dashboard.ingest.trustStore = /etc/2faskw-dashboard/credentials/dashboard-agent-ca.p12
+dashboard.ingest.trustStorePasswordFile = /etc/2faskw-dashboard/credentials/dashboard-agent-ca.password
+
+dashboard.health.staleEventSeconds = 900
+dashboard.health.parseFailureWarningCount = 1

@@ -1,0 +1,34 @@
+# 2FAS-KW Standalone Dashboard @VERSION@
+
+このZIPには、現行の`graphicalmatrix-audit.log`を参照専用で可視化するDashboard Service、
+Dashboard Agent、オフラインimport CLIが含まれます。Shibboleth IdPプラグイン本体とは別プロセスで
+動作し、MFA保存DB、LDAP、IdP管理APIへ接続しません。
+
+## 最初の確認
+
+公開鍵、detached signature、`SHA256SUMS`を使用してZIPを検証してから展開してください。
+
+導入は最初にdry-runで確認します。
+
+```bash
+sudo ./bin/2faskw-dashboard-install.sh --mode server \
+  --prefix /opt/2faskw-dashboard
+```
+
+反映する場合だけ`--apply`を追加します。インストーラーはsystemd unitを自動的に有効化・起動しません。
+
+設定後、起動前検査を実行します。
+
+```bash
+/opt/2faskw-dashboard/bin/2faskw-dashboard.sh check
+```
+
+Dashboardは既定で無効です。Web UIはloopbackで待ち受け、本番ではApache HTTP Serverと
+Shibboleth SPなどの認証proxyで保護してください。Agentの送信にはmTLSが必須です。
+
+## 詳細文書
+
+- Dashboard: https://github.com/y-asakawa/2faskw/blob/main/docs/DASHBOARD.md
+- Installation: https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL.md
+- Build: https://github.com/y-asakawa/2faskw/blob/main/docs/build.md
+- Security: https://github.com/y-asakawa/2faskw/blob/main/docs/SECURITY.md

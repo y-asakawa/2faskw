@@ -229,3 +229,10 @@ sudo systemctl is-active jetty-idp.service
 
 Plugin更新とロールバックは[UPGRADE.md](./UPGRADE.md)、画面HTML/CSSの編集は[FAQ.md](./FAQ.md)、
 管理APIは[API-CURL-TESTS.md](./API-CURL-TESTS.md)を参照する。
+
+### Standalone Dashboard
+
+`2faskw-dashboard.zip`は、現行の`graphicalmatrix-audit.log`を可視化する参照専用の独立配布物である。
+IdPとは別プロセスで動作し、DashboardからMFA保存DB、LDAP、IdP管理APIへ接続しない。
+別サーバ構成、Agent、mTLS、オフラインimport、認証proxyの詳細は
+[DASHBOARD.md](./DASHBOARD.md)を参照する。

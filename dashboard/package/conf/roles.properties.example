@@ -1,0 +1,3 @@
+# Map authenticated remote users to one read-only Dashboard role.
+# dashboard-operator=DASHBOARD_OPERATOR
+# security-auditor=DASHBOARD_AUDITOR

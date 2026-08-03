@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2FAS-KW Dashboard</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="product">2FAS-KW</p>
+      <h1>Operations Dashboard</h1>
+    </div>
+    <div class="header-status">
+      <span id="collection-state" class="status status-neutral">確認中</span>
+      <span id="last-updated">-</span>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Dashboard views">
+    <button class="tab active" data-view="overview">運用概要</button>
+    <button class="tab" data-view="authentication">GraphicalMatrix認証</button>
+    <button class="tab" data-view="self-service">登録・自己管理</button>
+    <button class="tab" data-view="admin-api">管理API</button>
+    <button class="tab" data-view="ingest">収集状態</button>
+    <button class="tab" data-view="events">イベント検索</button>
+  </nav>
+
+  <main>
+    <section class="toolbar" aria-label="表示期間">
+      <div class="segmented" role="group" aria-label="期間">
+        <button data-hours="1">1時間</button>
+        <button data-hours="6">6時間</button>
+        <button class="active" data-hours="24">24時間</button>
+        <button data-hours="168">7日</button>
+        <button data-hours="336">14日</button>
+        <button data-hours="720">30日</button>
+        <button data-hours="1440">60日</button>
+        <button id="custom-range-toggle" type="button">カスタム</button>
+      </div>
+      <form id="custom-range-form" class="custom-range-form hidden">
+        <label for="custom-range-from">開始</label>
+        <input id="custom-range-from" name="from" type="datetime-local"
+          step="60" required>
+        <span>から</span>
+        <label for="custom-range-to">終了</label>
+        <input id="custom-range-to" name="to" type="datetime-local"
+          step="60" required>
+        <span>まで</span>
+        <button type="submit">適用</button>
+        <span id="custom-range-timezone" class="timezone-label"></span>
+      </form>
+      <button id="refresh" class="icon-button" title="更新" aria-label="更新">&#8635;</button>
+    </section>
+
+    <div id="error" class="message error hidden" role="alert"></div>
+
+    <section id="view-overview" class="view active">
+      <div class="metric-grid">
+        <article class="metric"><span>GraphicalMatrix成功</span><strong id="metric-success">-</strong></article>
+        <article class="metric"><span>入力不一致</span><strong id="metric-failure">-</strong></article>
+        <article class="metric"><span>失敗率</span><strong id="metric-rate">-</strong></article>
+        <article class="metric"><span>ロック関連</span><strong id="metric-locked">-</strong></article>
+        <article class="metric"><span>DBエラー</span><strong id="metric-db-error">-</strong></article>
+        <article class="metric"><span>自己管理認証成功</span><strong id="metric-self-service">-</strong></article>
+      </div>
+      <div class="insight-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2 id="mismatch-users-heading">入力不一致 上位3ユーザー</h2>
+            <form id="mismatch-limit-form" class="panel-inline-form">
+              <label for="mismatch-limit">表示件数</label>
+              <input id="mismatch-limit" name="limit" type="number"
+                min="1" max="100" step="1" value="3" required>
+              <span>件</span>
+              <button type="submit">反映</button>
+            </form>
+          </div>
+          <div id="mismatch-users"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading">
+            <h2 id="source-network-heading">送信元IP 認証試行 上位3件</h2>
+            <form id="source-network-limit-form" class="panel-inline-form">
+              <label for="source-network-limit">表示件数</label>
+              <input id="source-network-limit" name="limit" type="number"
+                min="1" max="100" step="1" value="3" required>
+              <span>件</span>
+              <button type="submit">反映</button>
+            </form>
+          </div>
+          <div id="source-networks"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading">
+            <h2 id="source-network-mismatch-heading">送信元IP 入力不一致 上位3件</h2>
+          </div>
+          <div id="source-network-mismatches"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>現在ロック中のユーザー</h2>
+            <span id="locked-users-count">ログから推定</span>
+          </div>
+          <div id="locked-users"></div>
+        </section>
+      </div>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>イベント内訳</h2>
+          <span id="overview-range"></span>
+        </div>
+        <div id="event-bars" class="event-bars"></div>
+      </section>
+    </section>
+
+    <section id="view-authentication" class="view">
+      <section class="panel">
+        <div class="panel-heading"><h2>GraphicalMatrix認証イベント</h2></div>
+        <div id="authentication-table"></div>
+      </section>
+    </section>
+
+    <section id="view-self-service" class="view">
+      <section class="panel">
+        <div class="panel-heading"><h2>登録・自己管理イベント</h2></div>
+        <div id="self-service-table"></div>
+      </section>
+    </section>
+
+    <section id="view-admin-api" class="view">
+      <section class="panel">
+        <div class="panel-heading"><h2>管理APIイベント</h2></div>
+        <p class="notice">管理CLI、CSV import、直接SQL操作は含まれません。</p>
+        <div id="admin-api-table"></div>
+      </section>
+    </section>
+
+    <section id="view-ingest" class="view">
+      <section class="panel">
+        <div class="panel-heading"><h2>Node別収集状態</h2></div>
+        <div id="ingest-table"></div>
+      </section>
+    </section>
+
+    <section id="view-events" class="view">
+      <section class="panel">
+        <div class="panel-heading"><h2>イベント検索</h2></div>
+        <form id="event-filter" class="filters">
+          <label for="event-filter-field">検索項目
+            <select id="event-filter-field" name="field">
+              <option value="node">Node</option>
+              <option value="event">Event</option>
+              <option value="result">Result</option>
+              <option value="reason">Reason</option>
+              <option value="user">ユーザーID</option>
+              <option value="ip">IPアドレス</option>
+            </select>
+          </label>
+          <label for="event-filter-value">検索値
+            <input id="event-filter-value" name="value" type="text"
+              maxlength="64" autocomplete="off"
+              placeholder="検索する値を入力">
+          </label>
+          <label class="checkbox-filter">
+            <input type="checkbox" name="regex">
+            正規表現（RE2、大小区別）
+          </label>
+          <button type="submit">検索</button>
+        </form>
+        <div id="events-table"></div>
+        <button id="next-events" class="secondary hidden">次の100件</button>
+      </section>
+    </section>
+
+    <p class="scope-note">
+      現行2FAS-KW監査ログのみを対象とします。通常TOTP/WebAuthn認証、SP別集計、
+      IdP Passwordを含む全SAML認証件数は取得対象外です。
+    </p>
+  </main>
+</body>
+</html>
