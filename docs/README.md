@@ -79,6 +79,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOGROTATE.md](./LOGROTATE.md) | GraphicalMatrix audit log の logrotate 設定例。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
+| [release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md) | IdPローカルでSP metadata、属性リリース、SP別MFA方針を管理するCLIの設計と運用手順。 |
 
 ## API
 
@@ -173,6 +174,23 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export /secure/path/graph
 スタンドアロンのAdmin Toolsを導入している場合は、同じCLIを
 `/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh`から実行する。管理CLI、CSV形式、
 WebAuthn credentialの管理、保存方式移行の詳細は[ADMIN-TOOLS.md](./ADMIN-TOOLS.md)を参照する。
+
+### SP追加管理CLI
+
+v1.2.7以降は、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
+SP別MFA方針を一括管理できる。初期状態では無効であり、設定を有効化して初期化するまで
+IdP設定を変更しない。SP管理用HTTP APIは提供しない。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+```
+
+追加・更新コマンドは既定でdry-runとなる。metadataのentityID、ACS、証明書fingerprint、
+SHA-256を確認し、承認したdigestを指定してから`--apply`する。詳しい導入・更新・無効化・
+復元手順は[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md)を参照する。SP管理CLIはIdP本体パッケージ
+だけに含み、単体のAdmin Toolsパッケージには含めない。
 
 ### LDAP保存時の管理
 

@@ -113,6 +113,7 @@ public final class GraphicalMatrixConfigCheckTool {
         checkSaveData(idpHome, properties);
         checkStorage(idpHome, config, properties);
         checkMfaPolicy(idpHome);
+        checkSpManagement(idpHome);
 
         summary();
         return failures == 0 ? 0 : 1;
@@ -307,6 +308,59 @@ public final class GraphicalMatrixConfigCheckTool {
             intersection(policy.forceSPs(), policy.bypassSpEntityIds()));
         warnMfaPolicyOverlap("bypassSPs and requiredSPs",
             intersection(policy.bypassSPs(), policy.requiredSPs()));
+    }
+
+    private void checkSpManagement(final String idpHome) {
+        final Path configPath = Path.of(idpHome, "conf", "graphicalmatrix",
+            "sp-management.properties");
+        if (!Files.isRegularFile(configPath)) {
+            ok("SP management CLI is not configured");
+            return;
+        }
+
+        final GraphicalMatrixSpManagementConfig spConfig;
+        try {
+            spConfig = GraphicalMatrixSpManagementConfig.load(idpHome);
+        } catch (Exception ex) {
+            fail("SP management configuration invalid: " + rootMessage(ex));
+            return;
+        }
+        if (!spConfig.enabled()) {
+            ok("SP management CLI is disabled");
+            return;
+        }
+
+        try {
+            if (GraphicalMatrixSpXmlConfig.hasManagedProvider(spConfig.metadataProvidersPath())) {
+                ok("SP managed metadata provider configured: "
+                    + GraphicalMatrixSpXmlConfig.PROVIDER_ID);
+            } else {
+                fail("SP management is enabled but managed metadata provider is missing");
+            }
+            if (GraphicalMatrixSpXmlConfig.hasManagedAttributeBlock(spConfig.attributeFilterPath())) {
+                ok("SP managed attribute filter block configured");
+            } else {
+                fail("SP management is enabled but managed attribute filter block is missing");
+            }
+        } catch (Exception ex) {
+            fail("SP management XML configuration invalid: " + rootMessage(ex));
+        }
+
+        try {
+            final GraphicalMatrixSpRegistry registry =
+                GraphicalMatrixSpRegistry.load(spConfig.registryPath());
+            ok("SP management registry valid: entries=" + registry.entries().size());
+        } catch (Exception ex) {
+            fail("SP management registry invalid: " + rootMessage(ex));
+        }
+
+        if (!Files.isDirectory(spConfig.managedMetadataDirectory())) {
+            fail("SP managed metadata directory is missing: " + spConfig.managedMetadataDirectory());
+        } else if (!Files.isReadable(spConfig.managedMetadataDirectory())) {
+            fail("SP managed metadata directory is unreadable: " + spConfig.managedMetadataDirectory());
+        } else {
+            ok("SP managed metadata directory readable: " + spConfig.managedMetadataDirectory());
+        }
     }
 
     private void warnMfaPolicyOverlap(final String label, final Set<String> overlap) {

@@ -334,6 +334,7 @@ sed \
   -e 's/^[[:space:]]*graphicalmatrix[.]api[.]enabled[[:space:]]*=.*/graphicalmatrix.api.enabled = false/' \
   api.properties > "$DIST_DIR/conf/graphicalmatrix/api.properties.idpnew"
 cp mfa-policy.properties "$DIST_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
+cp sp-management.properties "$DIST_DIR/conf/graphicalmatrix/sp-management.properties.idpnew"
 cp postgresql-schema.sql "$DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
 cp webauthn.properties "$DIST_DIR/conf/authn/webauthn.properties.idpnew"
 cp webauthn-registration.properties "$DIST_DIR/conf/authn/webauthn-registration.properties.idpnew"
@@ -346,7 +347,9 @@ done
 cp graphicals/* "$DIST_DIR/conf/graphicalmatrix/graphicals/"
 
 cp graphicalmatrix-db.sh "$DIST_DIR/bin/graphicalmatrix-db.sh"
+cp graphicalmatrix-sp.sh "$DIST_DIR/bin/graphicalmatrix-sp.sh"
 chmod 0755 "$DIST_DIR/bin/graphicalmatrix-db.sh"
+chmod 0755 "$DIST_DIR/bin/graphicalmatrix-sp.sh"
 cp scripts/graphicalmatrix-db-migration.sh "$DIST_DIR/bin/graphicalmatrix-db-migration.sh"
 cp scripts/graphicalmatrix-api-token.sh "$DIST_DIR/bin/graphicalmatrix-api-token.sh"
 cp scripts/graphicalmatrix-security-upgrade.sh "$DIST_DIR/bin/graphicalmatrix-security-upgrade.sh"

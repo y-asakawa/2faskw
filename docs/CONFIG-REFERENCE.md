@@ -152,6 +152,25 @@ SP単位/IP単位でMFA要否を制御する。
 | `graphicalmatrix.mfa.bypassCIDRs` | CIDR list | empty | MFAを回避するCIDR。 | 広すぎる範囲にしない。 |
 | `graphicalmatrix.mfa.useForwardedFor` | boolean | `false` | `X-Forwarded-For` / `X-Real-IP` を参照。 | `true`または`false`。リバースプロキシ/LB経由のみの接続が保証され、プロキシが送信元IPヘッダを上書きする場合のみtrue。直接接続が可能ならfalse固定。 |
 
+## sp-management.properties
+
+IdPサーバ上のローカルSP管理CLIを制御する。管理APIやWeb UIは提供しない。
+
+| Property | Type | Default / Example | Description | Notes |
+| --- | --- | --- | --- | --- |
+| `graphicalmatrix.sp.management.enabled` | boolean | `false` | SP管理CLIの更新操作を有効化する。 | `status`、`list`、`next`などの読取操作は無効時も利用できる。 |
+| `graphicalmatrix.sp.metadata.allowedHosts` | FQDN list | empty | metadata URLとして接続を許可するFQDN。 | カンマ区切り。HTTPSのみ。IP literal、redirect、credential、query、fragmentは拒否する。 |
+| `graphicalmatrix.sp.metadata.allowedAcsHosts` | FQDN list | empty | ACS URLとして許可するFQDN。 | metadataファイルを登録する場合は必須。metadata URLのhostは自動的にACS候補へ追加される。 |
+| `graphicalmatrix.sp.metadata.maxBytes` | bytes | `1048576` | metadataの最大読込サイズ。 | `4096`から`10485760`。 |
+| `graphicalmatrix.sp.metadata.connectTimeoutSeconds` | seconds | `5` | metadata URL接続timeout。 | `1`から`60`。 |
+| `graphicalmatrix.sp.metadata.readTimeoutSeconds` | seconds | `10` | metadata URL読込timeout。 | `1`から`120`。 |
+| `graphicalmatrix.sp.reload.enabled` | boolean | `true` | 反映後にIdP metadata/attribute filter serviceをreloadする。 | 本番はtrue。offline試験時だけfalse。 |
+| `graphicalmatrix.sp.reload.baseUrl` | URL | empty | Shibboleth管理flowを呼び出すbase URL。 | 空の場合はShibboleth既定の`http://localhost/idp`。IdPをlocalhost:80で公開しない構成では、例として`http://127.0.0.1:8080/idp`を指定する。外部公開URLは指定しない。 |
+| `graphicalmatrix.sp.revision.retentionDays` | days | `180` | SP単位revisionの保持日数。 | `1`から`3650`。adopt元の最初のrevisionは保持する。 |
+| `graphicalmatrix.sp.revision.maxPerSp` | count | `50` | SP単位revisionの最大保持数。 | `1`から`500`。 |
+| `graphicalmatrix.sp.backup.retentionDays` | days | `30` | 更新transaction全体のbackup保持日数。 | `1`から`3650`。次回の更新操作開始時に期限切れを削除する。 |
+| `graphicalmatrix.sp.attributeProfile.<name>` | attribute list | none | 承認済みcustom属性profile。 | password、sequence、TOTP、WebAuthn、credential、adminを含むIDは拒否する。 |
+
 `policyOrder`はプロパティファイルの行順ではなく、この値に列挙した左から順に評価する。
 `bypassNetwork`は`bypassIPs`と`bypassCIDRs`を1つの評価単位として扱う。
 IdP自己管理フローはこの順序の対象外で、常にMFAを要求する。

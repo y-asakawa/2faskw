@@ -9,6 +9,7 @@
 - v1.0.x から v1.2.0 へ更新する場合の段階的な確認
 - v1.2.3 から v1.2.4 への更新
 - v1.2.4 から v1.2.5 への更新
+- v1.2.6 から v1.2.7 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -21,6 +22,7 @@
 | v1.0.x | v1.2.0 | v1.1.0の必須対応を先に完了し、その後v1.2.0差分を反映 | LDAP保存へ切り替える場合は別途移行計画を作成 |
 | v1.2.3 | v1.2.4 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | IdP自己管理フローの有効化、従来LDAP変更経路の停止 |
 | v1.2.4 | v1.2.5 | 旧JAR削除、ロックアウト4設定の追加、WAR再構築、設定検査 | 通常・最大ロック時間の調整 |
+| v1.2.6 | v1.2.7 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboard導入、SP追加管理CLIの有効化 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -43,6 +45,10 @@ v1.2.4では、Password + 現在のMFA方式による強制再認証後に変更
 
 v1.2.5では、GraphicalMatrix画像列照合のロック条件を設定化し、通常ロックと最大ロックの
 二段階制御を追加します。既定では5回目から15分、10回目以降は30日ロックされます。
+
+v1.2.7では、Dashboardの別配布に加えて、IdPローカルでSP metadata、属性リリース、SP別MFA
+方針を管理するCLIを本体パッケージへ追加します。SP管理CLIは既定で無効であり、更新だけで
+既存のmetadata設定やSP別MFA方針を変更しません。SP管理用HTTP APIは追加されません。
 
 ## 事前確認
 
@@ -204,6 +210,7 @@ ldap.properties.idpnew.TIMESTAMP
 webauthn-ldap.properties.idpnew.TIMESTAMP
 api.properties.idpnew.TIMESTAMP
 mfa-policy.properties.idpnew.TIMESTAMP
+sp-management.properties.idpnew.TIMESTAMP
 authn/webauthn.properties.idpnew.TIMESTAMP
 authn/webauthn-registration.properties.idpnew.TIMESTAMP
 authn/webauthn-metadata.properties.idpnew.TIMESTAMP
@@ -620,6 +627,179 @@ LDAP保存の場合は、設定した失敗回数属性とロック期限属性�
 v1.2.4へロールバックしても、DBまたはLDAPに保存済みの `failed_count` と
 `locked_until` は自動的に短縮されません。v1.2.5で30日ロックされたテストユーザーは、
 必要に応じて管理者がunlockしてからロールバックします。v1.2.4は新しい4設定を無視します。
+
+## v1.2.6からv1.2.7への追加手順
+
+v1.2.7では、本体パッケージにSP追加管理CLIを追加します。CLIはIdPサーバ上でroot権限により
+実行し、SP管理用のHTTP API、管理Web UI、listener port、API tokenは追加しません。
+Dashboardは従来どおり別パッケージであり、本体更新だけでは導入されません。
+
+更新スクリプトが配置した次のテンプレートを確認します。
+
+```bash
+sudo find /opt/shibboleth-idp/conf/graphicalmatrix \
+  -name 'sp-management.properties.idpnew*' \
+  -type f \
+  -print
+
+sudo ls -l /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh
+```
+
+新規ファイルとして配置された場合も、既定値は次のとおりです。この状態では`status`、`list`、
+`next`などの読み取りは利用できますが、`--apply`を伴う更新は拒否され、既存IdP設定は変わりません。
+
+```properties
+graphicalmatrix.sp.management.enabled = false
+```
+
+SP管理CLIを利用しない環境は、この既定値のまま通常の設定検査と認証回帰試験へ進みます。
+利用する環境だけ、[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md)に従ってmetadata取得元とACSの
+FQDNを許可し、管理機能を有効化します。
+
+```properties
+graphicalmatrix.sp.management.enabled = true
+graphicalmatrix.sp.metadata.allowedHosts = new-sp.example.org
+graphicalmatrix.sp.metadata.allowedAcsHosts = new-sp.example.org
+```
+
+初回は既存SPを変更しない`status`と`next`を確認し、管理用metadata providerと属性filter blockを
+dry-runしてから適用します。
+
+IdPが`http://localhost:80/idp`で待ち受けていない場合は、`init --apply`より前に
+`/opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties`へ、実際のloopback listenerを
+指定します。`/status`や`/profile`を末尾に付けず、IdP context pathまでを指定します。
+
+```properties
+graphicalmatrix.sp.reload.baseUrl = http://127.0.0.1:8080/idp
+```
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh init
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh init --apply
+```
+
+`init --apply`は`metadata-providers.xml`と`attribute-filter.xml`を原子的に更新し、変更前の
+バックアップを`credentials/graphicalmatrix/sp-management-backups/`へ保存します。初期化後だけ
+Jettyを1回再起動します。初期版v1.2.7が作成した`conf/graphicalmatrix/sp-management-revisions/`
+または`sp-management-backups/`が存在する場合、更新後のCLIは`credentials/graphicalmatrix/`配下へ
+自動移動します。旧配置と新配置の両方が存在する場合は、内容を確認して手動で統合してください。
+
+初期化直後に手動で`reload-metadata.sh`を実行する必要はありません。`add --apply`、`adopt --apply`、
+`update --apply`が成功時にmanaged metadata providerを自動reloadします。
+
+初期版v1.2.7が`metadata-providers.xml`へ作成した
+`id="2FAS-KWManagedSPMetadata"`は、数字で始まるためXMLの`NCName`として無効です。更新後の
+`init --apply`は、この旧IDを`id="GraphicalMatrixManagedSPMetadata"`へ自動移行します。旧IDにより
+`shibboleth.MetadataResolverService`の初期化がすでに失敗している場合も、移行後にJettyを再起動
+してください。`reload-metadata.sh`だけでは、初期化に失敗したresolverを復旧できません。
+
+```bash
+sudo systemctl restart jetty-idp.service
+sudo systemctl is-active jetty-idp.service
+curl --noproxy '*' -fsSI http://127.0.0.1:8080/idp/status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+```
+
+### 既存の手作業登録SPをCLI管理へ移行する場合
+
+既存SPは更新しただけでは変更されない。CLI管理へ移行しないSPは、そのまま既存の
+`FilesystemMetadataProvider`設定で運用できる。`init --apply`は管理用metadata provider、
+attribute filter block、管理台帳を初期化するだけであり、既存SPを自動的に移行しない。
+
+移行するSPだけ、1件ずつ`adopt`を実行する。最初に対象SPが一意な既存ローカルSPとして検出される
+ことを確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status \
+  --entity-id 'https://existing-sp.example.org/shibboleth'
+```
+
+出力が`EXISTING_LOCAL`かつ`FilesystemMetadataProvider`であることを確認する。`MANAGED`、
+`DUPLICATE`、`INVALID_METADATA`、または複数行が表示された場合は移行せず、metadata sourceの
+重複やXMLエラーを先に解消する。
+
+`FilesystemMetadataProvider`はmetadataファイルをJetty実行ユーザーが読めない場合にfail-fastで
+初期化を停止し、`MetadataResolverService`全体を利用不能にする。移行前に、次の手順で
+`status`出力の`metadata_file=`から実パスを自動取得する。
+
+```bash
+# 対象SPのentityIDを指定し、statusが表示するmetadata_fileを自動取得する。
+ENTITY_ID='https://existing-sp.example.org/shibboleth'
+METADATA_FILE="$(sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status \
+  --entity-id "$ENTITY_ID" | awk -F= \
+  '/^[[:space:]]*metadata_file=/{print $2; exit}')"
+
+sudo test -f "$METADATA_FILE" || {
+  echo "ERROR: status did not return an existing metadata_file for: $ENTITY_ID" >&2
+  exit 1
+}
+printf 'metadata_file=%s\n' "$METADATA_FILE"
+
+# jettyは標準的なJetty実行ユーザーであり、実環境で異なる場合は置き換える。
+sudo chown root:jetty "$METADATA_FILE"
+sudo chmod 0640 "$METADATA_FILE"
+sudo restorecon -v "$METADATA_FILE"
+sudo -u jetty test -r "$METADATA_FILE" && \
+  echo 'OK: Jetty can read existing SP metadata'
+```
+
+読み取り検査に失敗した場合は`adopt`を実行しない。すでに`MetadataResolverService`が停止した場合は、
+権限を直した後にJettyを再起動してから`status`を再確認する。
+
+```bash
+sudo systemctl restart jetty-idp.service
+curl --noproxy '*' -fsSI http://127.0.0.1:8080/idp/status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+```
+
+既存metadataをファイルから読み取るため、metadata内のACS FQDNを
+`graphicalmatrix.sp.metadata.allowedAcsHosts`に追加する。`adopt`ではmetadata URLを取得しないため、
+`allowedHosts`への追加は不要である。既存値は残してカンマ区切りで追記する。
+
+```properties
+graphicalmatrix.sp.metadata.allowedAcsHosts = existing-sp.example.org
+```
+
+次に、変更しないdry-runを実行する。`NAME`には管理用の一意な名前を指定する。`status`に表示された
+`SOURCE`（既存のmetadata provider ID）は`NAME`ではないため、その値をそのまま指定してはいけない。
+使用可能な文字は`[a-z0-9][a-z0-9-]{0,62}`であり、先頭を数字にできる。例えば、ローカル検証SPなら
+`local-test-sp`、業務SPなら`library-portal`のような小文字の管理名を付ける。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh adopt existing-sp \
+  --entity-id 'https://existing-sp.example.org/shibboleth'
+```
+
+表示された`source_provider`、`metadata_sha256`、`attribute_profile`、`mfa_profile`を確認する。
+`attribute_profile=none`は、このSPに対してCLIが追加で属性をreleaseしないことを表す。必要な属性が
+ある場合は、移行前に属性release方針を確認する。
+
+内容が正しい場合だけ、entityIDを完全一致で指定して適用する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh adopt existing-sp \
+  --entity-id 'https://existing-sp.example.org/shibboleth' \
+  --apply \
+  --confirm 'https://existing-sp.example.org/shibboleth'
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh verify existing-sp
+```
+
+`adopt`は旧providerと旧metadataファイルを管理用metadata providerと管理台帳へ移行し、移行前の
+状態をrevisionとして保存する。SP自体のentityID、証明書、ACSを変更する操作ではない。移行後は
+対象SPから実際にログインし、属性releaseとMFA方針が従来どおりであることを確認する。必要なら
+`restore-legacy`で手作業登録状態へ戻せる。
+
+新規SPの追加は必ずdry-runを先に行い、表示されたentityID、ACS、証明書fingerprint、metadataの
+SHA-256をSP管理者から得た値と照合します。一致したdigestを`--approve-sha256`へ指定した場合だけ
+`--apply`します。詳しい追加、更新、無効化、adopt、rollback、restore-legacy手順は
+[v1.2.7 SP管理CLI設計](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md)を参照してください。
+
+SP管理CLIを無効へ戻す場合は、まずCLI管理SPの状態と復元要否を確認してから、設定を
+`false`へ戻します。`false`への変更だけでは、既に配置したmetadataや属性・MFA方針は削除されません。
 
 ***
 ***

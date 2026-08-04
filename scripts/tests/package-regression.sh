@@ -58,6 +58,41 @@ cp \
   fi
 )
 
+"$PYTHON" - "$PLUGIN_DIST/2faskw-idp-plugin.zip" "2faskw-idp-plugin-$VERSION" <<'PY'
+import pathlib
+import stat
+import sys
+import zipfile
+
+archive = pathlib.Path(sys.argv[1])
+expected_root = sys.argv[2]
+required = {
+    f"{expected_root}/bin/graphicalmatrix-sp.sh",
+    f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew",
+}
+with zipfile.ZipFile(archive) as zf:
+    names = set(zf.namelist())
+    missing = sorted(required - names)
+    if missing:
+        raise SystemExit("SP management package entries are missing: " + ", ".join(missing))
+    mode = (zf.getinfo(f"{expected_root}/bin/graphicalmatrix-sp.sh").external_attr >> 16) & 0xFFFF
+    if not mode & stat.S_IXUSR:
+        raise SystemExit("SP management CLI is not executable")
+    config = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew"
+    ).decode("utf-8")
+    if "graphicalmatrix.sp.management.enabled = false" not in config:
+        raise SystemExit("SP management CLI must be disabled by default")
+    if "graphicalmatrix.sp.reload.baseUrl =" not in config:
+        raise SystemExit("SP management reload base URL setting is missing")
+    cli = zf.read(f"{expected_root}/bin/graphicalmatrix-sp.sh").decode("utf-8")
+    if "IDP_BASE_URL" not in cli or "graphicalmatrix.sp.reload.baseUrl" not in cli:
+        raise SystemExit("SP management CLI does not configure the reload base URL")
+    readme = zf.read(f"{expected_root}/README.md").decode("utf-8")
+    if "https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL_NEW_SP.md" not in readme:
+        raise SystemExit("SP management documentation URL is missing from package README")
+PY
+
 "$PYTHON" - "$ADMIN_FIXED" "$ADMIN_ROOT" <<'PY'
 import hashlib
 import pathlib
@@ -112,6 +147,8 @@ with zipfile.ZipFile(archive) as zf:
     missing = sorted(required - set(names))
     if missing:
         raise SystemExit("required entries are missing: " + ", ".join(missing))
+    if any(pathlib.PurePosixPath(name).name == "graphicalmatrix-sp.sh" for name in names):
+        raise SystemExit("SP management CLI must not be bundled in Admin Tools")
 
     readme = zf.read(f"{expected_root}/README.md").decode("utf-8")
     required_document_urls = {
