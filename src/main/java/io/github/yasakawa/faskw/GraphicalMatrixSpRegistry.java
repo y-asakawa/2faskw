@@ -27,14 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 final class GraphicalMatrixSpRegistry {
-    private static final Pattern FIELD = Pattern.compile(
-        "\\\"([A-Za-z][A-Za-z0-9]*)\\\"\\s*:\\s*(\\\"(?:\\\\.|[^\\\"])*\\\"|-?[0-9]+|true|false|null|\\[(?:\\s*\\\"(?:\\\\.|[^\\\"])*\\\"\\s*,?)*])");
-    private static final Pattern ARRAY_STRING = Pattern.compile("\\\"((?:\\\\.|[^\\\"])*)\\\"");
-
     record Entry(String name, String entityId, String status, String source, String metadataSha256,
                  String metadataFile, List<String> certificateFingerprints, List<String> acsUrls,
                  String attributeProfile, String mfaProfile, List<String> cidrs,
@@ -98,7 +92,7 @@ final class GraphicalMatrixSpRegistry {
             return empty();
         }
         final String json = Files.readString(path, StandardCharsets.UTF_8);
-        if (!json.contains("\"schemaVersion\"") || !json.matches("(?s).*\"schemaVersion\"\\s*:\\s*1.*")) {
+        if (!hasSchemaVersionOne(json)) {
             throw new IOException("unsupported or missing SP registry schemaVersion");
         }
         final LinkedHashMap<String, Entry> values = new LinkedHashMap<>();
@@ -286,13 +280,135 @@ final class GraphicalMatrixSpRegistry {
 
     private static Map<String, String> fields(final String object) throws IOException {
         final Map<String, String> out = new LinkedHashMap<>();
-        final Matcher matcher = FIELD.matcher(object);
-        while (matcher.find()) {
-            if (out.putIfAbsent(matcher.group(1), matcher.group(2)) != null) {
-                throw new IOException("duplicate field in SP registry: " + matcher.group(1));
+        int offset = skipWhitespace(object, 0);
+        while (offset < object.length()) {
+            if (object.charAt(offset) != '"') {
+                throw new IOException("expected JSON field name in SP registry");
             }
+            final int keyEnd = stringEnd(object, offset);
+            final String key = unescape(object.substring(offset + 1, keyEnd - 1));
+            offset = skipWhitespace(object, keyEnd);
+            if (offset >= object.length() || object.charAt(offset) != ':') {
+                throw new IOException("expected ':' after JSON field name: " + key);
+            }
+            offset = skipWhitespace(object, offset + 1);
+            final int valueStart = offset;
+            offset = valueEnd(object, offset);
+            if (out.putIfAbsent(key, object.substring(valueStart, offset)) != null) {
+                throw new IOException("duplicate field in SP registry: " + key);
+            }
+            offset = skipWhitespace(object, offset);
+            if (offset == object.length()) {
+                break;
+            }
+            if (object.charAt(offset) != ',') {
+                throw new IOException("expected ',' after JSON field: " + key);
+            }
+            offset = skipWhitespace(object, offset + 1);
         }
         return out;
+    }
+
+    private static boolean hasSchemaVersionOne(final String json) {
+        final int key = json.indexOf("\"schemaVersion\"");
+        if (key < 0) {
+            return false;
+        }
+        int offset = skipWhitespace(json, key + "\"schemaVersion\"".length());
+        if (offset >= json.length() || json.charAt(offset) != ':') {
+            return false;
+        }
+        offset = skipWhitespace(json, offset + 1);
+        if (offset >= json.length() || json.charAt(offset) != '1') {
+            return false;
+        }
+        offset = skipWhitespace(json, offset + 1);
+        return offset == json.length() || json.charAt(offset) == ',' || json.charAt(offset) == '}';
+    }
+
+    private static int valueEnd(final String value, final int offset) throws IOException {
+        if (offset >= value.length()) {
+            throw new IOException("missing JSON field value in SP registry");
+        }
+        return switch (value.charAt(offset)) {
+            case '"' -> stringEnd(value, offset);
+            case '[' -> arrayEnd(value, offset);
+            case 't' -> literalEnd(value, offset, "true");
+            case 'f' -> literalEnd(value, offset, "false");
+            case 'n' -> literalEnd(value, offset, "null");
+            default -> numberEnd(value, offset);
+        };
+    }
+
+    private static int arrayEnd(final String value, final int start) throws IOException {
+        int offset = skipWhitespace(value, start + 1);
+        if (offset < value.length() && value.charAt(offset) == ']') {
+            return offset + 1;
+        }
+        while (true) {
+            if (offset >= value.length() || value.charAt(offset) != '"') {
+                throw new IOException("SP registry arrays must contain JSON strings");
+            }
+            offset = skipWhitespace(value, stringEnd(value, offset));
+            if (offset >= value.length()) {
+                throw new IOException("unterminated JSON array in SP registry");
+            }
+            if (value.charAt(offset) == ']') {
+                return offset + 1;
+            }
+            if (value.charAt(offset) != ',') {
+                throw new IOException("expected ',' in JSON array in SP registry");
+            }
+            offset = skipWhitespace(value, offset + 1);
+        }
+    }
+
+    private static int literalEnd(final String value, final int start, final String literal)
+            throws IOException {
+        if (!value.startsWith(literal, start)) {
+            throw new IOException("invalid JSON literal in SP registry");
+        }
+        return start + literal.length();
+    }
+
+    private static int numberEnd(final String value, final int start) throws IOException {
+        int offset = value.charAt(start) == '-' ? start + 1 : start;
+        final int digits = offset;
+        while (offset < value.length() && Character.isDigit(value.charAt(offset))) {
+            offset++;
+        }
+        if (digits == offset) {
+            throw new IOException("invalid JSON number in SP registry");
+        }
+        return offset;
+    }
+
+    private static int stringEnd(final String value, final int start) throws IOException {
+        for (int offset = start + 1; offset < value.length(); offset++) {
+            final char item = value.charAt(offset);
+            if (item == '"') {
+                return offset + 1;
+            }
+            if (item == '\\') {
+                offset++;
+                if (offset >= value.length()) {
+                    break;
+                }
+                continue;
+            }
+            if (item < 0x20) {
+                throw new IOException("unescaped control character in JSON string");
+            }
+        }
+        throw new IOException("unterminated JSON string in SP registry");
+    }
+
+    private static int skipWhitespace(final String value, final int offset) {
+        int current = offset;
+        while (current < value.length() && Character.isWhitespace(value.charAt(current))) {
+            current++;
+        }
+        return current;
     }
 
     private static String required(final Map<String, String> fields, final String key) {
@@ -316,11 +432,39 @@ final class GraphicalMatrixSpRegistry {
             return List.of();
         }
         final List<String> out = new ArrayList<>();
-        final Matcher matcher = ARRAY_STRING.matcher(raw);
-        while (matcher.find()) {
-            out.add(unescape(matcher.group(1)));
+        int offset = skipWhitespace(raw, 0);
+        if (offset >= raw.length() || raw.charAt(offset) != '[') {
+            throw new IllegalArgumentException("expected JSON string array");
         }
-        return List.copyOf(out);
+        offset = skipWhitespace(raw, offset + 1);
+        if (offset < raw.length() && raw.charAt(offset) == ']') {
+            return List.of();
+        }
+        while (offset < raw.length()) {
+            if (raw.charAt(offset) != '"') {
+                throw new IllegalArgumentException("expected JSON string array item");
+            }
+            final int end;
+            try {
+                end = stringEnd(raw, offset);
+            } catch (IOException ex) {
+                throw new IllegalArgumentException(ex.getMessage(), ex);
+            }
+            out.add(unescape(raw.substring(offset + 1, end - 1)));
+            offset = skipWhitespace(raw, end);
+            if (offset < raw.length() && raw.charAt(offset) == ']') {
+                offset = skipWhitespace(raw, offset + 1);
+                if (offset != raw.length()) {
+                    throw new IllegalArgumentException("unexpected content after JSON array");
+                }
+                return List.copyOf(out);
+            }
+            if (offset >= raw.length() || raw.charAt(offset) != ',') {
+                throw new IllegalArgumentException("expected ',' in JSON string array");
+            }
+            offset = skipWhitespace(raw, offset + 1);
+        }
+        throw new IllegalArgumentException("unterminated JSON string array");
     }
 
     private static void string(final StringBuilder out, final String key, final String value,
