@@ -98,6 +98,7 @@ keys = [
     "VERSION",
     "ARTIFACT_ID",
     "ADMIN_ARTIFACT_ID",
+    "DASHBOARD_ARTIFACT_ID",
     "PLUGIN_ID",
     "PLUGIN_NAME",
     "SUPPORT_LEVEL",
@@ -115,6 +116,7 @@ keys = [
     "BASE_NAME",
     "PLUGIN_ARCHIVE_BASE_NAME",
     "ADMIN_BASE_NAME",
+    "DASHBOARD_BASE_NAME",
     "RUNTIME_LIBRARIES",
 ]
 for key in keys:
@@ -123,6 +125,7 @@ for key in keys:
 version = os.environ["VERSION"]
 base_name = os.environ["BASE_NAME"]
 admin_base_name = os.environ["ADMIN_BASE_NAME"]
+dashboard_base_name = os.environ["DASHBOARD_BASE_NAME"]
 data = data.replace("${project.version}", version)
 data = data.replace("${plugin.metadata.url}", os.environ["PLUGIN_METADATA_URL"])
 version_pattern = r"[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?"
@@ -130,12 +133,14 @@ version_pattern = r"[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?"
 # Keep source docs readable while making packaged docs version-correct.
 data = re.sub(r"2faskw-idp-plugin-" + version_pattern, base_name, data)
 data = re.sub(r"2faskw-admin-tools-" + version_pattern, admin_base_name, data)
+data = re.sub(r"2faskw-dashboard-" + version_pattern, dashboard_base_name, data)
 data = re.sub(r"(?m)^(\s*version:\s*)" + version_pattern + r"\s*$", r"\g<1>" + version, data)
 data = re.sub(r"(?m)^(plugin\.version\s*=\s*)" + version_pattern + r"\s*$", r"\g<1>" + version, data)
 data = re.sub(r"(/shibboleth/plugins/2faskw/)" + version_pattern + r"(/)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.downloadURL\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.baseName\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.adminToolsBaseName\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
+data = re.sub(r"(\.dashboardBaseName\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.idpVersionMin\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.idpVersionMax\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
 data = re.sub(r"(\.supportLevel\.)" + version_pattern + r"(\s*=)", r"\g<1>" + version + r"\2", data)
@@ -153,6 +158,7 @@ load_version_config
 require_var VERSION
 require_var ARTIFACT_ID
 require_var ADMIN_ARTIFACT_ID
+require_var DASHBOARD_ARTIFACT_ID
 require_var PLUGIN_ID
 require_var DOWNLOAD_BASE_URL
 require_var RELEASE_TAG
@@ -247,12 +253,20 @@ if [[ "$MAVEN_ARTIFACT_ID" != "$ARTIFACT_ID" ]]; then
   exit 1
 fi
 
+MVN="$MVN" \
+PYTHON="$PYTHON" \
+VERSION_CONFIG="$VERSION_CONFIG" \
+  "$ROOT_DIR/scripts/build-dashboard-package.sh"
+
 BASE_NAME="${ARTIFACT_ID}-${VERSION}"
 PLUGIN_ARCHIVE_BASE_NAME="$ARTIFACT_ID"
 ADMIN_BASE_NAME="${ADMIN_ARTIFACT_ID}-${VERSION}"
+DASHBOARD_BASE_NAME="${DASHBOARD_ARTIFACT_ID}-${VERSION}"
 DOWNLOAD_URL="${DOWNLOAD_BASE_URL%/}/${RELEASE_TAG}/"
 RUNTIME_LIBRARIES="$(find target/plugin-lib -maxdepth 1 -type f -name '*.jar' -exec basename {} \; | sort | paste -sd, -)"
-export VERSION ARTIFACT_ID ADMIN_ARTIFACT_ID BASE_NAME PLUGIN_ARCHIVE_BASE_NAME ADMIN_BASE_NAME DOWNLOAD_URL RUNTIME_LIBRARIES
+export VERSION ARTIFACT_ID ADMIN_ARTIFACT_ID DASHBOARD_ARTIFACT_ID
+export BASE_NAME PLUGIN_ARCHIVE_BASE_NAME ADMIN_BASE_NAME DASHBOARD_BASE_NAME
+export DOWNLOAD_URL RUNTIME_LIBRARIES
 DIST_ROOT="$ROOT_DIR/target/plugin-dist"
 DIST_DIR="$DIST_ROOT/$BASE_NAME"
 ZIP_FILE="$DIST_ROOT/$PLUGIN_ARCHIVE_BASE_NAME.zip"
@@ -265,6 +279,9 @@ ADMIN_DIST_ROOT="$ROOT_DIR/target/admin-dist"
 ADMIN_DIST_DIR="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME"
 ADMIN_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_BASE_NAME.zip"
 ADMIN_PUBLIC_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_ARTIFACT_ID.zip"
+DASHBOARD_DIST_ROOT="$ROOT_DIR/target/dashboard-dist"
+DASHBOARD_ZIP_FILE="$DASHBOARD_DIST_ROOT/$DASHBOARD_BASE_NAME.zip"
+DASHBOARD_PUBLIC_ZIP_FILE="$DASHBOARD_DIST_ROOT/$DASHBOARD_ARTIFACT_ID.zip"
 
 rm -rf \
   "$DIST_DIR" \
@@ -317,6 +334,7 @@ sed \
   -e 's/^[[:space:]]*graphicalmatrix[.]api[.]enabled[[:space:]]*=.*/graphicalmatrix.api.enabled = false/' \
   api.properties > "$DIST_DIR/conf/graphicalmatrix/api.properties.idpnew"
 cp mfa-policy.properties "$DIST_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
+cp sp-management.properties "$DIST_DIR/conf/graphicalmatrix/sp-management.properties.idpnew"
 cp postgresql-schema.sql "$DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
 cp webauthn.properties "$DIST_DIR/conf/authn/webauthn.properties.idpnew"
 cp webauthn-registration.properties "$DIST_DIR/conf/authn/webauthn-registration.properties.idpnew"
@@ -329,7 +347,9 @@ done
 cp graphicals/* "$DIST_DIR/conf/graphicalmatrix/graphicals/"
 
 cp graphicalmatrix-db.sh "$DIST_DIR/bin/graphicalmatrix-db.sh"
+cp graphicalmatrix-sp.sh "$DIST_DIR/bin/graphicalmatrix-sp.sh"
 chmod 0755 "$DIST_DIR/bin/graphicalmatrix-db.sh"
+chmod 0755 "$DIST_DIR/bin/graphicalmatrix-sp.sh"
 cp scripts/graphicalmatrix-db-migration.sh "$DIST_DIR/bin/graphicalmatrix-db-migration.sh"
 cp scripts/graphicalmatrix-api-token.sh "$DIST_DIR/bin/graphicalmatrix-api-token.sh"
 cp scripts/graphicalmatrix-security-upgrade.sh "$DIST_DIR/bin/graphicalmatrix-security-upgrade.sh"
@@ -583,12 +603,19 @@ sha256_digest() {
   printf '%s  %s\n' "$(sha256_digest "$TAR_GZ_FILE")" "$(basename "$TAR_GZ_FILE")"
   printf '%s  %s\n' "$(sha256_digest "$ZIP_FILE")" "$(basename "$ZIP_FILE")"
   printf '%s  %s\n' "$(sha256_digest "$ADMIN_PUBLIC_ZIP_FILE")" "$(basename "$ADMIN_PUBLIC_ZIP_FILE")"
+  printf '%s  %s\n' "$(sha256_digest "$DASHBOARD_PUBLIC_ZIP_FILE")" "$(basename "$DASHBOARD_PUBLIC_ZIP_FILE")"
 } > "$CHECKSUM_FILE"
 
 verify_checksums() {
   local check_dir
   check_dir="$(mktemp -d)"
-  cp "$TAR_GZ_FILE" "$ZIP_FILE" "$ADMIN_PUBLIC_ZIP_FILE" "$CHECKSUM_FILE" "$check_dir/"
+  cp \
+    "$TAR_GZ_FILE" \
+    "$ZIP_FILE" \
+    "$ADMIN_PUBLIC_ZIP_FILE" \
+    "$DASHBOARD_PUBLIC_ZIP_FILE" \
+    "$CHECKSUM_FILE" \
+    "$check_dir/"
   (
     cd "$check_dir"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -653,9 +680,11 @@ verify_release_signatures() {
     "$TAR_GZ_FILE" \
     "$ZIP_FILE" \
     "$ADMIN_PUBLIC_ZIP_FILE" \
+    "$DASHBOARD_PUBLIC_ZIP_FILE" \
     "$VERSIONED_TAR_GZ_FILE" \
     "$VERSIONED_ZIP_FILE" \
     "$ADMIN_ZIP_FILE" \
+    "$DASHBOARD_ZIP_FILE" \
     "$CHECKSUM_FILE"; do
     if ! verify_signature "$verify_home" "$artifact"; then
       rm -rf "$verify_home"
@@ -672,9 +701,11 @@ if [[ "$SIGN_RELEASE" == "1" ]]; then
     "$TAR_GZ_FILE"
     "$ZIP_FILE"
     "$ADMIN_PUBLIC_ZIP_FILE"
+    "$DASHBOARD_PUBLIC_ZIP_FILE"
     "$VERSIONED_TAR_GZ_FILE"
     "$VERSIONED_ZIP_FILE"
     "$ADMIN_ZIP_FILE"
+    "$DASHBOARD_ZIP_FILE"
     "$CHECKSUM_FILE"
   )
   SIGNING_COMPLETE=0
@@ -707,6 +738,9 @@ fi
 echo "admin_dist_dir=$ADMIN_DIST_DIR"
 echo "admin_zip=$ADMIN_ZIP_FILE"
 echo "admin_public_zip=$ADMIN_PUBLIC_ZIP_FILE"
+echo "dashboard_dist_dir=$DASHBOARD_DIST_ROOT/$DASHBOARD_BASE_NAME"
+echo "dashboard_zip=$DASHBOARD_ZIP_FILE"
+echo "dashboard_public_zip=$DASHBOARD_PUBLIC_ZIP_FILE"
 echo "release_checksums=$CHECKSUM_FILE"
 if [[ "$SIGN_RELEASE" == "1" ]]; then
   echo "release_signatures=generated_and_verified"

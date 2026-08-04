@@ -183,6 +183,235 @@ graphicalmatrix.lockout.maxLockSeconds = 2592000
 
 `graphicalmatrix.choice` を変更した場合は、既存ユーザーのsequence数も新しい設定に合わせる必要がある。
 
+## 手作業で登録済みのSPをSP管理CLIの対象へ移行するにはどうすればよいか
+
+既存SPは、v1.2.7へ更新しただけでは変更されない。CLI管理を使わないSPは、従来の
+`FilesystemMetadataProvider`設定のまま運用できる。`init --apply`は管理CLIの共通基盤を作るだけで、
+既存SPを自動的に移行しない。
+
+```
+# 現状のステータスを調査する
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+
+`EXISTING_LOCAL`　と表示されているSPがあれば手動登録
+```
+
+nextで次になにを行うべきかを調査する
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+```
+
+移行前に、`/opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties`を編集する。
+既存値を消さず、metadata内のACSホスト名を`allowedAcsHosts`へカンマ区切りで追加する。
+`adopt`では外部metadataを取得しないため、`allowedHosts`への追加は不要である。
+
+```properties
+graphicalmatrix.sp.management.enabled = true
+graphicalmatrix.sp.metadata.allowedAcsHosts = existing-sp.example.org
+
+# IdPがlocalhost:80で待ち受けていない場合だけ、実際のloopback listenerを指定する。
+graphicalmatrix.sp.reload.baseUrl = http://127.0.0.1:8080/idp
+```
+
+`existing-sp.example.org`はmetadataに記載されたACSのFQDNへ置き換える。複数SPがある場合は、既存値を
+残してカンマ区切りで追記する。`reload.baseUrl`には`/status`、`/profile`、外部公開URLを付けず、
+IdP context pathまでを指定する。IdPが`http://localhost:80/idp`で待ち受ける場合は、この行を空のままにする。
+
+ステータスを確認、HTTP/1.1 200 OKなど。間違っていたら、graphicalmatrix.sp.reload.baseUrlを修正すること。
+```
+curl --noproxy '*' -fsSI http://127.0.0.1:8080/idp/status
+```
+nextで次になにを行うべきかを調査する
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+```
+
+`adopt`の前に、管理基盤を一度だけ初期化する必要がある。`init --apply`の後は、metadata providerを
+実行中のIdPへ読み込ませるため、必ずJettyを再起動する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh init
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh init --apply
+sudo systemctl restart jetty-idp.service
+sleep 5
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+```
+
+### 初期化後のJetty再起動とmetadata reloadエラーを解消する
+
+`init --apply`は`metadata-providers.xml`を更新するが、実行中IdPには反映しない。このため、初期化後の
+Jetty再起動は必須である。次の待機ループでlistenerの起動完了を確認する。
+
+```bash
+sudo systemctl restart jetty-idp.service
+
+until curl --noproxy '*' -fsSI --connect-timeout 2 --max-time 5 \
+  http://127.0.0.1:8080/idp/status >/dev/null 2>&1; do
+  echo 'Waiting for Jetty...'
+  sleep 2
+done
+```
+
+通常はここまででよい。`adopt --apply`、新規SPの`add --apply`、metadata更新の`update --apply`は、
+成功時にCLI自身が`reload-metadata.sh`を実行するため、初期化直後に手動でreloadする必要はない。
+`graphicalmatrix.sp.reload.baseUrl`は、このCLI内の自動reloadの接続先として事前に設定する。
+
+次の手動reloadは、IdPのadmin reload endpoint、managed provider、および`reload.baseUrl`の接続先を
+事前確認したい場合、またはCLIがmetadata reloadエラーを出した場合だけ実行する。
+
+```bash
+sudo env IDP_BASE_URL='http://127.0.0.1:8080/idp' \
+  /opt/shibboleth-idp/bin/reload-metadata.sh \
+  -id GraphicalMatrixManagedSPMetadata
+```
+
+成功時は`Metadata reloaded for 'GraphicalMatrixManagedSPMetadata'`と表示される。手動reloadが失敗しても、
+まずJettyの起動完了と`metadata-providers.xml`の設定を確認する。
+
+エラー別の意味と対処は以下のとおりである。
+
+| エラー | 原因 | 対処 |
+| --- | --- | --- |
+| `http://localhost/idp ... 404 Not Found` | IdPがlocalhost:80で待ち受けていない。 | `graphicalmatrix.sp.reload.baseUrl`を`http://127.0.0.1:8080/idp`のような実際のloopback listenerへ設定する。 |
+| `Metadata source not found` | `init --apply`後のJetty再起動が未実施で、実行中IdPにmanaged providerがない。 | `metadata-providers.xml`に`GraphicalMatrixManagedSPMetadata`があることを確認し、Jettyを再起動してからreloadする。 |
+| `MetadataResolverService is unavailable` | いずれかのmetadata providerが起動時にfail-fastで失敗した。 | 次節の既存metadataファイルの読み取り検査を行い、修正後にJettyを再起動する。 |
+| `接続を拒否されました` | Jetty再起動直後で8080 listenerがまだ準備できていない、または起動失敗。 | 上記の待機ループで準備完了を確認する。待機が続く場合は`journalctl -u jetty-idp.service -n 160 --no-pager`を確認する。 |
+
+nextで次になにを行うべきかを調査する
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+```
+移行する場合は、対象SPを1件ずつ確認して`adopt`する。最初に既存SPとして一意に検出されることを
+確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status \
+  --entity-id 'https://existing-sp.example.org/shibboleth'
+```
+
+`STATUS`が`EXISTING_LOCAL`、`TYPE`が`FilesystemMetadataProvider`なら移行候補である。
+`DUPLICATE`、`INVALID_METADATA`、複数行、または`MANAGED`の場合は`adopt`せず、既存のmetadata設定を
+確認する。
+
+`FilesystemMetadataProvider`のmetadataファイルはJetty実行ユーザーが読み取れなければならない。
+読めない場合、対象SPだけでなく`MetadataResolverService`全体がfail-fastで停止する。次の手順は
+`status`出力の`metadata_file=`から実ファイルの絶対パスを自動取得する。
+
+```bash
+# 対象SPのentityIDを直接指定する。
+ENTITY_ID='https://existing-sp.example.org/shibboleth'
+
+#　このまま実行
+METADATA_FILE="$(sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status \
+  --entity-id "$ENTITY_ID" | awk -F= \
+  '/^[[:space:]]*metadata_file=/{print $2; exit}')"
+
+sudo test -f "$METADATA_FILE" || {
+  echo "ERROR: status did not return an existing metadata_file for: $ENTITY_ID" >&2
+  exit 1
+}
+printf 'metadata_file=%s\n' "$METADATA_FILE"
+
+# 2. IdPには読み取りだけを許可し、SELinux contextを復元する。
+sudo chown root:jetty "$METADATA_FILE"
+sudo chmod 0640 "$METADATA_FILE"
+sudo restorecon -v "$METADATA_FILE"
+
+# 3. Jettyとして読み取れることを確認する。
+sudo -u jetty test -r "$METADATA_FILE" && \
+  echo 'OK: Jetty can read existing SP metadata'
+```
+
+ここで失敗した場合は`adopt`を実行しない。すでにIdPが503やmetadata reloadエラーになっている場合は、
+上記を修正してからJettyを再起動する。
+
+```bash
+sudo systemctl restart jetty-idp.service
+curl --noproxy '*' -fsSI http://127.0.0.1:8080/idp/status
+```
+
+dry-runで移行内容を確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh adopt existing-sp \
+  --entity-id 'https://existing-sp.example.org/shibboleth'
+```
+
+`source_provider`、`metadata_sha256`、`attribute_profile`、`mfa_profile`を確認後、適用する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh adopt existing-sp \
+  --entity-id 'https://existing-sp.example.org/shibboleth' \
+  --apply \
+  --confirm 'https://existing-sp.example.org/shibboleth'
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh verify existing-sp
+```
+
+nextで次になにを行うべきかを調査する
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next
+```
+
+list を表示して登録されていることを確認する。
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+MANAGEDとなっていれば、登録済み。
+```
+
+`小文字と大文字に注意：existing-sp`は管理用の名前であり、実在するSP名に置き換える。`status`に表示された`SOURCE`は既存の
+metadata provider IDであり、管理名ではないため、そのまま指定しない。使用可能な形式は
+`[a-z0-9][a-z0-9-]{0,62}`である。移行後はSPからログインし、MFAと属性releaseを確認する。
+移行前の手作業状態へ戻す必要がある場合は、`restore-legacy`を使用する。
+
+## 2つ目以降のSPを追加するにはどうすればよいか
+
+`/opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties`の許可リストへ、既存のFQDNを
+残したまま新しいSPのFQDNをカンマ区切りで追加する。
+
+```properties
+graphicalmatrix.sp.management.enabled = true
+graphicalmatrix.sp.metadata.allowedHosts = new-sp.example.org,new-sp2.example.org
+graphicalmatrix.sp.metadata.allowedAcsHosts = new-sp.example.org,new-sp2.example.org
+```
+
+`graphicalmatrix-sp.sh add`はこのpropertiesを自動更新しない。許可リストは管理者が事前に定める
+信頼境界であり、CLI入力だけで外部接続先やACSの許可範囲を広げないためである。2つ目以降のSPでは
+`init --apply`を再実行する必要はない。
+
+最初にdry-runする。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh add \
+  --name new-sp2 \
+  --entity-id https://new-sp2.example.org/shibboleth \
+  --metadata-url https://new-sp2.example.org/Shibboleth.sso/Metadata \
+  --attribute-profile uid \
+  --mfa force
+```
+
+表示された`metadata_sha256`、entityID、ACS、証明書fingerprintを確認し、一致したdigestを指定して
+適用する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh add \
+  --name new-sp2 \
+  --entity-id https://new-sp2.example.org/shibboleth \
+  --metadata-url https://new-sp2.example.org/Shibboleth.sso/Metadata \
+  --attribute-profile uid \
+  --mfa force \
+  --approve-sha256 METADATA_SHA256 \
+  --apply
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh verify new-sp2
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+```
+
+propertiesの変更は次回のCLI起動から読み込まれるため、その変更だけを反映する目的でJettyを再起動
+する必要はない。詳しい確認項目は[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md)を参照する。
+
 ## SPごと、送信元IPごとにMFAの要否を変更するにはどうすればよいか
 
 次のファイルを編集する。

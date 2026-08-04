@@ -1,0 +1,26 @@
+[Unit]
+Description=2FAS-KW Dashboard Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=2faskw-dashboard-agent
+Group=2faskw-dashboard-agent
+ExecStart=/opt/2faskw-dashboard-agent/bin/2faskw-dashboard-agent.sh agent
+Restart=on-failure
+RestartSec=5s
+SuccessExitStatus=143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/shibboleth-idp/logs
+ReadWritePaths=/var/lib/2faskw-dashboard-agent
+MemoryMax=192M
+CPUQuota=25%
+TasksMax=64
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
