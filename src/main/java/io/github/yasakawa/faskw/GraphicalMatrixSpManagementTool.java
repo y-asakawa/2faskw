@@ -18,6 +18,7 @@ package io.github.yasakawa.faskw;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.FileSystems;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -67,6 +68,11 @@ public final class GraphicalMatrixSpManagementTool {
             final GraphicalMatrixSpManagementConfig config =
                 GraphicalMatrixSpManagementConfig.load(args[0]);
             final String command = args[1];
+            if ("access".equals(command) || "attributes".equals(command)) {
+                new GraphicalMatrixSpGovernanceTool(config).execute(command,
+                    Arrays.copyOfRange(args, 2, args.length));
+                return;
+            }
             final Options options = Options.parse(Arrays.copyOfRange(args, 2, args.length));
             if (MUTATING.contains(command) && options.apply() && !config.enabled()) {
                 throw new IllegalStateException(GraphicalMatrixSpManagementConfig.ENABLED
@@ -134,7 +140,8 @@ public final class GraphicalMatrixSpManagementTool {
     private void list(final Options options) throws Exception {
         options.allow(Set.of("format"), Set.of("all"));
         if (options.flag("all")) {
-            status(new Options(Map.of("format", options.value("format", "text")), Set.of(), List.of()));
+            status(new Options(Map.of("format", List.of(options.value("format", "text"))),
+                Set.of(), List.of()));
             return;
         }
         final GraphicalMatrixSpRegistry registry = registry();
@@ -239,6 +246,24 @@ public final class GraphicalMatrixSpManagementTool {
                             + "--approve-sha256 METADATA_SHA256 --apply"))));
             return;
         }
+        if (!config.accessEnabled()) {
+            printNext("ACCESS_NOT_INITIALIZED",
+                "SP attribute access control has not been initialized", "Next Steps", List.of(
+                    nextStep("Review the ContextCheck integration plan",
+                        cliCommand("access init"),
+                        "This dry-run does not modify the IdP."),
+                    nextStep("Apply the reviewed ContextCheck integration",
+                        cliCommand("access init --apply"),
+                        "A build and Jetty restart are required after this command.")));
+            return;
+        }
+        final GraphicalMatrixSpRegistry.Entry pending = registry.entries().stream()
+            .filter(entry -> "ACTIVE".equals(entry.status())
+                && !entry.accessPolicyEnabled()).findFirst().orElse(null);
+        if (pending != null) {
+            printManagedSpNext(pending);
+            return;
+        }
         printNext("ACTIVE", "All managed SP settings are consistent",
             "No Configuration Changes Required", List.of(
                 nextStep("Review the managed SP list", cliCommand("list")),
@@ -248,11 +273,47 @@ public final class GraphicalMatrixSpManagementTool {
 
     private void printManagedSpNext(final GraphicalMatrixSpRegistry.Entry entry) {
         if ("ACTIVE".equals(entry.status())) {
-            printNext("ACTIVE", "The managed SP is active and consistent", "Next Steps", List.of(
-                nextStep("Verify the managed files and policy",
-                    cliCommand("verify " + entry.name())),
-                nextStep("Run an SSO test", "",
-                    "Start the test from the SP protected resource.")));
+            if (!config.accessEnabled()) {
+                printNext("ACCESS_NOT_INITIALIZED",
+                    "SP attribute access control has not been initialized", "Next Steps", List.of(
+                        nextStep("Review the ContextCheck integration plan",
+                            cliCommand("access init")),
+                        nextStep("Apply the reviewed integration",
+                            cliCommand("access init --apply"))));
+                return;
+            }
+            if (!entry.accessPolicyEnabled() && entry.accessPolicyRevision() > 0) {
+                printNext("ACCESS_POLICY_DISABLED",
+                    "The SP access policy is present but disabled", "Next Steps", List.of(
+                        nextStep("Review the saved access policy",
+                            cliCommand("access show " + entry.name())),
+                        nextStep("Re-enable the policy after review",
+                            cliCommand("access enable " + entry.name()
+                                + " --apply --confirm " + shellQuote(entry.entityId())))));
+                return;
+            }
+            if (!entry.accessPolicyEnabled()) {
+                printNext("ACCESS_POLICY_NOT_SET",
+                    "No SP attribute access policy is configured", "Next Steps", List.of(
+                        nextStep("Discover available IdP attributes",
+                            cliCommand("attributes discover")),
+                        nextStep("Approve an attribute for IdP-side access checks",
+                            cliCommand("attributes approve ATTRIBUTE --usage access "
+                                + "--classification internal --purpose PURPOSE"),
+                            "Replace ATTRIBUTE and PURPOSE after governance review."),
+                        nextStep("Review a policy for this SP",
+                            cliCommand("access set " + entry.name()
+                                + " --allow 'ATTRIBUTE=VALUE'"),
+                            "Replace ATTRIBUTE and VALUE with an approved condition.")));
+                return;
+            }
+            printNext("READY_FOR_ACCESS_TEST",
+                "The SP access policy is enabled", "Next Steps", List.of(
+                    nextStep("Run an IdP attribute resolver policy test",
+                        cliCommand("access test " + entry.name() + " --user USER"),
+                        "Replace USER with an authorized test principal."),
+                    nextStep("Run an end-to-end SSO test", "",
+                        "Test both an allowed and a denied account from the SP protected URL.")));
             return;
         }
         if ("DISABLED".equals(entry.status())) {
@@ -329,6 +390,10 @@ public final class GraphicalMatrixSpManagementTool {
             System.out.println("next_command=" + cliCommand("init --apply"));
             return;
         }
+        if (config.runtimeGroup().isBlank()) {
+            throw new IllegalStateException("graphicalmatrix.sp.runtimeGroup must be set before "
+                + "initializing SP management");
+        }
         final Snapshot snapshot = snapshot(config.metadataProvidersPath(), config.attributeFilterPath(),
             config.registryPath());
         try {
@@ -368,6 +433,7 @@ public final class GraphicalMatrixSpManagementTool {
         final GraphicalMatrixSpMetadata.Parsed metadata = metadata(options, entityId);
         final String attributes = options.value("attribute-profile", "none");
         config.attributesFor(attributes);
+        validateAttributeProfileApplication(attributes, null);
         final String mfa = options.value("mfa", "inherit");
         final List<String> cidrs = csv(options.value("cidrs", ""));
         GraphicalMatrixSpMfaConfig.validateProfile(mfa, cidrs);
@@ -379,10 +445,12 @@ public final class GraphicalMatrixSpManagementTool {
         requireDigest(options, metadata);
         final Instant now = Instant.now();
         final String file = relativeMetadataFile(entityId, true);
-        final GraphicalMatrixSpRegistry.Entry entry = new GraphicalMatrixSpRegistry.Entry(
+        GraphicalMatrixSpRegistry.Entry entry = new GraphicalMatrixSpRegistry.Entry(
             name, entityId, "ACTIVE", metadata.source(), metadata.sha256(), file,
             metadata.certificateFingerprints(), metadata.acsUrls(), attributes, mfa, cidrs,
             now.toString(), now.toString(), 0, "", "", "", "", "");
+        entry = entry.withAttributeProfileRevision(
+            attributeProfileRevision(attributes), Instant.now());
         applyEntry("SP_ADD", oldRegistry, entry, metadata.bytes(), null);
     }
 
@@ -396,6 +464,7 @@ public final class GraphicalMatrixSpManagementTool {
         final GraphicalMatrixSpMetadata.Parsed metadata = metadata(options, current.entityId());
         final String attributes = options.value("attribute-profile", current.attributeProfile());
         config.attributesFor(attributes);
+        validateAttributeProfileApplication(attributes, current.attributeProfile());
         final String mfa = options.value("mfa", current.mfaProfile());
         final List<String> cidrs = options.has("cidrs") ? csv(options.value("cidrs", "")) : current.cidrs();
         GraphicalMatrixSpMfaConfig.validateProfile(mfa, cidrs);
@@ -406,7 +475,8 @@ public final class GraphicalMatrixSpManagementTool {
         }
         requireDigest(options, metadata);
         final GraphicalMatrixSpRegistry.Entry updated = current.withMetadata(metadata,
-            relativeMetadataFile(current.entityId(), true), attributes, mfa, cidrs, Instant.now());
+            relativeMetadataFile(current.entityId(), true), attributes, mfa, cidrs, Instant.now())
+            .withAttributeProfileRevision(attributeProfileRevision(attributes), Instant.now());
         applyEntry("SP_UPDATE", oldRegistry, updated, metadata.bytes(), null);
     }
 
@@ -420,6 +490,7 @@ public final class GraphicalMatrixSpManagementTool {
         config.attributesFor(profile);
         final GraphicalMatrixSpRegistry oldRegistry = registry();
         final GraphicalMatrixSpRegistry.Entry current = oldRegistry.get(name);
+        validateAttributeProfileApplication(profile, current.attributeProfile());
         System.out.println("mode=" + mode(options));
         System.out.println("name=" + name);
         System.out.println("attribute_profile_current=" + current.attributeProfile());
@@ -429,9 +500,11 @@ public final class GraphicalMatrixSpManagementTool {
                 + cliCommand("set-attributes " + name + " " + profile + " --apply"));
             return;
         }
-        applyEntry("SP_SET_ATTRIBUTES", oldRegistry,
-            current.withPolicies(profile, current.mfaProfile(), current.cidrs(), Instant.now()),
-            readMetadata(current), null);
+        GraphicalMatrixSpRegistry.Entry updated = current.withPolicies(
+            profile, current.mfaProfile(), current.cidrs(), Instant.now());
+        updated = updated.withAttributeProfileRevision(
+            attributeProfileRevision(profile), Instant.now());
+        applyEntry("SP_SET_ATTRIBUTES", oldRegistry, updated, readMetadata(current), null);
     }
 
     private void setMfa(final Options options) throws Exception {
@@ -629,16 +702,21 @@ public final class GraphicalMatrixSpManagementTool {
         options.allow(Set.of(), Set.of());
         final String name = validateName(onePositional(options, "history NAME"));
         final Path directory = config.revisionsDirectory().resolve(name);
-        System.out.printf("%-10s %-24s %-12s %-16s %s%n",
-            "REVISION", "UPDATED", "STATUS", "ATTRIBUTES", "MFA");
+        System.out.printf("%-10s %-24s %-12s %-16s %-10s %-10s %s%n",
+            "REVISION", "UPDATED", "STATUS", "ATTRIBUTES", "ATTR REV", "ACCESS", "MFA");
         if (!Files.isDirectory(directory)) {
             return;
         }
         for (final Path revision : revisionDirectories(directory)) {
             final GraphicalMatrixSpRegistry.Entry entry =
                 GraphicalMatrixSpRegistry.loadEntry(revision.resolve("record.json"));
-            System.out.printf("%-10d %-24s %-12s %-16s %s%n", entry.currentRevision(),
-                entry.updatedAt(), entry.status(), entry.attributeProfile(), entry.mfaProfile());
+            final String access = entry.accessPolicyRevision() == 0 ? "-"
+                : (entry.accessPolicyEnabled() ? "on:" : "off:")
+                    + entry.accessPolicyRevision();
+            System.out.printf("%-10d %-24s %-12s %-16s %-10d %-10s %s%n",
+                entry.currentRevision(), entry.updatedAt(), entry.status(),
+                entry.attributeProfile(), entry.attributeProfileRevision(), access,
+                entry.mfaProfile());
             final Path event = revision.resolve("event.txt");
             if (Files.isRegularFile(event)) {
                 System.out.println("  event=" + Files.readString(event).trim());
@@ -657,6 +735,10 @@ public final class GraphicalMatrixSpManagementTool {
             GraphicalMatrixSpRegistry.loadEntry(revisionDirectory.resolve("record.json"));
         final byte[] metadata = Files.isRegularFile(revisionDirectory.resolve("metadata.xml"))
             ? Files.readAllBytes(revisionDirectory.resolve("metadata.xml")) : null;
+        final GraphicalMatrixSpAccessPolicy restoredAccess =
+            restoredAccessPolicy(name, target, revisionDirectory);
+        final GraphicalMatrixAttributeCatalog restoredCatalog =
+            restoredAttributeCatalog(target, revisionDirectory, oldRegistry);
         System.out.println("mode=" + mode(options));
         System.out.println("name=" + name);
         System.out.println("entity_id=" + target.entityId());
@@ -664,6 +746,9 @@ public final class GraphicalMatrixSpManagementTool {
         System.out.println("revision_target=" + revision);
         System.out.println("metadata_sha256=" + target.metadataSha256());
         System.out.println("attribute_profile=" + target.attributeProfile());
+        System.out.println("attribute_profile_revision=" + target.attributeProfileRevision());
+        System.out.println("access_policy_enabled=" + target.accessPolicyEnabled());
+        System.out.println("access_policy_revision=" + target.accessPolicyRevision());
         System.out.println("mfa_profile=" + target.mfaProfile());
         if (!options.apply()) {
             return;
@@ -680,8 +765,27 @@ public final class GraphicalMatrixSpManagementTool {
             target.attributeProfile(), target.mfaProfile(), target.cidrs(), current.createdAt(),
             Instant.now().toString(), current.currentRevision(), current.legacyProviderId(),
             current.legacyMetadataFile(), current.legacyProviderXml(), current.legacyAttributeXml(),
-            current.legacyMfaProfile());
-        applyEntry("SP_ROLLBACK", oldRegistry, restored, metadata, "target_revision=" + revision);
+            current.legacyMfaProfile(), target.attributeProfileRevision(),
+            target.accessPolicyEnabled(), target.accessPolicyRevision());
+        final Snapshot snapshot = snapshot(config.registryPath(), config.attributeFilterPath(),
+            config.mfaPolicyPath(), config.accessPolicyPath(), config.attributeCatalogPath(),
+            managedMetadataPath(restored.entityId(), true),
+            managedMetadataPath(restored.entityId(), false));
+        try {
+            if (restoredAccess != null || Files.exists(config.accessPolicyPath())) {
+                (restoredAccess == null ? GraphicalMatrixSpAccessPolicy.empty() : restoredAccess)
+                    .save(config.accessPolicyPath());
+            }
+            if (restoredCatalog != null) {
+                restoredCatalog.save(config.attributeCatalogPath());
+            }
+            applyEntryInternal("SP_ROLLBACK", oldRegistry, restored, metadata,
+                "target_revision=" + revision);
+        } catch (Exception ex) {
+            final Exception failure = restoreAfterFailure(snapshot, ex);
+            audit("SP_ROLLBACK", name, current.entityId(), "FAILED", rootMessage(failure));
+            throw failure;
+        }
     }
 
     private void restoreLegacy(final Options options) throws Exception {
@@ -781,8 +885,10 @@ public final class GraphicalMatrixSpManagementTool {
             Files.deleteIfExists(active);
         }
         newRegistry.put(entry);
+        final GraphicalMatrixSpManagementConfig currentConfig =
+            GraphicalMatrixSpManagementConfig.load(config.idpHome().toString());
         GraphicalMatrixSpXmlConfig.renderManagedAttributes(config.attributeFilterPath(),
-            newRegistry.entries(), config);
+            newRegistry.entries(), currentConfig);
         GraphicalMatrixSpMfaConfig.render(config.mfaPolicyPath(), oldRegistry.entries(),
             newRegistry.entries(), null);
         newRegistry.save(config.registryPath());
@@ -842,6 +948,47 @@ public final class GraphicalMatrixSpManagementTool {
                 item.entityId(), item.metadataFile(), status, item.detail()));
         }
         return List.copyOf(out);
+    }
+
+    private void validateAttributeProfileApplication(final String profile,
+            final String currentProfile) throws Exception {
+        if (profile.equals(currentProfile) || config.attributesFor(profile).isEmpty()) {
+            return;
+        }
+        final GraphicalMatrixAttributeCatalog catalog =
+            GraphicalMatrixAttributeCatalog.load(config.attributeCatalogPath());
+        final Map<String, GraphicalMatrixAttributeDiscovery.Candidate> discovered =
+            new LinkedHashMap<>();
+        for (final GraphicalMatrixAttributeDiscovery.Candidate candidate
+                : GraphicalMatrixAttributeDiscovery.discover(config, catalog, registry(),
+                    GraphicalMatrixSpAccessPolicy.load(config.accessPolicyPath()))) {
+            discovered.put(candidate.id(), candidate);
+        }
+        final List<String> invalid = new ArrayList<>();
+        for (final String attributeId : config.attributesFor(profile)) {
+            final GraphicalMatrixAttributeCatalog.Attribute attribute =
+                catalog.findAttribute(attributeId);
+            final GraphicalMatrixAttributeDiscovery.Candidate candidate =
+                discovered.get(attributeId);
+            if (attribute == null || !attribute.releaseApproved()
+                    || candidate == null || !"mapped".equals(candidate.samlMapping())
+                    || catalog.isBlocked(attributeId, config.blockedAttributes())) {
+                invalid.add(attributeId);
+            }
+        }
+        if (!invalid.isEmpty()) {
+            throw new IllegalStateException("attribute profile cannot be applied because its "
+                + "attributes are not currently release-approved and SAML-mapped: "
+                + profile + ":" + String.join(",", invalid)
+                + "; run attributes discover and configure the IdP attribute mapping first");
+        }
+    }
+
+    private int attributeProfileRevision(final String profile) throws IOException {
+        final GraphicalMatrixAttributeCatalog.Profile managed =
+            GraphicalMatrixAttributeCatalog.load(config.attributeCatalogPath())
+                .findProfile(profile);
+        return managed == null ? 0 : managed.revision();
     }
 
     private GraphicalMatrixSpRegistry registry() throws IOException {
@@ -923,8 +1070,82 @@ public final class GraphicalMatrixSpManagementTool {
         if (metadata != null) {
             atomicWrite(directory.resolve("metadata.xml"), metadata);
         }
+        saveGovernanceState(directory, entry);
         Files.writeString(directory.resolve("event.txt"), event + "\n", StandardCharsets.UTF_8);
         pruneRevisions(entry.name(), !entry.legacyProviderId().isBlank());
+    }
+
+    private void saveGovernanceState(final Path directory,
+            final GraphicalMatrixSpRegistry.Entry entry) throws IOException {
+        if (Files.isRegularFile(config.accessPolicyPath())) {
+            final GraphicalMatrixSpAccessPolicy.Policy policy =
+                GraphicalMatrixSpAccessPolicy.load(config.accessPolicyPath()).find(entry.name());
+            if (policy != null) {
+                atomicWrite(directory.resolve("access-policy.json"),
+                    GraphicalMatrixSpAccessPolicy.singlePolicyJson(policy).getBytes(
+                        StandardCharsets.UTF_8));
+            }
+        }
+        if (Files.isRegularFile(config.attributeCatalogPath())) {
+            atomicWrite(directory.resolve("attribute-catalog.json"),
+                Files.readAllBytes(config.attributeCatalogPath()));
+        }
+    }
+
+    private GraphicalMatrixSpAccessPolicy restoredAccessPolicy(final String name,
+            final GraphicalMatrixSpRegistry.Entry target, final Path revisionDirectory)
+            throws IOException {
+        GraphicalMatrixSpAccessPolicy current =
+            GraphicalMatrixSpAccessPolicy.load(config.accessPolicyPath());
+        if (target.accessPolicyRevision() == 0) {
+            if (!Files.exists(config.accessPolicyPath()) && current.find(name) == null) {
+                return null;
+            }
+            return current.find(name) == null ? current : current.without(name);
+        }
+        final Path saved = revisionDirectory.resolve("access-policy.json");
+        if (!Files.isRegularFile(saved)) {
+            throw new IOException("revision access policy snapshot is missing: " + saved);
+        }
+        final GraphicalMatrixSpAccessPolicy.Policy policy =
+            GraphicalMatrixSpAccessPolicy.singlePolicy(saved);
+        if (!policy.name().equals(name) || !policy.entityId().equals(target.entityId())
+                || policy.revision() != target.accessPolicyRevision()
+                || policy.enabled() != target.accessPolicyEnabled()) {
+            throw new IOException("revision access policy does not match registry record");
+        }
+        return current.with(policy);
+    }
+
+    private GraphicalMatrixAttributeCatalog restoredAttributeCatalog(
+            final GraphicalMatrixSpRegistry.Entry target, final Path revisionDirectory,
+            final GraphicalMatrixSpRegistry registry) throws IOException {
+        if (target.attributeProfileRevision() == 0) {
+            return Files.isRegularFile(config.attributeCatalogPath())
+                ? GraphicalMatrixAttributeCatalog.load(config.attributeCatalogPath()) : null;
+        }
+        final Path saved = revisionDirectory.resolve("attribute-catalog.json");
+        if (!Files.isRegularFile(saved)) {
+            throw new IOException("revision attribute catalog snapshot is missing: " + saved);
+        }
+        final GraphicalMatrixAttributeCatalog catalog = GraphicalMatrixAttributeCatalog.load(saved);
+        final GraphicalMatrixAttributeCatalog.Profile targetProfile =
+            catalog.findProfile(target.attributeProfile());
+        if (targetProfile == null || targetProfile.revision() != target.attributeProfileRevision()) {
+            throw new IOException("revision attribute profile does not match registry record");
+        }
+        for (final GraphicalMatrixSpRegistry.Entry entry : registry.entries()) {
+            if (entry.name().equals(target.name()) || entry.attributeProfileRevision() == 0) {
+                continue;
+            }
+            final GraphicalMatrixAttributeCatalog.Profile profile =
+                catalog.findProfile(entry.attributeProfile());
+            if (profile == null || profile.revision() != entry.attributeProfileRevision()) {
+                throw new IOException("attribute catalog rollback would make another SP inconsistent: "
+                    + entry.name());
+            }
+        }
+        return catalog;
     }
 
     private void pruneRevisions(final String name, final boolean preserveFirst) throws IOException {
@@ -1010,12 +1231,27 @@ public final class GraphicalMatrixSpManagementTool {
         setPermissions(config.disabledMetadataDirectory(), "rwx------");
         setPermissions(config.revisionsDirectory(), "rwx------");
         setPermissions(config.backupsDirectory(), "rwx------");
-        setPermissions(config.registryPath(), "rw-r-----");
-        inheritGroup(config.registryPath(), config.registryPath().getParent());
+        if (!config.runtimeGroup().isBlank()) {
+            secureRuntimeConfiguration();
+        } else {
+            setPermissions(config.registryPath(), "rw-r-----");
+            inheritGroup(config.registryPath(), config.registryPath().getParent());
+        }
         try {
             if (Files.isDirectory(config.managedMetadataDirectory())) {
+                if (!config.runtimeGroup().isBlank()) {
+                    setRuntimeGroup(config.managedMetadataDirectory());
+                    setPermissions(config.managedMetadataDirectory(), "rwxr-x---");
+                }
                 try (var files = Files.list(config.managedMetadataDirectory())) {
-                    files.forEach(path -> setPermissions(path, "rw-r--r--"));
+                    files.forEach(path -> {
+                        if (!config.runtimeGroup().isBlank()) {
+                            setRuntimeGroup(path);
+                            setPermissions(path, "rw-r-----");
+                        } else {
+                            setPermissions(path, "rw-r--r--");
+                        }
+                    });
                 }
             }
             if (Files.isDirectory(config.disabledMetadataDirectory())) {
@@ -1026,6 +1262,14 @@ public final class GraphicalMatrixSpManagementTool {
         } catch (IOException ignored) {
             // Permission hardening is best effort on non-POSIX test filesystems.
         }
+    }
+
+    private void secureRuntimeConfiguration() {
+        final Path directory = config.registryPath().getParent();
+        setRuntimeGroup(directory);
+        setPermissions(directory, "rwxr-x---");
+        setRuntimeGroup(config.registryPath());
+        setPermissions(config.registryPath(), "rw-r-----");
     }
 
     private static void setPermissions(final Path path, final String mode) {
@@ -1052,6 +1296,25 @@ public final class GraphicalMatrixSpManagementTool {
             }
         } catch (UnsupportedOperationException | IOException ignored) {
             // Windows and some test filesystems do not expose POSIX ownership.
+        }
+    }
+
+    private void setRuntimeGroup(final Path path) {
+        try {
+            if (!Files.exists(path)) {
+                return;
+            }
+            final PosixFileAttributeView view = Files.getFileAttributeView(path,
+                PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+            if (view != null) {
+                view.setGroup(FileSystems.getDefault().getUserPrincipalLookupService()
+                    .lookupPrincipalByGroupName(config.runtimeGroup()));
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // POSIX ownership is unavailable on some test filesystems.
+        } catch (IOException ex) {
+            throw new IllegalStateException("cannot assign IdP runtime group "
+                + config.runtimeGroup() + " to " + path, ex);
         }
     }
 
@@ -1299,12 +1562,13 @@ public final class GraphicalMatrixSpManagementTool {
         System.err.println("Usage: GraphicalMatrixSpManagementTool IDP_HOME COMMAND [OPTIONS]");
         System.err.println("Commands: status, list, next, init, add, update, set-attributes, set-mfa,");
         System.err.println("          disable, enable, remove, verify, check-update, adopt, history,");
-        System.err.println("          rollback, restore-legacy");
+        System.err.println("          rollback, restore-legacy, access, attributes");
     }
 
-    private record Options(Map<String, String> values, Set<String> flags, List<String> positionals) {
+    private record Options(Map<String, List<String>> values, Set<String> flags,
+                           List<String> positionals) {
         static Options parse(final String[] args) {
-            final Map<String, String> values = new LinkedHashMap<>();
+            final Map<String, List<String>> values = new LinkedHashMap<>();
             final Set<String> flags = new LinkedHashSet<>();
             final List<String> positionals = new ArrayList<>();
             final Set<String> booleanOptions = Set.of("apply", "all", "confirm-bypass");
@@ -1326,9 +1590,7 @@ public final class GraphicalMatrixSpManagementTool {
                     if (++i >= args.length || args[i].startsWith("--")) {
                         throw new IllegalArgumentException("option requires a value: " + argument);
                     }
-                    if (values.putIfAbsent(key, args[i]) != null) {
-                        throw new IllegalArgumentException("duplicate option: " + argument);
-                    }
+                    values.computeIfAbsent(key, ignored -> new ArrayList<>()).add(args[i]);
                 }
             }
             return new Options(Map.copyOf(values), Set.copyOf(flags), List.copyOf(positionals));
@@ -1347,15 +1609,26 @@ public final class GraphicalMatrixSpManagementTool {
         }
 
         String value(final String key, final String defaultValue) {
-            return values.getOrDefault(key, defaultValue);
+            final List<String> found = values.get(key);
+            if (found == null) {
+                return defaultValue;
+            }
+            if (found.size() != 1) {
+                throw new IllegalArgumentException("duplicate option: --" + key);
+            }
+            return found.get(0);
         }
 
         String required(final String key) {
-            final String value = values.get(key);
-            if (value == null || value.isBlank()) {
+            final String value = value(key, "");
+            if (value.isBlank()) {
                 throw new IllegalArgumentException("missing required option: --" + key);
             }
             return value;
+        }
+
+        List<String> values(final String key) {
+            return values.getOrDefault(key, List.of());
         }
 
         void allow(final Set<String> allowedValues, final Set<String> allowedFlags) {

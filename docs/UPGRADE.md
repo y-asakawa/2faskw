@@ -10,6 +10,7 @@
 - v1.2.3 から v1.2.4 への更新
 - v1.2.4 から v1.2.5 への更新
 - v1.2.6 から v1.2.7 への更新
+- v1.2.7 から v1.3.0 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -23,6 +24,7 @@
 | v1.2.3 | v1.2.4 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | IdP自己管理フローの有効化、従来LDAP変更経路の停止 |
 | v1.2.4 | v1.2.5 | 旧JAR削除、ロックアウト4設定の追加、WAR再構築、設定検査 | 通常・最大ロック時間の調整 |
 | v1.2.6 | v1.2.7 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboard導入、SP追加管理CLIの有効化 |
+| v1.2.7 | v1.3.0 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboardのv1.3.0配布物への更新、SP管理CLIの継続利用、SP別LDAP属性アクセス制御・属性カタログCLIの初期化 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -49,6 +51,12 @@ v1.2.5では、GraphicalMatrix画像列照合のロック条件を設定化し�
 v1.2.7では、Dashboardの別配布に加えて、IdPローカルでSP metadata、属性リリース、SP別MFA
 方針を管理するCLIを本体パッケージへ追加します。SP管理CLIは既定で無効であり、更新だけで
 既存のmetadata設定やSP別MFA方針を変更しません。SP管理用HTTP APIは追加されません。
+
+v1.3.0では、SP別のIdP属性アクセス制御と属性カタログを`graphicalmatrix-sp.sh`へ追加します。
+更新直後はアクセス制御が無効であり、既存SPの認証・属性releaseは変更しません。利用する環境だけ
+`access init`を明示的に実行し、ContextCheck module、IdP build、Jetty再起動を行います。
+v1.2.7で導入したDashboardとSP管理CLIもv1.3.0の配布物へ含まれます。既にSP管理CLIを初期化済みの
+環境では`init`を再実行せず、必要な場合だけ`access init`を実行します。
 
 ## 事前確認
 
@@ -796,10 +804,124 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh verify existing-sp
 新規SPの追加は必ずdry-runを先に行い、表示されたentityID、ACS、証明書fingerprint、metadataの
 SHA-256をSP管理者から得た値と照合します。一致したdigestを`--approve-sha256`へ指定した場合だけ
 `--apply`します。詳しい追加、更新、無効化、adopt、rollback、restore-legacy手順は
-[v1.2.7 SP管理CLI設計](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md)を参照してください。
+[v1.3.0統合リリースノート](./release-notes/v1.3.0-RELEASE-NOTES.md)および
+[v1.3.0 SP別LDAP属性アクセス制御・属性カタログCLI設計](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md)を参照してください。
 
 SP管理CLIを無効へ戻す場合は、まずCLI管理SPの状態と復元要否を確認してから、設定を
 `false`へ戻します。`false`への変更だけでは、既に配置したmetadataや属性・MFA方針は削除されません。
+
+## v1.2.7からv1.3.0への統合更新手順
+
+v1.3.0はDashboard、SP管理CLI、SP別LDAP属性アクセス制御、属性カタログCLIを含む統合リリースである。
+v1.2.7でDashboardを導入している場合は、`2faskw-dashboard-1.3.0.zip`へ更新する。SP管理CLIを
+初期化済みの場合は、既存のmanaged registry、metadata、属性release、MFA方針を維持するため、
+`init`を再実行しない。
+
+v1.3.0のインストールだけでは、SP別属性アクセス制御は有効にならない。既存の
+`sp-management.properties`へ次の新規設定を反映する。既定値のままなら既存認証への影響はない。
+
+```properties
+graphicalmatrix.sp.access.enabled = false
+graphicalmatrix.sp.access.reloadIntervalSeconds = 5
+graphicalmatrix.sp.access.auditDecisions = true
+# Jetty実行アカウントのprimary group。標準構成はjetty。
+graphicalmatrix.sp.runtimeGroup = jetty
+graphicalmatrix.sp.attributes.blocked =
+```
+
+`graphicalmatrix.sp.runtimeGroup`は、IdP実行アカウントのprimary groupへ設定する。標準構成は
+`jetty`だが、異なる環境では次で確認して置き換える。
+
+```bash
+sudo systemctl show jetty-idp.service -p User -p Group
+```
+
+機能を利用する場合は、まずSP管理CLIが初期化済みで、対象SPが`MANAGED`であることを確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access init
+```
+
+dry-runに`CONTEXT_CHECK_CONFLICT`が出た場合は適用しない。既存の
+`shibboleth.context-check.Function`または`Condition`と2FAS-KW判定を手作業で統合する必要がある。
+競合がなければ適用し、表示された順にbuildと再起動を行う。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access init --apply
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+
+until curl --noproxy '*' -fsSI --connect-timeout 2 --max-time 5 \
+  http://127.0.0.1:8080/idp/status >/dev/null 2>&1; do
+  echo 'Waiting for Jetty...'
+  sleep 2
+done
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+`access init --apply`は、`/opt/shibboleth-idp/conf/graphicalmatrix`を`0750`、
+`access-policy.json`、`attribute-catalog.json`、`sp-management-registry.json`を
+`root:<runtimeGroup>`かつ`0640`へ設定する。旧版のJSONを手動で復元した場合は、次で同じ状態へ戻す。
+
+```bash
+sudo chown root:jetty /opt/shibboleth-idp/conf/graphicalmatrix
+sudo chmod 0750 /opt/shibboleth-idp/conf/graphicalmatrix
+sudo chown root:jetty \
+  /opt/shibboleth-idp/conf/graphicalmatrix/access-policy.json \
+  /opt/shibboleth-idp/conf/graphicalmatrix/attribute-catalog.json \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management-registry.json
+sudo chmod 0640 \
+  /opt/shibboleth-idp/conf/graphicalmatrix/access-policy.json \
+  /opt/shibboleth-idp/conf/graphicalmatrix/attribute-catalog.json \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management-registry.json
+sudo restorecon -Rv /opt/shibboleth-idp/conf/graphicalmatrix
+```
+
+上の`jetty`は`graphicalmatrix.sp.runtimeGroup`と同じ値へ読み替える。設定検査でruntime groupの
+読み取りエラーが出た場合は、この所有者・mode・SELinux contextを確認する。
+
+属性候補を確認し、SPへ送信しないIdP内部判定用属性として承認する例を示す。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
+  businessCategory \
+  --usage access \
+  --classification internal \
+  --purpose 'IdP-side SP authorization'
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
+  businessCategory \
+  --usage access \
+  --classification internal \
+  --purpose 'IdP-side SP authorization' \
+  --apply --confirm businessCategory
+```
+
+対象SPに`businessCategory=AA`を要求する場合は、dry-run後にentityIDを確認値として適用する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest --allow 'businessCategory=AA'
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest --allow 'businessCategory=AA' \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access show 2faskwlocaltest
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh next 2faskwlocaltest
+```
+
+policy変更はJSONの再読込で反映され、通常はJetty再起動を必要としない。初回の`access init`、
+ContextCheck設定変更、Plugin JAR更新時だけbuildと再起動を行う。詳細は
+[v1.3.0 SPアクセス制御・属性カタログ設計](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md)
+を参照する。
 
 ***
 ***

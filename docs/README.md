@@ -20,6 +20,8 @@ Shibboleth plugin形式ではtar.gzとZIPの両方を配布物として扱えま
 - [SECURITY.md](./SECURITY.md)
 - [SECURITY-CHECKLIST.md](./SECURITY-CHECKLIST.md)
 - [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)
+- [COMMAND-REFERENCE.md](./COMMAND-REFERENCE.md)
+- [LOG-REFERENCE.md](./LOG-REFERENCE.md)
 - [FAQ.md](./FAQ.md)
 - [UPGRADE.md](./UPGRADE.md)
 
@@ -52,10 +54,13 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [INSTALL.md](./INSTALL.md) | IdP への導入手順、配布物構成、必須アプリ、主要設定例、rollback 手順。 |
 | [INSTALL_Manual_Installation.md](./INSTALL_Manual_Installation.md) | `graphicalmatrix-plugin-check.sh` / `graphicalmatrix-plugin-config.sh` を使わずに手動で確認・配置する手順。 |
 | [INSTALL_LDAP.md](./INSTALL_LDAP.md) | LDAP新規導入、属性設計、TOTP/WebAuthn LDAP保存設定の手順。 |
-| [INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md) | 新しいSAML SPのmetadata登録、属性リリース、SP別MFAポリシー、検証、ロールバック手順。 |
+| [INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md) | v1.3.0のSP管理CLIを使った、新しいSAML SPの登録、属性release、SP別MFA方針、検証、取消し手順。 |
+| [INSTALL_NEW_Manual_SP.md](./INSTALL_NEW_Manual_SP.md) | SP管理CLIを使わず、metadata provider、属性release、MFAポリシーを手作業で設定する手順。 |
 | [INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md) | GraphicalMatrix変更およびMFA方式変更を、IdP内のShibboleth再認証済み自己管理フローで提供するための設計。推奨方式。 |
 | [INSTALL_Passchange_SP.md](./INSTALL_Passchange_SP.md) | 外部自己管理SPを追加し、GraphicalMatrix変更およびMFA方式変更を提供するための設計。 |
 | [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md) | `*.properties` の設定項目、型、既定値、注意点の一覧。 |
+| [COMMAND-REFERENCE.md](./COMMAND-REFERENCE.md) | IdP/DB/SP管理、属性・アクセス制御、診断、移行のコマンドリファレンス。 |
+| [LOG-REFERENCE.md](./LOG-REFERENCE.md) | 2FAS-KW、IdP、Admin Tools、Dashboardのログ形式、event、確認順序、保持のリファレンス。 |
 | [FAQ.md](./FAQ.md) | 設定読込エラー、反映タイミング、ログ確認などのFAQ。 |
 | [UPGRADE.md](./UPGRADE.md) | Plugin更新、旧JAR整理、設定差分反映、動作試験、ロールバック手順。 |
 | [DB-SCHEMA.md](./DB-SCHEMA.md) | GraphicalMatrix DB スキーマ設計の素案。 |
@@ -79,7 +84,9 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOGROTATE.md](./LOGROTATE.md) | GraphicalMatrix audit log の logrotate 設定例。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
-| [release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md) | IdPローカルでSP metadata、属性リリース、SP別MFA方針を管理するCLIの設計と運用手順。 |
+| [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
+| [release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md) | SP別LDAP属性アクセス制御と、SP向け属性profileを管理する属性カタログCLIの詳細設計。 |
+| [release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md) | SP管理CLIの履歴設計。v1.3.0でもmetadata、属性release、SP別MFA方針の管理機能を継承する。 |
 
 ## API
 
@@ -177,8 +184,8 @@ WebAuthn credentialの管理、保存方式移行の詳細は[ADMIN-TOOLS.md](./
 
 ### SP追加管理CLI
 
-v1.2.7以降は、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
-SP別MFA方針を一括管理できる。初期状態では無効であり、設定を有効化して初期化するまで
+v1.3.0では、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
+SP別MFA方針、属性カタログ、SP別LDAP属性アクセス制御を一括管理できる。初期状態では無効であり、設定を有効化して初期化するまで
 IdP設定を変更しない。SP管理用HTTP APIは提供しない。
 
 ```bash

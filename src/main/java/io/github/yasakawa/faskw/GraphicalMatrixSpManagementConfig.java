@@ -42,12 +42,20 @@ final class GraphicalMatrixSpManagementConfig {
     private final Duration connectTimeout;
     private final Duration readTimeout;
     private final boolean reloadEnabled;
+    private final String reloadBaseUrl;
     private final int revisionRetentionDays;
     private final int maxRevisionsPerSp;
     private final int backupRetentionDays;
+    private final boolean accessEnabled;
+    private final int accessReloadIntervalSeconds;
+    private final boolean accessAuditDecisions;
+    private final String runtimeGroup;
+    private final Set<String> blockedAttributes;
     private final Map<String, List<String>> attributeProfiles;
+    private final Set<String> legacyAttributeProfiles;
 
-    private GraphicalMatrixSpManagementConfig(final Path home, final Properties properties) {
+    private GraphicalMatrixSpManagementConfig(final Path home, final Properties properties)
+            throws IOException {
         idpHome = home.toAbsolutePath().normalize();
         enabled = booleanValue(properties, ENABLED, false);
         allowedMetadataHosts = hosts(properties.getProperty(
@@ -61,13 +69,26 @@ final class GraphicalMatrixSpManagementConfig {
         readTimeout = Duration.ofSeconds(integerValue(properties,
             "graphicalmatrix.sp.metadata.readTimeoutSeconds", 10, 1, 120));
         reloadEnabled = booleanValue(properties, "graphicalmatrix.sp.reload.enabled", true);
+        reloadBaseUrl = reloadBaseUrl(properties.getProperty(
+            "graphicalmatrix.sp.reload.baseUrl", "http://localhost/idp"));
         revisionRetentionDays = integerValue(properties,
             "graphicalmatrix.sp.revision.retentionDays", 180, 1, 3650);
         maxRevisionsPerSp = integerValue(properties,
             "graphicalmatrix.sp.revision.maxPerSp", 50, 1, 500);
         backupRetentionDays = integerValue(properties,
             "graphicalmatrix.sp.backup.retentionDays", 30, 1, 3650);
-        attributeProfiles = profiles(properties);
+        accessEnabled = booleanValue(properties, "graphicalmatrix.sp.access.enabled", false);
+        accessReloadIntervalSeconds = integerValue(properties,
+            "graphicalmatrix.sp.access.reloadIntervalSeconds", 5, 1, 300);
+        accessAuditDecisions = booleanValue(properties,
+            "graphicalmatrix.sp.access.auditDecisions", true);
+        runtimeGroup = runtimeGroup(properties.getProperty(
+            "graphicalmatrix.sp.runtimeGroup", "jetty"));
+        blockedAttributes = Set.copyOf(csv(properties.getProperty(
+            "graphicalmatrix.sp.attributes.blocked", "")));
+        attributeProfiles = profiles(properties,
+            GraphicalMatrixAttributeCatalog.load(attributeCatalogPath()));
+        legacyAttributeProfiles = legacyProfileNames(properties);
     }
 
     static GraphicalMatrixSpManagementConfig load(final String idpHome) throws IOException {
@@ -118,6 +139,10 @@ final class GraphicalMatrixSpManagementConfig {
         return reloadEnabled;
     }
 
+    String reloadBaseUrl() {
+        return reloadBaseUrl;
+    }
+
     int revisionRetentionDays() {
         return revisionRetentionDays;
     }
@@ -130,6 +155,31 @@ final class GraphicalMatrixSpManagementConfig {
         return backupRetentionDays;
     }
 
+    boolean accessEnabled() {
+        return accessEnabled;
+    }
+
+    int accessReloadIntervalSeconds() {
+        return accessReloadIntervalSeconds;
+    }
+
+    boolean accessAuditDecisions() {
+        return accessAuditDecisions;
+    }
+
+    String runtimeGroup() {
+        return runtimeGroup;
+    }
+
+    Set<String> blockedAttributes() {
+        return blockedAttributes;
+    }
+
+    boolean isBlockedAttribute(final String attributeId) {
+        return GraphicalMatrixAttributeCatalog.defaults()
+            .isBlocked(attributeId, blockedAttributes);
+    }
+
     Map<String, List<String>> attributeProfiles() {
         return attributeProfiles;
     }
@@ -140,6 +190,14 @@ final class GraphicalMatrixSpManagementConfig {
             throw new IllegalArgumentException("unknown attribute profile: " + profile);
         }
         return attributes;
+    }
+
+    boolean isLegacyAttributeProfile(final String profile) {
+        return legacyAttributeProfiles.contains(profile);
+    }
+
+    Set<String> legacyAttributeProfileNames() {
+        return legacyAttributeProfiles;
     }
 
     Path metadataProvidersPath() {
@@ -178,7 +236,28 @@ final class GraphicalMatrixSpManagementConfig {
         return idpHome.resolve("logs/graphicalmatrix-sp-management-audit.log");
     }
 
-    private static Map<String, List<String>> profiles(final Properties properties) {
+    Path accessAuditLogPath() {
+        return idpHome.resolve("logs/graphicalmatrix-access-audit.log");
+    }
+
+    Path accessPolicyPath() {
+        return idpHome.resolve("conf/graphicalmatrix/access-policy.json");
+    }
+
+    Path attributeCatalogPath() {
+        return idpHome.resolve("conf/graphicalmatrix/attribute-catalog.json");
+    }
+
+    Path contextCheckConfigPath() {
+        return idpHome.resolve("conf/intercept/context-check-intercept-config.xml");
+    }
+
+    Path relyingPartyPath() {
+        return idpHome.resolve("conf/relying-party.xml");
+    }
+
+    private static Map<String, List<String>> profiles(final Properties properties,
+            final GraphicalMatrixAttributeCatalog catalog) {
         final Map<String, List<String>> out = new LinkedHashMap<>();
         out.put("none", List.of());
         out.put("uid", List.of("uid"));
@@ -209,7 +288,45 @@ final class GraphicalMatrixSpManagementConfig {
             }
             out.put(name, List.copyOf(attributes));
         }
+        for (final Map.Entry<String, List<String>> entry : catalog.managedProfiles().entrySet()) {
+            if (out.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
+                throw new IllegalArgumentException(
+                    "managed attribute profile conflicts with an existing profile: "
+                        + entry.getKey());
+            }
+        }
         return Map.copyOf(out);
+    }
+
+    private static Set<String> legacyProfileNames(final Properties properties) {
+        final Set<String> out = new LinkedHashSet<>();
+        for (final String key : properties.stringPropertyNames()) {
+            if (key.startsWith(PROFILE_PREFIX)) {
+                out.add(key.substring(PROFILE_PREFIX.length()).trim());
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static String reloadBaseUrl(final String raw) {
+        final String value = raw.trim().isEmpty() ? "http://localhost/idp" : raw.trim();
+        if (!value.matches("https?://(?:127\\.0\\.0\\.1|localhost)(?::[0-9]{1,5})?/idp")) {
+            throw new IllegalArgumentException(
+                "graphicalmatrix.sp.reload.baseUrl must use a loopback HTTP(S) IdP URL");
+        }
+        return value;
+    }
+
+    private static String runtimeGroup(final String raw) {
+        final String value = raw.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        if (!value.matches("[a-z_][a-z0-9_-]{0,31}")) {
+            throw new IllegalArgumentException(
+                "graphicalmatrix.sp.runtimeGroup must be a local POSIX group name");
+        }
+        return value;
     }
 
     private static Set<String> hosts(final String value) {

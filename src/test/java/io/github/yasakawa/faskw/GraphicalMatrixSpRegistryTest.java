@@ -62,6 +62,45 @@ class GraphicalMatrixSpRegistryTest {
                 () -> GraphicalMatrixSpRegistry.load(path)));
     }
 
+    @Test
+    void readsSchemaOneAndWritesSchemaTwoGovernanceDefaults() throws Exception {
+        final Path path = temporary.resolve("schema-one-registry.json");
+        Files.writeString(path, """
+            {"schemaVersion":1,"entries":[{
+              "name":"library",
+              "entityId":"https://sp.example.org/shibboleth",
+              "status":"ACTIVE",
+              "source":"/secure/sp.xml",
+              "metadataSha256":"abc",
+              "metadataFile":"metadata/file.xml",
+              "certificateFingerprints":["AA:BB"],
+              "acsUrls":["https://sp.example.org/acs"],
+              "attributeProfile":"uid",
+              "mfaProfile":"force",
+              "cidrs":[],
+              "createdAt":"2026-08-03T00:00:00Z",
+              "updatedAt":"2026-08-03T00:00:00Z",
+              "currentRevision":1,
+              "legacyProviderId":"legacy",
+              "legacyMetadataFile":"metadata/legacy.xml",
+              "legacyProviderXml":"",
+              "legacyAttributeXml":"",
+              "legacyMfaProfile":"force"
+            }]}
+            """, StandardCharsets.UTF_8);
+
+        final GraphicalMatrixSpRegistry registry = GraphicalMatrixSpRegistry.load(path);
+        assertEquals(0, registry.get("library").attributeProfileRevision());
+        assertEquals(false, registry.get("library").accessPolicyEnabled());
+        assertEquals(0, registry.get("library").accessPolicyRevision());
+
+        registry.save(path);
+        assertEquals(2, GraphicalMatrixJson.integer(
+            GraphicalMatrixJson.readObject(path, 2_097_152), "schemaVersion", 0));
+        assertEquals(0, GraphicalMatrixSpRegistry.load(path)
+            .get("library").accessPolicyRevision());
+    }
+
     private static GraphicalMatrixSpRegistry.Entry entry(final String name, final String entityId) {
         return new GraphicalMatrixSpRegistry.Entry(name, entityId, "ACTIVE", "/secure/sp.xml",
             "abc", "metadata/file.xml", List.of("AA:BB", "CC:DD"),

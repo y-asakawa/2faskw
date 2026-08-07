@@ -16,9 +16,12 @@
 
 package io.github.yasakawa.faskw;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFileAttributes;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -326,7 +329,17 @@ public final class GraphicalMatrixConfigCheckTool {
             return;
         }
         if (!spConfig.enabled()) {
+            if (spConfig.accessEnabled()) {
+                fail("SP attribute access control requires SP management to be enabled");
+                return;
+            }
             ok("SP management CLI is disabled");
+            return;
+        }
+
+        if (spConfig.runtimeGroup().isBlank()) {
+            fail("SP management requires graphicalmatrix.sp.runtimeGroup to identify the IdP "
+                + "runtime group");
             return;
         }
 
@@ -350,6 +363,7 @@ public final class GraphicalMatrixConfigCheckTool {
             final GraphicalMatrixSpRegistry registry =
                 GraphicalMatrixSpRegistry.load(spConfig.registryPath());
             ok("SP management registry valid: entries=" + registry.entries().size());
+            checkSpAccess(spConfig, registry);
         } catch (Exception ex) {
             fail("SP management registry invalid: " + rootMessage(ex));
         }
@@ -359,7 +373,143 @@ public final class GraphicalMatrixConfigCheckTool {
         } else if (!Files.isReadable(spConfig.managedMetadataDirectory())) {
             fail("SP managed metadata directory is unreadable: " + spConfig.managedMetadataDirectory());
         } else {
-            ok("SP managed metadata directory readable: " + spConfig.managedMetadataDirectory());
+            try {
+                checkRuntimeReadable("SP managed metadata directory",
+                    spConfig.managedMetadataDirectory(), spConfig.runtimeGroup(), true);
+                try (var files = Files.list(spConfig.managedMetadataDirectory())) {
+                    for (final Path metadata : files.filter(Files::isRegularFile).toList()) {
+                        checkNonSymlinkReadable("SP managed metadata", metadata);
+                        checkRuntimeReadable("SP managed metadata", metadata,
+                            spConfig.runtimeGroup(), false);
+                    }
+                }
+                ok("SP managed metadata directory readable: " + spConfig.managedMetadataDirectory());
+            } catch (Exception ex) {
+                fail("SP managed metadata directory runtime access invalid: " + rootMessage(ex));
+            }
+        }
+    }
+
+    private void checkSpAccess(final GraphicalMatrixSpManagementConfig config,
+            final GraphicalMatrixSpRegistry registry) {
+        if (!config.accessEnabled()) {
+            ok("SP attribute access control is disabled");
+            return;
+        }
+        try {
+            if (config.runtimeGroup().isBlank()) {
+                throw new IllegalStateException("graphicalmatrix.sp.runtimeGroup is required when "
+                    + "SP attribute access control is enabled");
+            }
+            checkRuntimeReadable("SP management configuration directory",
+                config.registryPath().getParent(), config.runtimeGroup(), true);
+            checkNonSymlinkReadable("SP management registry", config.registryPath());
+            checkNonSymlinkReadable("SP access policy", config.accessPolicyPath());
+            checkNonSymlinkReadable("SP attribute catalog", config.attributeCatalogPath());
+            checkRuntimeReadable("SP management registry", config.registryPath(),
+                config.runtimeGroup(), false);
+            checkRuntimeReadable("SP access policy", config.accessPolicyPath(),
+                config.runtimeGroup(), false);
+            checkRuntimeReadable("SP attribute catalog", config.attributeCatalogPath(),
+                config.runtimeGroup(), false);
+            final GraphicalMatrixSpAccessPolicy access =
+                GraphicalMatrixSpAccessPolicy.load(config.accessPolicyPath());
+            final GraphicalMatrixAttributeCatalog catalog =
+                GraphicalMatrixAttributeCatalog.load(config.attributeCatalogPath());
+            final GraphicalMatrixSpAccessXmlConfig.Inspection inspection =
+                GraphicalMatrixSpAccessXmlConfig.inspect(config.contextCheckConfigPath(),
+                    config.relyingPartyPath());
+            if (inspection.conflict() || !inspection.managedFunction()) {
+                fail("SP access ContextCheck function is missing or conflicts with existing config");
+            } else if (inspection.saml2Profiles() == 0
+                    || inspection.saml2Profiles() != inspection.contextCheckProfiles()) {
+                fail("context-check is not configured exactly once in every SAML2.SSO profile");
+            } else {
+                ok("SP access ContextCheck integration valid: profiles="
+                    + inspection.saml2Profiles());
+            }
+            for (final GraphicalMatrixSpAccessPolicy.Policy policy : access.policies()) {
+                final GraphicalMatrixSpRegistry.Entry entry = registry.get(policy.name());
+                if (!entry.entityId().equals(policy.entityId())) {
+                    throw new IllegalStateException("policy entityID mismatch: " + policy.name());
+                }
+                if (entry.accessPolicyEnabled() != policy.enabled()
+                        || entry.accessPolicyRevision() != policy.revision()) {
+                    throw new IllegalStateException("policy revision mismatch: " + policy.name());
+                }
+                for (final GraphicalMatrixSpAccessPolicy.Rule rule :
+                        java.util.stream.Stream.concat(policy.allow().stream(),
+                            policy.deny().stream()).toList()) {
+                    final GraphicalMatrixAttributeCatalog.Attribute attribute =
+                        catalog.requireAttribute(rule.attributeId());
+                    if (!attribute.accessApproved()
+                            || catalog.isBlocked(attribute.id(), config.blockedAttributes())) {
+                        throw new IllegalStateException(
+                            "policy attribute is not approved: " + attribute.id());
+                    }
+                }
+            }
+            for (final GraphicalMatrixSpRegistry.Entry entry : registry.entries()) {
+                final GraphicalMatrixAttributeCatalog.Profile profile =
+                    catalog.findProfile(entry.attributeProfile());
+                if (profile != null && entry.attributeProfileRevision() != profile.revision()) {
+                    throw new IllegalStateException(
+                        "attribute profile revision mismatch: " + entry.name());
+                }
+                if (entry.accessPolicyEnabled() && access.find(entry.name()) == null) {
+                    throw new IllegalStateException(
+                        "registry references a missing access policy: " + entry.name());
+                }
+            }
+            ok("SP access policy and attribute catalog valid: policies="
+                + access.policies().size() + " attributes=" + catalog.attributes().size()
+                + " profiles=" + catalog.profiles().size());
+        } catch (Exception ex) {
+            fail("SP access control configuration invalid: " + rootMessage(ex));
+        }
+    }
+
+    private void checkNonSymlinkReadable(final String label, final Path path) {
+        if (Files.isSymbolicLink(path) || !Files.isRegularFile(path)
+                || !Files.isReadable(path)) {
+            throw new IllegalStateException(label + " is missing, unreadable, or a symlink: " + path);
+        }
+        try {
+            final Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
+            if (!permissions.contains(PosixFilePermission.OWNER_READ)
+                    || permissions.contains(PosixFilePermission.OWNER_EXECUTE)
+                    || permissions.contains(PosixFilePermission.GROUP_WRITE)
+                    || permissions.contains(PosixFilePermission.GROUP_EXECUTE)
+                    || permissions.contains(PosixFilePermission.OTHERS_READ)
+                    || permissions.contains(PosixFilePermission.OTHERS_WRITE)
+                    || permissions.contains(PosixFilePermission.OTHERS_EXECUTE)) {
+                throw new IllegalStateException(label + " has unsafe permissions: " + path);
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // POSIX permissions are checked on supported production filesystems.
+        } catch (java.io.IOException ex) {
+            throw new IllegalStateException(label + " permissions cannot be read: " + path, ex);
+        }
+    }
+
+    private void checkRuntimeReadable(final String label, final Path path,
+            final String runtimeGroup, final boolean directory) throws IOException {
+        final PosixFileAttributes attributes = Files.readAttributes(path,
+            PosixFileAttributes.class, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        final Set<PosixFilePermission> permissions = attributes.permissions();
+        final boolean groupReadable = directory
+            ? permissions.contains(PosixFilePermission.GROUP_READ)
+                && permissions.contains(PosixFilePermission.GROUP_EXECUTE)
+            : permissions.contains(PosixFilePermission.GROUP_READ);
+        final boolean othersAccessible = directory
+            ? permissions.contains(PosixFilePermission.OTHERS_READ)
+                || permissions.contains(PosixFilePermission.OTHERS_WRITE)
+                || permissions.contains(PosixFilePermission.OTHERS_EXECUTE)
+            : false;
+        if (!runtimeGroup.equals(attributes.group().getName()) || !groupReadable
+                || othersAccessible) {
+            throw new IllegalStateException(label + " is not readable by configured runtime group "
+                + runtimeGroup + ": " + path);
         }
     }
 
