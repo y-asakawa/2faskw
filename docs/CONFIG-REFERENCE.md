@@ -170,6 +170,11 @@ IdPサーバ上のローカルSP管理CLIを制御する。管理APIやWeb UIは
 | `graphicalmatrix.sp.revision.maxPerSp` | count | `50` | SP単位revisionの最大保持数。 | `1`から`500`。 |
 | `graphicalmatrix.sp.backup.retentionDays` | days | `30` | 更新transaction全体のbackup保持日数。 | `1`から`3650`。次回の更新操作開始時に期限切れを削除する。 |
 | `graphicalmatrix.sp.attributeProfile.<name>` | attribute list | none | 承認済みcustom属性profile。 | password、sequence、TOTP、WebAuthn、credential、adminを含むIDは拒否する。 |
+| `graphicalmatrix.sp.access.enabled` | boolean | `false` | ContextCheckによるSP別IdP属性アクセス制御を有効化する。 | `access init --apply`で管理する。手編集だけでtrueにしない。 |
+| `graphicalmatrix.sp.access.reloadIntervalSeconds` | seconds | `5` | access policy JSONの変更確認間隔。 | `1`から`300`。要求ごとのJSON解析やLDAP再検索は行わない。 |
+| `graphicalmatrix.sp.access.auditDecisions` | boolean | `true` | SP別アクセス判定を専用監査ログへ記録する。 | 属性値とpolicy比較値は記録しない。 |
+| `graphicalmatrix.sp.runtimeGroup` | local POSIX group | `jetty` | IdP実行アカウントのprimary group。 | access制御のJSON、SP管理台帳、metadata directoryへ読み取りを許可するgroup。実環境のJetty groupへ変更する。 |
+| `graphicalmatrix.sp.attributes.blocked` | attribute list | empty | 組織固有の使用禁止属性ID。 | カンマ区切り。組込みのcredential/secret系deny listへ追加される。 |
 
 `policyOrder`はプロパティファイルの行順ではなく、この値に列挙した左から順に評価する。
 `bypassNetwork`は`bypassIPs`と`bypassCIDRs`を1つの評価単位として扱う。

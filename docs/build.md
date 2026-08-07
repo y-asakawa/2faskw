@@ -5,7 +5,7 @@
 リリースおよびパッケージのビルドでは、`version.ini` をバージョン情報の正とする。
 
 ```ini
-VERSION=1.2.7
+VERSION=1.3.0
 ARTIFACT_ID=2faskw-idp-plugin
 ADMIN_ARTIFACT_ID=2faskw-admin-tools
 DASHBOARD_ARTIFACT_ID=2faskw-dashboard

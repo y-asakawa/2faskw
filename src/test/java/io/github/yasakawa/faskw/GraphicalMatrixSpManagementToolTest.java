@@ -12,6 +12,7 @@ package io.github.yasakawa.faskw;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -30,6 +31,20 @@ class GraphicalMatrixSpManagementToolTest {
 
     @TempDir
     Path temporary;
+
+    @Test
+    void rejectsProfileCreationWhenAnAttributeIsNotCurrentlySamlMapped() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+
+        final IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> new GraphicalMatrixSpGovernanceTool(
+                GraphicalMatrixSpManagementConfig.load(temporary.toString())).execute("attributes",
+                    new String[] {"profile", "create", "unmapped-business",
+                        "--attributes", "businessCategory"}));
+
+        assertTrue(exception.getMessage().contains("release-approved and SAML-mapped"));
+    }
 
     @Test
     void nextPrintsStateSpecificNumberedGuidance() throws Exception {
@@ -70,20 +85,20 @@ class GraphicalMatrixSpManagementToolTest {
             "--mfa", "force", "--approve-sha256", digest, "--apply");
 
         final String active = invokeOutput("next", "library");
-        assertTrue(active.contains("state=ACTIVE"));
-        assertTrue(active.contains("[1/2] Verify the managed files and policy"));
-        assertTrue(active.contains("Start the test from the SP protected resource."));
+        assertTrue(active.contains("state=ACCESS_NOT_INITIALIZED"));
+        assertTrue(active.contains(cliCommand("access init")));
+        assertTrue(active.contains(cliCommand("access init --apply")));
 
         final String globalActive = invokeOutput("next");
-        assertTrue(globalActive.contains("state=ACTIVE"));
-        assertTrue(globalActive.contains("No Configuration Changes Required"));
-        assertTrue(globalActive.contains("[1/2] Review the managed SP list"));
+        assertTrue(globalActive.contains("state=ACCESS_NOT_INITIALIZED"));
+        assertTrue(globalActive.contains(cliCommand("access init")));
 
         final String all = invokeOutput("next", "--all");
         assertTrue(all.contains("scope=ALL"));
         assertTrue(all.contains("sp_count=1"));
         assertTrue(all.contains("sp_name=library"));
-        assertTrue(all.contains(cliCommand("verify library")));
+        assertTrue(all.contains("state=ACCESS_NOT_INITIALIZED"));
+        assertTrue(all.contains(cliCommand("access init")));
 
         invoke("disable", "library", "--apply");
         final String disabledSp = invokeOutput("next", "library");
@@ -276,6 +291,100 @@ class GraphicalMatrixSpManagementToolTest {
     }
 
     @Test
+    void configuresAndRollsBackAnAttributeAccessPolicy() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+        final Path metadataFile = Files.writeString(temporary.resolve("sp.xml"),
+            GraphicalMatrixSpMetadataTest.metadata(ENTITY_ID, "https://sp.example.org/acs"));
+        final GraphicalMatrixSpManagementConfig config =
+            GraphicalMatrixSpManagementConfig.load(temporary.toString());
+        final String digest = GraphicalMatrixSpMetadata.fromFile(
+            config, metadataFile, ENTITY_ID).sha256();
+        invoke("add", "--name", "library", "--entity-id", ENTITY_ID,
+            "--metadata-file", metadataFile.toString(), "--attribute-profile", "uid",
+            "--mfa", "force", "--approve-sha256", digest, "--apply");
+
+        invoke("attributes", "approve", "businessCategory", "--usage", "access",
+            "--classification", "internal", "--purpose", "SP authorization test",
+            "--apply", "--confirm", "businessCategory");
+        invoke("access", "set", "library", "--allow", "businessCategory=AA",
+            "--apply", "--confirm", ENTITY_ID);
+        GraphicalMatrixSpRegistry.Entry entry = GraphicalMatrixSpRegistry.load(
+            config.registryPath()).get("library");
+        assertTrue(entry.accessPolicyEnabled());
+        assertEquals(1, entry.accessPolicyRevision());
+        assertTrue(Files.isRegularFile(config.revisionsDirectory().resolve(
+            "library/revision-000002/metadata.xml")));
+        assertTrue(Files.isRegularFile(config.revisionsDirectory().resolve(
+            "library/revision-000002/access-policy.json")));
+
+        invoke("access", "disable", "library", "--apply", "--confirm", ENTITY_ID);
+        invoke("rollback", "library", "--revision", "2", "--apply", "--confirm", ENTITY_ID);
+
+        entry = GraphicalMatrixSpRegistry.load(config.registryPath()).get("library");
+        final GraphicalMatrixSpAccessPolicy.Policy restored =
+            GraphicalMatrixSpAccessPolicy.load(config.accessPolicyPath()).find("library");
+        assertTrue(entry.accessPolicyEnabled());
+        assertEquals(1, entry.accessPolicyRevision());
+        assertTrue(restored.enabled());
+        assertEquals(1, restored.revision());
+        assertEquals(GraphicalMatrixSpAccessEvaluator.Result.ALLOW,
+            new GraphicalMatrixSpAccessEvaluator().evaluate(restored, ENTITY_ID,
+                java.util.Map.of("businessCategory", java.util.List.of("AA"))).result());
+    }
+
+    @Test
+    void listsLegacyProfilesAndRecordsManagedProfileRevisionOnAdd() throws Exception {
+        prepareIdp();
+        final Path properties = temporary.resolve(
+            "conf/graphicalmatrix/sp-management.properties");
+        Files.writeString(properties, Files.readString(properties)
+            + "graphicalmatrix.sp.attributeProfile.legacy-business = uid,businessCategory\n");
+        invoke("init", "--apply");
+
+        final String profiles = invokeOutput("attributes", "profile", "list");
+        assertTrue(profiles.contains("legacy-business"));
+        assertTrue(profiles.contains("LEGACY_UNREVIEWED"));
+        assertTrue(invokeOutput("attributes", "profile", "show", "legacy-business")
+            .contains("status=LEGACY_UNREVIEWED"));
+        final String profilesJson = invokeOutput(
+            "attributes", "profile", "list", "--format", "json");
+        final java.util.List<?> profileRows =
+            (java.util.List<?>) GraphicalMatrixJson.parse(profilesJson);
+        assertTrue(profileRows.stream().map(item -> {
+            try {
+                return GraphicalMatrixJson.asObject(item, "profile").get("name");
+            } catch (java.io.IOException ex) {
+                throw new IllegalStateException(ex);
+            }
+        }).anyMatch("uid"::equals));
+        assertTrue(profileRows.stream().map(item -> {
+            try {
+                return GraphicalMatrixJson.asObject(item, "profile").get("name");
+            } catch (java.io.IOException ex) {
+                throw new IllegalStateException(ex);
+            }
+        }).anyMatch("legacy-business"::equals));
+
+        invoke("attributes", "profile", "create", "managed-uid", "--attributes", "uid",
+            "--description", "Managed uid", "--apply", "--confirm", "managed-uid");
+        final Path metadataFile = Files.writeString(temporary.resolve("sp.xml"),
+            GraphicalMatrixSpMetadataTest.metadata(ENTITY_ID, "https://sp.example.org/acs"));
+        final GraphicalMatrixSpManagementConfig config =
+            GraphicalMatrixSpManagementConfig.load(temporary.toString());
+        final String digest = GraphicalMatrixSpMetadata.fromFile(
+            config, metadataFile, ENTITY_ID).sha256();
+        invoke("add", "--name", "library", "--entity-id", ENTITY_ID,
+            "--metadata-file", metadataFile.toString(), "--attribute-profile", "managed-uid",
+            "--mfa", "force", "--approve-sha256", digest, "--apply");
+
+        final GraphicalMatrixSpRegistry.Entry entry =
+            GraphicalMatrixSpRegistry.load(config.registryPath()).get("library");
+        assertEquals("managed-uid", entry.attributeProfile());
+        assertEquals(1, entry.attributeProfileRevision());
+    }
+
+    @Test
     void adoptsAndRestoresLegacyFilesystemProvider() throws Exception {
         prepareIdp();
         final Path legacyMetadata = Files.writeString(temporary.resolve("metadata/legacy.xml"),
@@ -326,11 +435,14 @@ class GraphicalMatrixSpManagementToolTest {
         Files.createDirectories(temporary.resolve("conf/graphicalmatrix"));
         Files.createDirectories(temporary.resolve("metadata"));
         Files.createDirectories(temporary.resolve("logs"));
+        final String runtimeGroup = Files.readAttributes(temporary,
+            PosixFileAttributes.class).group().getName();
         Files.writeString(temporary.resolve("conf/graphicalmatrix/sp-management.properties"), """
             graphicalmatrix.sp.management.enabled = true
             graphicalmatrix.sp.metadata.allowedAcsHosts = sp.example.org
             graphicalmatrix.sp.reload.enabled = false
-            """, StandardCharsets.UTF_8);
+            graphicalmatrix.sp.runtimeGroup = %s
+            """.formatted(runtimeGroup), StandardCharsets.UTF_8);
         Files.writeString(temporary.resolve("conf/metadata-providers.xml"), """
             <?xml version="1.0" encoding="UTF-8"?>
             <MetadataProvider xmlns="urn:mace:shibboleth:2.0:metadata"
@@ -353,6 +465,19 @@ class GraphicalMatrixSpManagementToolTest {
             graphicalmatrix.mfa.bypassIPs =
             graphicalmatrix.mfa.bypassCIDRs =
             graphicalmatrix.mfa.useForwardedFor = false
+            """, StandardCharsets.UTF_8);
+        Files.writeString(temporary.resolve("conf/attribute-resolver.xml"), """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <AttributeResolver xmlns="urn:mace:shibboleth:2.0:resolver"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+              <AttributeDefinition id="uid" xsi:type="Simple">
+                <AttributeEncoder xsi:type="SAML2String" name="urn:oid:0.9.2342.19200300.100.1.1"/>
+              </AttributeDefinition>
+              <AttributeDefinition id="mail" xsi:type="Simple">
+                <AttributeEncoder xsi:type="SAML2String" name="urn:oid:0.9.2342.19200300.100.1.3"/>
+              </AttributeDefinition>
+              <AttributeDefinition id="businessCategory" xsi:type="Simple"/>
+            </AttributeResolver>
             """, StandardCharsets.UTF_8);
     }
 

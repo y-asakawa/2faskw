@@ -185,7 +185,7 @@ graphicalmatrix.lockout.maxLockSeconds = 2592000
 
 ## 手作業で登録済みのSPをSP管理CLIの対象へ移行するにはどうすればよいか
 
-既存SPは、v1.2.7へ更新しただけでは変更されない。CLI管理を使わないSPは、従来の
+既存SPは、v1.3.0へ更新しただけでは変更されない。CLI管理を使わないSPは、従来の
 `FilesystemMetadataProvider`設定のまま運用できる。`init --apply`は管理CLIの共通基盤を作るだけで、
 既存SPを自動的に移行しない。
 
@@ -795,6 +795,285 @@ TOTPを使用しない環境では、TOTP保存方式に関するWARNを許容�
 ```
 
 この検査はDB内の既存 `sequence` と `graphicalmatrix.choice` の整合性までは確認しない。
+
+## 他システムからTOTPまたはWebAuthnを移行できるか
+
+TOTPは、移行元から利用者ごとの**元のTOTP seed**を安全に取得でき、2FAS-KW側のTOTP認証設定と
+互換性がある場合に限り、個別移行できる。単に利用者が現在表示できるワンタイムコードやQR画像だけでは、
+安全かつ確実な一括移行の入力にはならない。
+
+現在の`graphicalmatrix-db.sh`には、1ユーザーの大文字Base32 seedを登録する機能がある。一方、
+他システムのTOTP seedを含むCSVを一括インポートする機能は提供していない。seedは認証秘密情報であるため、
+端末履歴、通常のCSV、通常ログに残さない専用の移行手順を設計する。
+
+seedを登録しただけで直ちに本番移行完了とはしない。利用者の既存Authenticatorで生成されたコードを使い、
+2FAS-KWのTOTP認証・有効化フローを1ユーザーずつ検証してから展開する。移行元とTOTPの方式
+（seed、ハッシュ方式、桁数、時間刻み）が互換でなければ、利用者に2FAS-KW側で再登録してもらう。
+
+WebAuthn credentialの他システムからの移行は、原則としてできない。credentialは認証先の
+**RP ID**に暗号学的に結び付くため、別のドメインまたは別のRelying Partyへコピーしても利用できない。
+2FAS-KWの管理CLIもWebAuthnについては一覧・削除だけを提供し、import機能は提供していない。
+
+同一RP ID、同一のShibboleth WebAuthn Plugin、同一のStorageService保存形式を維持したまま保存先だけを
+移す場合は、別途の保存先移行として検討できる。しかし、credential ID、公開鍵、署名カウンタ、
+StorageServiceのcontextを壊さず扱う必要があり、直接DBへ書き込む運用はサポートしない。
+通常は、新しい2FAS-KW環境で利用者にWebAuthn credentialを再登録してもらう。
+
+## SPごとにLDAP属性で利用可否を制御するにはどうすればよいか
+
+v1.3.0以降の`graphicalmatrix-sp.sh access`を使用する。SP metadata管理、属性release、MFA要否とは
+別の機能であり、IdPが解決した未フィルタ属性をSAML Response発行前に評価する。認可判定のたびに
+LDAPを追加検索する処理ではない。
+
+> [!IMPORTANT]
+> LDAPに対象属性が存在するだけでは判定できない。Attribute Resolverが使用するLDAP bindユーザーにも、
+> 対象属性の`read`権限が必要である。権限不足やResolver未設定の場合、`access test`は
+> `reason=ATTRIBUTE_MISSING`として対象SPをfail closedで拒否する。属性値を設定した後は、
+> 検証用利用者と対象SPのentityIDを指定して、IdPが実際に属性を解決できることを確認する。
+
+```bash
+sudo env IDP_BASE_URL='http://127.0.0.1:8080/idp' \
+  /opt/shibboleth-idp/bin/aacli.sh \
+  --principal USER_ID \
+  --requester 'https://sp.example.org/shibboleth' \
+  --unfiltered
+```
+
+出力に対象属性がない場合は、Attribute Resolverの定義、LDAP bindユーザーの権限、LDAP側の
+アクセス制御を確認する。389 Directory ServerではACI、OpenLDAPではACLなど、LDAP製品に応じた
+読取り権限の設定が必要である。`--unfiltered`はResolverの確認用であり、通常のSAML属性releaseを
+確認する操作ではない。
+
+初回はContextCheck連携を明示的に初期化する。既存ContextCheckがある場合は自動上書きされず、
+`CONTEXT_CHECK_CONFLICT`で停止する。
+
+初期化前に`sp-management.properties`の`graphicalmatrix.sp.runtimeGroup`をIdP実行アカウントの
+primary groupへ設定する。標準構成は`jetty`である。`access init --apply`は、runtime groupへ
+access policy、attribute catalog、SP管理台帳の読み取りだけを許可する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access init
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access init --apply
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+`businessCategory=AA`の利用者だけを`2faskwlocaltest`へ許可する例:
+
+```bash
+# 1. IdPで利用可能な属性IDの候補を検出する。
+# 属性値は表示・保存しない。businessCategoryが候補にあることを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
+
+# 2. businessCategoryをIdP内部のSPアクセス制御に使うことを実際に承認する。
+# --usage access はSPへの属性送信ではなく、IdP内の認可判定にだけ利用する指定である。
+# --classification internal は内部利用の属性として分類する。
+# --confirm には承認する属性IDを完全一致で指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
+  businessCategory --usage access --classification internal \
+  --purpose 'IdP-side SP authorization' \
+  --apply --confirm businessCategory
+
+# 3. 対象SPのaccess policyを設定する事前確認（dry-run）。
+# 2faskwlocaltest はSPのentityIDではなく、SP管理CLIに登録した管理名である。
+# businessCategory=AA を満たす利用者だけを許可する予定内容を表示し、設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest --allow 'businessCategory=AA'
+
+# 4. access policyを対象SPへ実際に適用する。
+# --confirm には対象SPの実際のentityIDを完全一致で指定する。
+# https://sp.example.org/shibboleth は例のため、対象SPのentityIDへ置き換える。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest --allow 'businessCategory=AA' \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+```
+
+異なる属性はAND、同一属性へ繰り返した`--allow`値はORである。denyはallowより先に評価する。
+期待属性がない場合や値が一致しない場合、policy設定済みSPだけをfail closedで拒否する。
+policyを設定していないSPには影響しない。
+
+適用後は、許可される利用者と拒否される利用者をそれぞれ指定して判定を確認する。
+
+```bash
+# 5. businessCategory=AAを持つ利用者で、許可（decision=ALLOW）を確認する。
+# 属性値そのものは表示せず、判定結果と確認した属性IDだけを出力する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
+  2faskwlocaltest --user user-with-aa
+
+# 6. businessCategory=AAを持たない利用者で、拒否（decision=DENY）を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
+  2faskwlocaltest --user user-without-aa
+```
+
+最後に対象SPの保護URLから実際にSSOを行い、許可利用者はSPへ到達し、非許可利用者は
+IdPで拒否されることを確認する。`access set --apply`後の判定は設定ファイルを定期reloadするため、
+この操作だけを理由に`build.sh`やJetty再起動を行う必要はない。
+
+## LDAP属性の候補とSPへ送信できる属性を確認するにはどうすればよいか
+
+`attributes discover`はresolver、Attribute Registry、既存filter、profile、access policyから
+属性IDだけを検出する。実属性値は表示・保存しない。
+
+属性profileの作成・更新時と`set-attributes`時には、全属性が現在`release-approved`かつ
+`mapped`であることをCLIが再検証する。`attributes discover --sp SP_NAME --user USER`を使い、
+検証用利用者で`runtime-observed`かつ`mapped`であることを確認してからprofileを作成する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
+  --sp 2faskwlocaltest --user test01
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes list
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes show uid
+```
+
+SPへ送るprofileには`release-approved`かつSAML mapping済みの属性だけを登録できる。
+`internal-only`はIdP内部のaccess policyには使えるが、SPへreleaseできない。
+
+```bash
+# 1. attribute profile作成の事前確認（dry-run）。
+# uid-mail-release は任意のprofile管理名であり、まだ設定は変更しない。
+# --attributes は、このprofileでSPへ送信を許可する属性IDを指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile create \
+  uid-mail-release --attributes uid,mail \
+  --description 'Account correlation and mail notification'
+
+# 2. profileを実際に作成する。
+# --confirm には、作成するprofile管理名を完全一致で指定する。
+# この時点では、どのSPにも属性は送信されない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile create \
+  uid-mail-release --attributes uid,mail \
+  --description 'Account correlation and mail notification' \
+  --apply --confirm uid-mail-release
+
+# 3. 対象SPへprofileを割り当てる事前確認（dry-run）。
+# 2faskwlocaltest はSPのentityIDではなく、SP管理CLIに登録した管理名である。
+# uid-mail-release は手順1・2で作成したprofile管理名である。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-attributes 2faskwlocaltest uid-mail-release
+
+# 4. 対象SPへprofileを実際に適用する。
+# この操作で、対象SP向けmanaged attribute filterにuidとmailの送信設定が反映される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-attributes 2faskwlocaltest uid-mail-release --apply
+```
+
+`discover`やprofile作成のdry-runだけではattribute filterを変更しない。最後の`set-attributes --apply`
+を対象SPへ実行した時点で、そのSP向けmanaged filterへ反映される。
+
+### 既存profileへeduPersonPrincipalNameを追加する場合
+
+既に`uid-mail-release`を`2faskwlocaltest`へ割り当てており、そこへ
+`eduPersonPrincipalName`を追加する例である。最初に`attributes discover`の
+`GOVERNANCE`が`release-approved`、`SAML MAPPING`が`mapped`であることを確認する。
+すでに`release-approved`なら承認操作は不要である。`candidate`の場合だけ、明示承認してから
+profileを更新する。
+
+```bash
+# 1. 対象利用者で、属性が解決され、SAML mapping済みであることを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
+  --sp 2faskwlocaltest --user test01
+
+# 2. 表示がcandidateの場合だけ実行する。release-approvedの場合は不要。
+# --usage release は、この属性をSPへ送信可能な属性として承認する指定である。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
+  eduPersonPrincipalName \
+  --usage release \
+  --classification personal \
+  --purpose 'Federated account identifier' \
+  --apply \
+  --confirm eduPersonPrincipalName
+
+# 3. 既存の管理対象profileを更新する事前確認（dry-run）。
+# --attributes は置換指定のため、残したいuidとmailも含めて全属性を列挙する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile update \
+  uid-mail-release \
+  --attributes uid,mail,eduPersonPrincipalName \
+  --description 'Account identifiers and federated principal name'
+
+# 4. profileを実際に更新する。
+# uid-mail-releaseを割り当て済みのSPのmanaged AttributeFilterPolicyも自動更新・reloadされる。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile update \
+  uid-mail-release \
+  --attributes uid,mail,eduPersonPrincipalName \
+  --description 'Account identifiers and federated principal name' \
+  --apply \
+  --confirm uid-mail-release
+
+# 5. profile内容と対象SPへの割当を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes profile show uid-mail-release
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh verify 2faskwlocaltest
+```
+
+`attributes profile update`は**管理対象profile**だけを更新できる。組み込みの`uid`、`uid-mail`、
+`none`は更新できないため、それらを利用中の場合は`uid-mail-eppn-release`などの新しい管理対象profileを
+作成し、`set-attributes SP_NAME uid-mail-eppn-release --apply`で対象SPへ割り当てる。
+
+適用後は、次の順で確認する。
+
+```bash
+# 1. profileに登録した属性IDを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes profile show uid-mail-release
+
+# 2. SP管理台帳の割当状態とmetadata整合性を確認する。
+# attribute_profile=uid-mail-release、status=ACTIVE、result=OK を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  verify 2faskwlocaltest
+```
+
+`set-attributes --apply`が`result=APPLY_OK`で完了した場合、CLIは対象SPのmanaged
+AttributeFilterPolicyを書き換え、`shibboleth.AttributeFilterService`を自動reloadするため、
+この操作だけを理由に`build.sh`やJetty再起動を行う必要はない。
+
+最後に、対象SPの保護URLから実際にSSOを実施し、SP側のセッション情報、アプリケーションの属性表示、
+またはSPのSAMLデバッグログで`uid`と`mail`が受信されていることを確認する。CLIの`verify`は
+管理台帳とmetadataの整合性を確認するものであり、実際のSAML Responseに含まれる属性値までは確認しない。
+
+実際の属性送信は、検証用利用者でSPの保護URLからSSOを開始した後、**SP側**で確認する。IdPの
+`attributes discover`や`attributes profile show`は、IdPが解決可能な属性や送信設定を確認するための
+commandであり、送信済みSAML Responseを表示するものではない。
+
+IdP内部の属性IDとSPが受信するSAML属性名は別である。例えば標準的なAttribute Registryでは、
+`uid`は`urn:oid:0.9.2342.19200300.100.1.1`、`mail`は
+`urn:oid:0.9.2342.19200300.100.1.3`、`eduPersonPrincipalName`は
+`urn:oid:1.3.6.1.4.1.5923.1.1.1.6`として送られる。SP側の期待値は、IdP内部IDではなく
+実際のSAML属性名に合わせる。
+
+SP側の確認方法は製品に依存するが、次の方針とする。
+
+- Shibboleth SP: アプリケーションが参照する`attribute-map.xml`の属性名を、保護された検証用endpointで
+  確認する。`REMOTE_USER`や属性ヘッダの有無だけを表示し、値を画面や通常ログへ出力しない。
+- SimpleSAMLphp: SSO後に`$auth->getAttributes()`で取得した配列から、実際のSAML属性名（OIDまたは
+  SP側で設定した別名）が存在することだけを検証用画面へ表示する。IdP内部IDの`uid`だけを配列keyとして
+  期待すると、正常に送信されていても`missing`と誤判定する。
+- SPのアプリケーション: `uid`と`mail`を使う機能を検証し、属性がない場合に意図どおり拒否またはエラーに
+  なることも確認する。
+
+SAMLトレーサーやSPのデバッグログでSAML Responseを直接確認する方法もあるが、属性値やセッション情報を
+露出しやすいため、本番環境の通常運用には使用しない。障害調査で一時的に有効化する場合も、対象利用者を
+限定し、出力を速やかに削除する。
+
+SimpleSAMLphpで存在確認だけを行う検証用ページは、次のようにIdP内部IDとSAML属性名の候補を対応付ける。
+通常運用では属性値を表示しない。
+
+```php
+$expected = [
+    'uid' => ['uid', 'urn:oid:0.9.2342.19200300.100.1.1'],
+    'mail' => ['mail', 'urn:oid:0.9.2342.19200300.100.1.3'],
+    'eduPersonPrincipalName' => [
+        'eduPersonPrincipalName', 'urn:oid:1.3.6.1.4.1.5923.1.1.1.6',
+    ],
+];
+
+foreach ($expected as $label => $aliases) {
+    $present = array_filter($aliases, static fn ($key) => array_key_exists($key, $attributes));
+    printf("%s: %s\n", $label, $present ? 'present' : 'missing');
+}
+```
+
+属性値そのものを表示する試験は、テスト利用者とアクセス制限された一時endpointだけで実施する。試験後は
+endpointを削除し、Webサーバーのaccess log・error logへ値が残っていないことを確認する。
 
 ## 関連文書
 

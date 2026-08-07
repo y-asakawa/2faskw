@@ -4,7 +4,10 @@
 Dashboard障害が認証処理へ影響しないよう、Shibboleth IdPおよび2FAS-KWプラグインとは別プロセスで
 動作する。MFA保存DB、LDAP、IdP管理APIには接続しない。
 
-詳細な設計判断と受入条件は
+v1.3.0ではDashboardをSP管理CLIおよびSP別LDAP属性アクセス制御とともに統合リリースとして
+配布する。現在の配布・更新方針は
+[`v1.3.0-RELEASE-NOTES.md`](release-notes/v1.3.0-RELEASE-NOTES.md)を参照する。
+Dashboard固有の詳細設計と受入条件は、v1.2.7で確定した
 [`v1.2.7-DASHBOARD.md`](release-notes/v1.2.7-DASHBOARD.md)を参照する。
 
 <img src="MFA_DS01.png" alt="2FAS-KW dashboard screenshot 1" width="50%">

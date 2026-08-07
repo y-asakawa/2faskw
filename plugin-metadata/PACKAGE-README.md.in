@@ -35,6 +35,7 @@ sudo systemctl restart jetty-idp.service
 
 - 導入: https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL.md
 - SP追加管理: https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL_NEW_SP.md
+- SP別属性アクセス制御: https://github.com/y-asakawa/2faskw/blob/main/docs/release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md
 - 設定一覧: https://github.com/y-asakawa/2faskw/blob/main/docs/CONFIG-REFERENCE.md
 - 更新: https://github.com/y-asakawa/2faskw/blob/main/docs/UPGRADE.md
 - セキュリティ運用: https://github.com/y-asakawa/2faskw/blob/main/docs/SECURITY.md
