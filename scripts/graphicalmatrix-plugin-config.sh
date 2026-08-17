@@ -297,6 +297,12 @@ if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/postgresql-*.jar >/dev/null 2>&1; then
   echo "ERROR: PostgreSQL JDBC driver missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
   exit 1
 fi
+if ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/httpclient-*.jar >/dev/null 2>&1 \
+  || ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/httpcore-*.jar >/dev/null 2>&1 \
+  || ! ls "$PACKAGE_DIR"/webapp/WEB-INF/lib/commons-logging-*.jar >/dev/null 2>&1; then
+  echo "ERROR: Apache HttpClient runtime dependencies missing under $PACKAGE_DIR/webapp/WEB-INF/lib" >&2
+  exit 1
+fi
 
 for src in "$PACKAGE_DIR"/webapp/WEB-INF/lib/*.jar; do
   install_copy "$src" "$IDP_HOME/edit-webapp/WEB-INF/lib/$(basename "$src")"
