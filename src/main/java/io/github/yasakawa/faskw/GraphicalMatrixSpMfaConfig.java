@@ -134,6 +134,7 @@ final class GraphicalMatrixSpMfaConfig {
     private static void addProfile(final String profile, final String entityId,
             final List<String> entryCidrs, final Set<String> force, final Set<String> bypass,
             final Set<String> required, final Map<String, List<String>> cidrs) {
+        validateEntityId(entityId);
         switch (profile == null || profile.isBlank() ? "inherit" : profile) {
             case "inherit" -> {
             }
@@ -142,6 +143,15 @@ final class GraphicalMatrixSpMfaConfig {
             case "required" -> required.add(entityId);
             case "sp-cidr-bypass" -> cidrs.put(entityId, List.copyOf(entryCidrs));
             default -> throw new IllegalArgumentException("unknown MFA profile: " + profile);
+        }
+    }
+
+    static void validateEntityId(final String entityId) {
+        if (entityId == null || entityId.isBlank()
+                || entityId.indexOf(',') >= 0 || entityId.indexOf(';') >= 0
+                || entityId.indexOf('|') >= 0) {
+            throw new IllegalArgumentException(
+                "entityID must not contain MFA policy delimiters: comma, semicolon, or pipe");
         }
     }
 

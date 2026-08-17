@@ -40,9 +40,13 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.change.ldapRateLimit.windowSeconds` | integer seconds | `300` | 失敗回数を数える時間窓。 | 1以上。 |
 | `graphicalmatrix.change.ldapRateLimit.lockSeconds` | integer seconds | `900` | 閾値超過後の制限時間。 | 制限中はLDAP bindを実行しない。 |
 | `graphicalmatrix.change.ldapRateLimit.key` | enum | `ip-user` | レート制限キー。 | `ip`, `user`, `ip-user`。NAT配下の巻き添えを抑えるため`ip-user`推奨。 |
+| `graphicalmatrix.change.ldapRateLimit.ipFailureLimit` | integer | `100` | user IDローテーションを抑止するIP単位の失敗上限。 | 1以上。通常のキー別制限とは独立して適用する。 |
+| `graphicalmatrix.change.ldapRateLimit.ipWindowSeconds` | integer seconds | `60` | IP単位の失敗回数を数える時間窓。 | 1以上。 |
+| `graphicalmatrix.change.ldapRateLimit.ipLockSeconds` | integer seconds | `300` | IP単位の閾値超過後の制限時間。 | 1以上。NAT環境では利用者数に合わせて調整する。 |
+| `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs` | CIDR list | empty | 信頼済み共有NATで独立IP全体制限だけを除外する。 | IPv4/IPv6 CIDRをカンマ区切りで最大256件。ホスト名不可。キー別制限は継続する。単一IPはIPv4 `/32`、IPv6 `/128`。 |
 | `graphicalmatrix.selfservice.enabled` | boolean | `false` | IdP内のShibboleth再認証済み自己管理flowを有効にする。 | `true`にする前に`authn/MFA`と各第二要素のForceAuthn対応を確認する。 |
 | `graphicalmatrix.selfservice.transactionTtlSeconds` | integer seconds | `600` | 認証済みprofileから変更画面へ渡す一回限りの状態の有効期限。 | `60`から`900`。変更画面自体は`challenge.seconds`で別に期限管理する。 |
-| `graphicalmatrix.change.legacyLdapLoginEnabled` | boolean | `true` | `/graphicalmatrix/change`の従来LDAPログイン経路を許可する。 | 自己管理flowの検証後は`false`を推奨。self-serviceと両方をfalseにはできない。 |
+| `graphicalmatrix.change.legacyLdapLoginEnabled` | boolean | `true` | `/graphicalmatrix/change`の従来LDAPログイン経路を許可する。 | 現在のMFA方式がGraphicalMatrixの場合だけ利用できる。TOTP/WebAuthn選択中はIdP自己管理flowを使う。自己管理flowの検証後は`false`を推奨。 |
 | `graphicalmatrix.productionMode` | boolean | `false` | Runtime側の本番保護。 | true時はplaintext TOTP seed保存を拒否する。 |
 | `graphicalmatrix.sequence.storage` | enum | `auto` | sequence保存方式。 | `auto`, `plaintext`, `keyword`, `aes-gcm`, `hash`。`auto`は`hash`として扱う。本番は`hash`推奨。 |
 | `graphicalmatrix.sequence.keywordFile` | path | `/opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword` | keyword暗号化用secret。 | 復号可能。権限は`0640`以下。 |
@@ -84,6 +88,9 @@ IdP runtime / Admin Tools がMFA DBへ接続するための設定。
 | `graphicalmatrix.db.pool.idleTimeoutMillis` | milliseconds | `600000` | idle接続の破棄時間。 | `minimumIdle`との関係に注意。 |
 | `graphicalmatrix.db.pool.maxLifetimeMillis` | milliseconds | `1800000` | 接続最大寿命。 | DB/LB側の接続寿命より短くする。 |
 | `graphicalmatrix.db.pool.validationTimeoutMillis` | milliseconds | `5000` | 接続検証タイムアウト。 | 短すぎると一時遅延で失敗しやすい。 |
+
+`graphicalmatrix-db.sh`のH2操作は、DB passwordをprocess argumentやcommand lineへ展開せず、専用Java
+bridgeの標準入力へ渡す。H2はPoC用途だが、`passwordFile`とOS上のprocess情報をどちらも保護する。
 
 TLS verify-full例:
 
@@ -255,6 +262,8 @@ DB/JDBC StorageServiceが推奨構成であり、この設定はLDAP保存を選
 
 WebAuthn credential登録/管理画面の代表設定。
 配布ファイルにはコメントアウトされた設定候補を含む。
+自己管理画面からの安全な方式変更には、`AddKeyAuditSuccessHook`をサポートする
+Shibboleth WebAuthn Plugin 1.3.0以上が必要である。
 
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
@@ -268,6 +277,11 @@ WebAuthn credential登録/管理画面の代表設定。
 | `idp.authn.webauthn.registration.attestationConveyancePreference` | enum | `none` | attestation要求。 | `none`, `indirect`, `direct`, `enterprise`。 |
 | `idp.authn.webauthn.registration.nicknameRequired` | boolean | `true` | credential nickname必須。 | 複数デバイス管理に有用。 |
 | `idp.authn.webauthn.admin.management.accessPolicy` | bean/policy | `AccessByAdmin` | 管理画面アクセス制御。 | 管理者用Flow。 |
+
+プロファイル内の`shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook`は、credential保存成功後に
+2FAS-KWのMFA方式を`WebAuthn`へ切り替えるための統合ポイントである。2FAS-KW Pluginが
+このbeanを提供する。独自hookを使う場合は上書きせず、2FAS-KW hookも必ず呼び出す複合hookとする。
+このhookが呼ばれない場合、credentialは保存されても2FAS-KWのMFA方式は登録前のままとなる。
 
 詳細項目は配布ファイル `webauthn-registration.properties` のコメントを参照する。
 

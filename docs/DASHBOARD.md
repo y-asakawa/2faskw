@@ -106,7 +106,7 @@ Dashboard server
 3. nodeごとに一意の`agent.nodeId`とclient certificateを設定する。
 4. client certificateのDNS SANまたはURI SANを`agent.nodeId`と一致させる。
 5. IdPサーバからDashboardのingest portへの通信だけをFirewallで許可する。
-6. DashboardのUI portはloopbackで待ち受け、認証proxyだけが接続できるようにする。
+6. DashboardのUI portはloopbackで待ち受け、認証proxyに専用proxy secret headerを設定する。
 7. Dashboardサーバと全IdPサーバで時刻同期を有効にする。
 8. Agent停止や通信断に備え、IdP側spoolの容量と監視を設定する。
 
@@ -270,6 +270,8 @@ dashboard.http.bindAddress = 127.0.0.1
 dashboard.http.port = 9080
 dashboard.auth.mode = proxy
 dashboard.auth.trustedProxies = 127.0.0.1/32,::1/128
+dashboard.auth.proxySecretHeader = X-2FASKW-Proxy-Secret
+dashboard.auth.proxySecretFile = /etc/2faskw-dashboard/credentials/proxy.secret
 dashboard.storage.retentionDays = 30
 dashboard.storage.aggregateRetentionDays = 90
 dashboard.query.maxRangeDays = 100
@@ -358,16 +360,24 @@ v1.2.7のDashboard UI listenerはTLSを直接提供しない。`local` modeは�
 
 ### proxy mode
 
-`dashboard.auth.mode=proxy`では、Dashboardは接続元が`trustedProxies`に一致する場合だけ
-`remoteUserHeader`と`roleHeader`を信頼する。認証proxyは外部クライアントから同名headerを受け取らず、
-必ず削除してから認証結果で設定する。
+`dashboard.auth.mode=proxy`では、Dashboardは接続元が`trustedProxies`に一致し、さらに
+`proxySecretHeader`が`proxySecretFile`の値と一致する場合だけ`remoteUserHeader`と`roleHeader`を
+信頼する。loopback上の別processがidentity headerを直接送信しても、proxy secretがなければ拒否される。
+認証proxyは外部クライアントから同名headerを受け取らず、必ず削除してから認証結果で設定する。
 
 同梱のApache HTTP Server例では次を使用する。
 
 ```text
 X-Remote-User
 X-2FASKW-Role
+X-2FASKW-Proxy-Secret
 ```
+
+server modeのインストーラーは
+`/etc/2faskw-dashboard/credentials/proxy.secret`へ64桁のrandom hex値を生成する。同梱Apache例を
+`/etc/httpd/conf.d/`などへroot所有かつ`0600`で配置し、rootだけが利用できるeditorで
+`REPLACE_WITH_PROXY_SECRET`を同じ値へ置換する。secretをshellのcommand lineへ展開せず、Apache access
+logにもこのheaderを追加しない。proxy secretを変更した場合はApacheとDashboardの両方を再起動する。
 
 利用できるroleは次のとおりである。
 
@@ -1461,6 +1471,8 @@ dashboard.auth.trustedProxies = 127.0.0.1/32,::1/128
 dashboard.auth.remoteUserHeader = X-Remote-User
 dashboard.auth.roleHeader = X-2FASKW-Role
 dashboard.auth.rolesFile = /etc/2faskw-dashboard/roles.properties
+dashboard.auth.proxySecretHeader = X-2FASKW-Proxy-Secret
+dashboard.auth.proxySecretFile = /etc/2faskw-dashboard/credentials/proxy.secret
 
 dashboard.ingest.enabled = true
 dashboard.ingest.bindAddress = 0.0.0.0

@@ -57,6 +57,18 @@ class DashboardStoreTest {
     }
 
     @Test
+    void accessAuditUsesRetentionAndRegexQueriesHaveAHardCandidateLimit() throws Exception {
+        try (DashboardStore store =
+                new DashboardStore("jdbc:h2:mem:dashboard-security-bounds;DB_CLOSE_DELAY=-1")) {
+            store.recordAccess("admin", "viewer", "events", "all", "OK", "127.0.0.1");
+
+            assertEquals(1L, store.deleteAccessAuditOlderThan(Instant.now().plusSeconds(1)));
+            assertEquals(0L, store.deleteAccessAuditOlderThan(Instant.now().plusSeconds(1)));
+            assertEquals(10_000, DashboardStore.REGEX_CANDIDATE_LIMIT);
+        }
+    }
+
+    @Test
     void deduplicatesEventsAndUsesOnlyVerifyFailInFailureRate() throws Exception {
         try (DashboardStore store =
                 new DashboardStore("jdbc:h2:mem:dashboard;DB_CLOSE_DELAY=-1")) {

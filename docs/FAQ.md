@@ -123,6 +123,11 @@ graphicalmatrix.aliases = A:img01,B:img02,C:img03
 - `graphicalmatrix.change.ldapRateLimit.windowSeconds` は `1` 以上
 - `graphicalmatrix.change.ldapRateLimit.lockSeconds` は `1` 以上
 - `graphicalmatrix.change.ldapRateLimit.key` は `ip`、`user`、`ip-user` のいずれか
+- `graphicalmatrix.change.ldapRateLimit.ipFailureLimit` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipWindowSeconds` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipLockSeconds` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs` は空、またはIPv4/IPv6 CIDRを
+  カンマ区切りで最大256件。ホスト名、prefixなしの単一IP、空要素は使用不可
 
 設定例:
 
@@ -132,6 +137,46 @@ graphicalmatrix.change.ldapRateLimit.failureLimit = 5
 graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
 graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
+graphicalmatrix.change.ldapRateLimit.ipFailureLimit = 100
+graphicalmatrix.change.ldapRateLimit.ipWindowSeconds = 60
+graphicalmatrix.change.ldapRateLimit.ipLockSeconds = 300
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs =
+```
+
+### 大規模な共有NATからLDAP変更画面を利用するにはどうすればよいか
+
+同じNATアドレスから多数の利用者が一斉に操作する環境では、利用者ごとの入力誤りが
+`ipFailureLimit`へ合算され、正常な利用者までIP全体制限へ巻き込む可能性がある。
+信頼済みの学内・社内ネットワークに限り、独立したIP全体制限だけを除外できる。
+
+```properties
+# 利用者ごとの制限は維持する。
+graphicalmatrix.change.ldapRateLimit.enabled = true
+graphicalmatrix.change.ldapRateLimit.failureLimit = 5
+graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
+graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
+graphicalmatrix.change.ldapRateLimit.key = ip-user
+
+# このCIDRでは独立IP全体制限だけを除外する。
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs = 192.168.0.0/16,10.0.0.0/8
+```
+
+CIDRに一致しても、`failureLimit`によるキー別制限は継続する。既定の`key=ip-user`なら、
+同じNAT配下でもユーザーIDごとに別の失敗カウンターとなる。`key=ip`ではキー別制限も
+共有IP単位になるため、この用途では`user`または`ip-user`を使用する。
+
+この設定はLDAP保護全体のホワイトリストではなく、`ipFailureLimit`、`ipWindowSeconds`、
+`ipLockSeconds`で構成する独立IP全体制限だけの除外である。通常のShibboleth Password認証、
+GraphicalMatrix画像照合のロック、LDAPサーバー自身のロック方針には影響しない。
+接続元はServletが認識したIPを使用する。リバースプロキシ環境ではプロキシIPになる場合があるため、
+信頼できるプロキシ構成と実際の`graphicalmatrix-audit.log`の`ip`を確認してCIDRを決定する。
+
+設定保存後は次のリクエストから反映され、通常はJetty再起動を必要としない。適用前に設定検査を行う。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
 ```
 
 ### GraphicalMatrixロックアウト設定が不正
@@ -654,6 +699,25 @@ sudo systemctl restart jetty-idp.service
 sudo /opt/shibboleth-idp/bin/build.sh
 sudo systemctl restart jetty-idp.service
 ```
+
+## WebAuthnへMFA方式を変更するとき、登録の途中で失敗したらどうなるか
+
+自己管理画面でWebAuthnを選択しても、2FAS-KWはその時点でMFA方式を変更しない。
+現在のMFA方式を保持したまま、Shibboleth WebAuthn Pluginの公式登録flowを開始する。
+
+公式Pluginがcredentialの保存に成功し、登録成功hookで同一利用者の一回限り要求を
+確認できた場合だけ、2FAS-KWのMFA方式を`WebAuthn`へ切り替える。次の場合は元の
+MFA方式が維持される。
+
+- 利用者が登録画面を閉じた。
+- authenticator登録が失敗した。
+- 一回限りの登録要求が期限切れになった。
+- 登録中に管理者または別の操作がMFA方式を変更した。
+
+この連携にはShibboleth WebAuthn Plugin 1.3.0以上が必要である。管理CLIの
+`set-method USER WebAuthn`はcredentialの存在を検査しない強制操作のため、通常の利用者登録には
+使用しない。動作確認では、監査ログの`WEBAUTHN_REGISTER_START result=OK`と
+`WEBAUTHN_REGISTER_ACTIVATE result=OK`を確認する。
 
 ## Jettyの再起動が必要になるのはどのような場合か
 

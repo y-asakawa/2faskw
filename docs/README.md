@@ -140,12 +140,15 @@ sudo tail -n 50 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 | --- | --- | --- |
 | IdP状態確認 | `https://idp.example.org/idp/status` | IdPのstatus endpointを公開している場合。 |
 | 通常ログイン | SPが開始するSAML認証URL | 利用者へIdPログインURLを直接案内しない。 |
-| 従来の変更画面 | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`の場合。LDAP ID・パスワードと現在のGraphicalMatrixを使用する。 |
+| 従来の変更画面 | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`かつ現在選択中のMFA方式がGraphicalMatrixの場合。LDAP ID・パスワードと現在のGraphicalMatrixを使用し、保存されている未選択factorでは変更できない。 |
 | 推奨の自己管理画面 | `https://idp.example.org/idp/profile/2faskw/self-service` | `graphicalmatrix.selfservice.enabled=true`の場合。Shibboleth Password認証と現在のMFA方式で再認証する。 |
 | 管理API | `https://idp.example.org/idp/graphicalmatrix-admin/api/v1/` | APIを明示的に有効化した管理クライアントだけが使用する。 |
 
 TOTP登録とWebAuthn登録は、自己管理画面または変更メニューでMFA方式を選択して開始する。
 登録用URLを利用者へ直接案内せず、既存の認証・認可条件を通して開始する。
+WebAuthnでは、Shibboleth WebAuthn Pluginがcredentialの保存に成功した後だけ、
+2FAS-KWが利用者のMFA方式を`WebAuthn`へ切り替える。登録を中断または失敗した場合は、
+登録開始前のMFA方式を維持する。
 
 ### DB保存時の管理CLI
 
@@ -169,6 +172,10 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method user001 WebAuthn
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh unlock user001
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh user001 RESET
 ```
+
+`set-method ... WebAuthn`はcredentialの存在を確認せず強制的に方式を変更する管理操作である。
+通常のWebAuthn登録には自己管理画面を使い、復旧操作以外でcredential未登録の利用者へ
+`WebAuthn`を直接設定しない。
 
 CSV投入は、最初にdry-runを実行する。`--apply`を付けたときだけDBへ反映する。
 

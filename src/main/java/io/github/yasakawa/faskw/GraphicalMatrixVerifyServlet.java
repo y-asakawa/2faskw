@@ -203,9 +203,12 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final String csrfToken = (String) session.getAttribute("totpEnroll.csrfToken");
         final Long expiresAt = (Long) session.getAttribute("totpEnroll.expiresAt");
         final Boolean used = (Boolean) session.getAttribute("totpEnroll.used");
+        final boolean selfServiceAuthorized = Boolean.TRUE.equals(
+            session.getAttribute("totpEnroll.selfServiceAuthorized"));
         final long now = System.currentTimeMillis();
 
         if (user == null
+                || !selfServiceAuthorized
                 || !matchesFlowKey(sessionKey, request.getParameter("key"))
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
@@ -228,9 +231,11 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         try {
             if (result.isSuccess()) {
                 session.setAttribute("totpEnroll.used", Boolean.TRUE);
-                request.setAttribute(ExternalAuthentication.PRINCIPAL_NAME_KEY, user);
                 clearTotpRegistration(session);
-                ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
+                final GraphicalMatrixConfig config =
+                    GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
+                GraphicalMatrixChangeServlet.renderComplete(request, response, config, user,
+                    "TOTP登録を完了しました。次回ログインからTOTPを利用してください。");
                 return;
             }
 
@@ -243,14 +248,16 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 session.setAttribute("totpEnroll.csrfToken", retryCsrfToken);
                 session.setAttribute("totpEnroll.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
                 session.setAttribute("totpEnroll.used", Boolean.FALSE);
+                session.setAttribute("totpEnroll.selfServiceAuthorized", Boolean.TRUE);
                 GraphicalMatrixStartServlet.renderTotpRegistration(request, response, sessionKey, user,
                     seed, retryCsrfToken, "コードが正しくありません。認証アプリの6桁コードを確認してください。");
                 return;
             }
 
             clearTotpRegistration(session);
-            request.setAttribute(ExternalAuthentication.AUTHENTICATION_EVENT_KEY, result.getEvent());
-            ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "TOTP登録を完了できません。",
+                "登録状態が変更されました。自己管理画面から最初からやり直してください。");
         } catch (Exception ex) {
             throw new ServletException(ex);
         }
@@ -265,9 +272,12 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         final String csrfToken = (String) session.getAttribute("totpEnroll.csrfToken");
         final Long expiresAt = (Long) session.getAttribute("totpEnroll.expiresAt");
         final Boolean used = (Boolean) session.getAttribute("totpEnroll.used");
+        final boolean selfServiceAuthorized = Boolean.TRUE.equals(
+            session.getAttribute("totpEnroll.selfServiceAuthorized"));
         final long now = System.currentTimeMillis();
 
         if (user == null
+                || !selfServiceAuthorized
                 || !matchesFlowKey(sessionKey, request.getParameter("key"))
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
                 || expiresAt == null
@@ -325,23 +335,11 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 return;
             }
 
-            final List<String> displayOrder = GraphicalMatrixSupport.shuffledGraphicalIds(config);
-            final String challengeId = GraphicalMatrixSupport.token();
-            final String csrf = GraphicalMatrixSupport.token();
             clearTotpRegistration(session);
-            session.setAttribute("graphicalmatrix.key", sessionKey);
-            session.setAttribute("graphicalmatrix.user", user);
-            session.setAttribute("graphicalmatrix.challengeId", challengeId);
-            session.setAttribute("graphicalmatrix.csrfToken", csrf);
-            session.setAttribute("graphicalmatrix.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
-            session.setAttribute("graphicalmatrix.displayOrder", displayOrder);
-            session.setAttribute("graphicalmatrix.config", config);
-            session.setAttribute("graphicalmatrix.used", Boolean.FALSE);
-
-            audit.log("TOTP_REGISTER_CANCEL", user, "OK", challengeId,
-                "mfa_method=GraphicalMatrix,graphicals=" + displayOrder.size(), request);
-            GraphicalMatrixStartServlet.render(request, response, sessionKey, challengeId, csrf,
-                displayOrder, config, "TOTP登録を取り消し、GraphicalMatrixに戻しました。");
+            audit.log("TOTP_REGISTER_CANCEL", user, "OK", null,
+                "mfa_method=GraphicalMatrix,authorization=self_service", request);
+            GraphicalMatrixChangeServlet.renderComplete(request, response, config, user,
+                "TOTP登録を取り消し、GraphicalMatrixに戻しました。");
         } catch (Exception ex) {
             audit.log("TOTP_REGISTER_CANCEL", user, "DB_ERROR", null,
                 ex.getClass().getSimpleName(), request);
@@ -355,6 +353,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         session.removeAttribute("totpEnroll.csrfToken");
         session.removeAttribute("totpEnroll.expiresAt");
         session.removeAttribute("totpEnroll.used");
+        session.removeAttribute("totpEnroll.selfServiceAuthorized");
     }
 
     private static void handleForcedSequenceSave(final HttpServletRequest request,

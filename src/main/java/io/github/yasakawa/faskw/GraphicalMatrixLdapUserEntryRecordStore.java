@@ -22,9 +22,11 @@ import java.util.List;
 
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
+import javax.naming.directory.AttributeInUseException;
 import javax.naming.directory.BasicAttribute;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.ModificationItem;
+import javax.naming.directory.NoSuchAttributeException;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
 import javax.naming.ldap.LdapContext;
@@ -58,7 +60,15 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
                     && valid(entry.record)) {
                 return false;
             }
-            ldap.modifyAttributes(entry.dn, replaceAll(context, key, value, expiration, INITIAL_VERSION));
+            try {
+                final ModificationItem[] updates = emptyRecord(entry.record)
+                    ? createAll(context, key, value, expiration, INITIAL_VERSION)
+                    : replaceAll(context, key, value, expiration,
+                        entry.record.version(), INITIAL_VERSION);
+                ldap.modifyAttributes(entry.dn, updates);
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                return false;
+            }
             return true;
         } catch (NamingException ex) {
             throw new IOException("Unable to create WebAuthn LDAP user-entry storage record", ex);
@@ -111,7 +121,12 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
                 throw new VersionMismatchException("LDAP storage record version mismatch");
             }
             final long newVersion = value != null ? version + 1L : version;
-            ldap.modifyAttributes(entry.dn, replacePartial(value, expiration, newVersion));
+            try {
+                ldap.modifyAttributes(entry.dn,
+                    replacePartial(value, expiration, version, newVersion));
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                throw new VersionMismatchException("LDAP storage record version mismatch");
+            }
             return newVersion;
         } catch (NamingException ex) {
             throw new IOException("Unable to update WebAuthn LDAP user-entry storage record", ex);
@@ -131,7 +146,11 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
             if (entry.record.version() != version) {
                 throw new VersionMismatchException("LDAP storage record version mismatch");
             }
-            ldap.modifyAttributes(entry.dn, clearAll());
+            try {
+                ldap.modifyAttributes(entry.dn, clearAll(version));
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                throw new VersionMismatchException("LDAP storage record version mismatch");
+            }
             return true;
         } catch (NamingException ex) {
             throw new IOException("Unable to delete WebAuthn LDAP user-entry storage record", ex);
@@ -145,7 +164,11 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
             final LdapContext ldap = session.context();
             for (Entry entry : findContextEntries(ldap, context)) {
                 if (entry.record.expired(System.currentTimeMillis())) {
-                    ldap.modifyAttributes(entry.dn, clearAll());
+                    try {
+                        ldap.modifyAttributes(entry.dn, clearAll(entry.record.version()));
+                    } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                        // A concurrent writer renewed the record; leave its new value intact.
+                    }
                 }
             }
         } catch (NamingException ex) {
@@ -175,7 +198,7 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
                 GraphicalMatrixLdapRecordStore.context(config)) {
             final LdapContext ldap = session.context();
             for (Entry entry : findContextEntries(ldap, context)) {
-                ldap.modifyAttributes(entry.dn, clearAll());
+                ldap.modifyAttributes(entry.dn, clearAll(entry.record.version()));
             }
         } catch (NamingException ex) {
             throw new IOException("Unable to delete WebAuthn LDAP user-entry context", ex);
@@ -223,38 +246,53 @@ final class GraphicalMatrixLdapUserEntryRecordStore implements GraphicalMatrixLd
         return entries;
     }
 
-    private ModificationItem[] replaceAll(final String context, final String key, final String value,
+    private ModificationItem[] createAll(final String context, final String key, final String value,
             final Long expiration, final long version) {
         return new ModificationItem[] {
             replace(config.contextAttr(), context),
             replace(config.idAttr(), key),
             replace(config.valueAttr(), value),
             replace(config.expiresAttr(), expiration),
-            replace(config.versionAttr(), String.valueOf(version))
+            new ModificationItem(DirContext.ADD_ATTRIBUTE,
+                new BasicAttribute(config.versionAttr(), String.valueOf(version)))
         };
     }
 
-    private ModificationItem[] replacePartial(final String value, final Long expiration, final long version) {
-        if (value == null) {
-            return new ModificationItem[] {
-                replace(config.expiresAttr(), expiration),
-                replace(config.versionAttr(), String.valueOf(version))
-            };
-        }
-        return new ModificationItem[] {
+    private ModificationItem[] replaceAll(final String context, final String key, final String value,
+            final Long expiration, final long currentVersion, final long newVersion) {
+        final List<ModificationItem> updates = new ArrayList<>(List.of(
+            replace(config.contextAttr(), context),
+            replace(config.idAttr(), key),
             replace(config.valueAttr(), value),
-            replace(config.expiresAttr(), expiration),
-            replace(config.versionAttr(), String.valueOf(version))
-        };
+            replace(config.expiresAttr(), expiration)
+        ));
+        updates.addAll(List.of(GraphicalMatrixLdapSubtreeRecordStore.stateVersionUpdate(
+            config.versionAttr(), currentVersion, newVersion)));
+        return updates.toArray(ModificationItem[]::new);
     }
 
-    private ModificationItem[] clearAll() {
+    private ModificationItem[] replacePartial(final String value, final Long expiration,
+            final long currentVersion, final long newVersion) {
+        final List<ModificationItem> updates = new ArrayList<>();
+        if (value == null) {
+            updates.add(replace(config.expiresAttr(), expiration));
+        } else {
+            updates.add(replace(config.valueAttr(), value));
+            updates.add(replace(config.expiresAttr(), expiration));
+        }
+        updates.addAll(List.of(GraphicalMatrixLdapSubtreeRecordStore.stateVersionUpdate(
+            config.versionAttr(), currentVersion, newVersion)));
+        return updates.toArray(ModificationItem[]::new);
+    }
+
+    private ModificationItem[] clearAll(final long currentVersion) {
         return new ModificationItem[] {
             replace(config.contextAttr(), null),
             replace(config.idAttr(), null),
             replace(config.valueAttr(), null),
             replace(config.expiresAttr(), null),
-            replace(config.versionAttr(), null)
+            new ModificationItem(DirContext.REMOVE_ATTRIBUTE,
+                new BasicAttribute(config.versionAttr(), String.valueOf(currentVersion)))
         };
     }
 

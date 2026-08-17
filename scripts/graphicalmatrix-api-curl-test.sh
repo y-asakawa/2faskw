@@ -17,7 +17,6 @@ Usage:
 Options:
   --base-url URL       API base URL.
                        Default: http://127.0.0.1:8080/idp/graphicalmatrix-admin/api/v1
-  --token TOKEN        Bearer token value.
   --token-file FILE    Bearer token file. Default: /opt/shibboleth-idp/credentials/graphicalmatrix-api.token
   --user USER          Test user for --write. Default: graphicalmatrix-api-test-TIMESTAMP
   --write              Run write tests: PUT, PATCH, POST actions, DELETE.
@@ -45,12 +44,11 @@ need_cmd() {
 }
 
 read_token() {
-  if [[ -n "$TOKEN" ]]; then
-    return
-  fi
   [[ -r "$TOKEN_FILE" ]] || die "token file is not readable: $TOKEN_FILE"
   TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
   [[ -n "$TOKEN" ]] || die "token file is empty: $TOKEN_FILE"
+  [[ "$TOKEN" != *'"'* && "$TOKEN" != *'\'* ]] \
+    || die "token file contains unsupported characters: $TOKEN_FILE"
 }
 
 curl_status() {
@@ -59,17 +57,21 @@ curl_status() {
   local token_mode="${3:-valid}"
   local body="${4:-}"
   local url="${BASE_URL%/}${path}"
-  local tmp code
+  local tmp curl_config code
   tmp="$(mktemp)"
+  curl_config="$(mktemp)"
+  chmod 0600 "$curl_config"
   local args=(-sS -o "$tmp" -w '%{http_code}' -X "$method" "$url")
   case "$token_mode" in
     none)
       ;;
     bad)
-      args+=(-H 'Authorization: Bearer invalid-token-for-test')
+      printf '%s\n' 'header = "Authorization: Bearer invalid-token-for-test"' > "$curl_config"
+      args+=(--config "$curl_config")
       ;;
     valid)
-      args+=(-H "Authorization: Bearer $TOKEN")
+      printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" > "$curl_config"
+      args+=(--config "$curl_config")
       ;;
     *)
       die "unknown token mode: $token_mode"
@@ -80,7 +82,7 @@ curl_status() {
   fi
   code="$(curl "${args[@]}" || true)"
   printf "%s" "$code"
-  rm -f "$tmp"
+  rm -f "$tmp" "$curl_config"
 }
 
 expect_code() {
@@ -99,10 +101,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
       BASE_URL="${2:-}"
-      shift 2
-      ;;
-    --token)
-      TOKEN="${2:-}"
       shift 2
       ;;
     --token-file)

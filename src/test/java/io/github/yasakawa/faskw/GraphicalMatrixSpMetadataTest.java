@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.InetAddress;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -67,6 +68,32 @@ class GraphicalMatrixSpMetadataTest {
         assertThrows(IllegalArgumentException.class,
             () -> GraphicalMatrixSpMetadata.fromFile(config, foreign, ENTITY_ID));
         assertEquals(ENTITY_ID, GraphicalMatrixSpMetadata.inspectExisting(config, foreign).entityId());
+    }
+
+    @Test
+    void rejectsEntityIdsThatContainPolicyDelimiters() throws Exception {
+        final GraphicalMatrixSpManagementConfig config = config("sp.example.org");
+        final Path metadata = Files.writeString(temporary.resolve("delimiter.xml"), metadata(
+            "urn:attacker,https://victim.example.org/sp", "https://sp.example.org/acs"));
+
+        assertThrows(IllegalArgumentException.class,
+            () -> GraphicalMatrixSpMetadata.fromFile(config, metadata, null));
+    }
+
+    @Test
+    void metadataHostAddressesMustAllBePublic() throws Exception {
+        GraphicalMatrixSpMetadata.validateResolvedAddresses("public.example",
+            new InetAddress[] {InetAddress.getByName("8.8.8.8"),
+                InetAddress.getByName("2606:4700:4700::1111")});
+
+        for (final String prohibited : new String[] {
+            "10.0.0.1", "100.64.0.1", "169.254.1.1", "192.168.1.1",
+            "198.51.100.1", "127.0.0.1", "fc00::1", "2001:db8::1"
+        }) {
+            assertThrows(IllegalArgumentException.class,
+                () -> GraphicalMatrixSpMetadata.validateResolvedAddresses("private.example",
+                    new InetAddress[] {InetAddress.getByName(prohibited)}));
+        }
     }
 
     private GraphicalMatrixSpManagementConfig config(final String acsHost) throws Exception {

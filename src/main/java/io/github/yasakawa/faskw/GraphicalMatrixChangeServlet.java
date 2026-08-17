@@ -17,15 +17,11 @@
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -35,7 +31,12 @@ import jakarta.servlet.http.HttpSession;
 
 public final class GraphicalMatrixChangeServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
-    private static final Map<String, RateLimitState> LDAP_FAILURES = new ConcurrentHashMap<>();
+    private static final int MAX_LDAP_FAILURE_KEYS = 10_000;
+    private static final int MAX_LDAP_FAILURE_IPS = 10_000;
+    private static final GraphicalMatrixLdapLoginRateLimiter LDAP_FAILURES =
+        new GraphicalMatrixLdapLoginRateLimiter(MAX_LDAP_FAILURE_KEYS);
+    private static final GraphicalMatrixLdapLoginRateLimiter LDAP_IP_FAILURES =
+        new GraphicalMatrixLdapLoginRateLimiter(MAX_LDAP_FAILURE_IPS);
 
     @Override
     protected void doGet(final HttpServletRequest request, final HttpServletResponse response)
@@ -122,7 +123,9 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
         if (ldapRateLimited(request, user, config)) {
             audit.log("CHANGE_LDAP_AUTH", user, "RATE_LIMITED", null,
-                "ldap_failure_rate_limited,key=" + config.getChangeLdapRateLimitKey(), request);
+                ldapRateLimitAuditDetail(
+                    "ldap_failure_rate_limited,key=" + config.getChangeLdapRateLimitKey(),
+                    request, config), request);
             renderStart(request, response, config,
                 "認証に連続して失敗したため、一時的に制限されています。しばらくしてから再度試してください。");
             return;
@@ -133,7 +136,8 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             authenticated = new GraphicalMatrixLdapAuthenticator(GraphicalMatrixRuntime.idpHome())
                 .authenticate(user, password);
         } catch (Exception ex) {
-            audit.log("CHANGE_LDAP_AUTH", user, "LDAP_ERROR", null, ex.getClass().getSimpleName(), request);
+            audit.log("CHANGE_LDAP_AUTH", user, "LDAP_ERROR", null,
+                ldapRateLimitAuditDetail(ex.getClass().getSimpleName(), request, config), request);
             renderStart(request, response, config,
                 "LDAP認証を確認できません。時間をおいて再度試してください。");
             return;
@@ -141,13 +145,15 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
         if (!authenticated) {
             recordLdapFailure(request, user, config);
-            audit.log("CHANGE_LDAP_AUTH", user, "FAIL", null, "bind_failed", request);
+            audit.log("CHANGE_LDAP_AUTH", user, "FAIL", null,
+                ldapRateLimitAuditDetail("bind_failed", request, config), request);
             renderStart(request, response, config, "ユーザーIDまたはパスワードが正しくありません。");
             return;
         }
 
         clearLdapFailures(request, user, config);
-        audit.log("CHANGE_LDAP_AUTH", user, "OK", null, "bind_success", request);
+        audit.log("CHANGE_LDAP_AUTH", user, "OK", null,
+            ldapRateLimitAuditDetail("bind_success", request, config), request);
         startCurrentChallenge(request, response, config, user, null);
     }
 
@@ -200,49 +206,36 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken"), null);
     }
 
-    private static boolean ldapRateLimited(final HttpServletRequest request, final String user,
+    static boolean ldapRateLimited(final HttpServletRequest request, final String user,
             final GraphicalMatrixConfig config) {
         if (!config.isChangeLdapRateLimitEffective()) {
             return false;
         }
+        final long now = System.currentTimeMillis();
         final String key = ldapRateLimitKey(request, user, config);
-        final RateLimitState state = LDAP_FAILURES.get(key);
-        if (state == null) {
-            return false;
-        }
-        synchronized (state) {
-            final long now = System.currentTimeMillis();
-            if (state.lockedUntilMillis > now) {
-                return true;
-            }
-            if (state.lockedUntilMillis > 0L) {
-                LDAP_FAILURES.remove(key, state);
-            }
-            return false;
-        }
+        return (!ldapIpLimitBypassed(request.getRemoteAddr(), config)
+                && LDAP_IP_FAILURES.isLimited(ldapIpRateLimitKey(request), now,
+                    ldapIpRateLimitMaximumAge(config)))
+            || LDAP_FAILURES.isLimited(key, now, ldapRateLimitMaximumAge(config));
     }
 
-    private static void recordLdapFailure(final HttpServletRequest request, final String user,
+    static void recordLdapFailure(final HttpServletRequest request, final String user,
             final GraphicalMatrixConfig config) {
         if (!config.isChangeLdapRateLimitEffective()) {
             return;
         }
-        cleanupLdapFailures(config);
         final long now = System.currentTimeMillis();
         final String key = ldapRateLimitKey(request, user, config);
-        final RateLimitState state = LDAP_FAILURES.computeIfAbsent(key, ignored -> new RateLimitState());
-        synchronized (state) {
-            while (!state.failures.isEmpty()
-                    && now - state.failures.peekFirst().longValue() > config.getChangeLdapRateLimitWindowMillis()) {
-                state.failures.removeFirst();
-            }
-            state.failures.addLast(Long.valueOf(now));
-            state.lastSeenMillis = now;
-            if (state.failures.size() >= config.getChangeLdapRateLimitFailureLimit()) {
-                state.lockedUntilMillis = now + config.getChangeLdapRateLimitLockMillis();
-                state.failures.clear();
-            }
+        if (!ldapIpLimitBypassed(request.getRemoteAddr(), config)) {
+            LDAP_IP_FAILURES.recordFailure(ldapIpRateLimitKey(request), now,
+                config.getChangeLdapRateLimitIpWindowMillis(),
+                config.getChangeLdapRateLimitIpFailureLimit(),
+                config.getChangeLdapRateLimitIpLockMillis(),
+                ldapIpRateLimitMaximumAge(config));
         }
+        LDAP_FAILURES.recordFailure(key, now, config.getChangeLdapRateLimitWindowMillis(),
+            config.getChangeLdapRateLimitFailureLimit(), config.getChangeLdapRateLimitLockMillis(),
+            ldapRateLimitMaximumAge(config));
     }
 
     private static void clearLdapFailures(final HttpServletRequest request, final String user,
@@ -250,22 +243,32 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         if (!config.isChangeLdapRateLimitEffective()) {
             return;
         }
-        LDAP_FAILURES.remove(ldapRateLimitKey(request, user, config));
+        LDAP_FAILURES.clear(ldapRateLimitKey(request, user, config));
     }
 
-    private static void cleanupLdapFailures(final GraphicalMatrixConfig config) {
-        if (LDAP_FAILURES.size() < 10000) {
-            return;
-        }
-        final long now = System.currentTimeMillis();
-        final long maxAge = Math.max(config.getChangeLdapRateLimitWindowMillis(),
+    private static long ldapRateLimitMaximumAge(final GraphicalMatrixConfig config) {
+        return Math.max(config.getChangeLdapRateLimitWindowMillis(),
             config.getChangeLdapRateLimitLockMillis());
-        LDAP_FAILURES.entrySet().removeIf(entry -> {
-            final RateLimitState state = entry.getValue();
-            synchronized (state) {
-                return state.lockedUntilMillis <= now && now - state.lastSeenMillis > maxAge;
-            }
-        });
+    }
+
+    private static long ldapIpRateLimitMaximumAge(final GraphicalMatrixConfig config) {
+        return Math.max(config.getChangeLdapRateLimitIpWindowMillis(),
+            config.getChangeLdapRateLimitIpLockMillis());
+    }
+
+    private static String ldapIpRateLimitKey(final HttpServletRequest request) {
+        return "ip:" + trim(request.getRemoteAddr());
+    }
+
+    static boolean ldapIpLimitBypassed(final String clientIp, final GraphicalMatrixConfig config) {
+        return config.isChangeLdapRateLimitIpLimitBypassed(trim(clientIp));
+    }
+
+    private static String ldapRateLimitAuditDetail(final String detail,
+            final HttpServletRequest request, final GraphicalMatrixConfig config) {
+        return ldapIpLimitBypassed(request.getRemoteAddr(), config)
+            ? detail + ",ip_limit=bypassed"
+            : detail;
     }
 
     private static String ldapRateLimitKey(final HttpServletRequest request, final String user,
@@ -304,6 +307,20 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "GraphicalMatrixを変更できません。",
                 "このアカウントのGraphicalMatrix登録情報を確認できません。管理者に連絡してください。");
+            return;
+        }
+
+        if (!legacyGraphicalMatrixAllowed(enrollment)) {
+            audit.log("CHANGE_START", user, "DENIED", null,
+                "current_mfa_method_required,method=" + normalizeMethod(enrollment.getMfaMethod()), request);
+            if (config.isSelfServiceEnabled()) {
+                response.sendRedirect(request.getContextPath()
+                    + GraphicalMatrixSelfServiceAuthentication.PROFILE_PATH);
+            } else {
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "現在のMFA方式による再認証が必要です。",
+                    "IdP自己管理フローを利用するか、管理者に連絡してください。");
+            }
             return;
         }
 
@@ -705,6 +722,12 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             return;
         }
 
+        if ("WebAuthn".equals(method)) {
+            beginWebAuthnRegistration(request, response, config, repository, session,
+                user, expectedStateVersion.longValue(), now);
+            return;
+        }
+
         try {
             if (!repository.updateMfaMethodIfCurrent(user, method, now, expectedStateVersion.longValue())) {
                 audit.log("CHANGE_METHOD_SAVE", user, "ENROLL_REQUIRED", null,
@@ -724,16 +747,85 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         audit.log("CHANGE_METHOD_SAVE", user, "OK", null, "mfa_method=" + method, request);
-        clearChange(session);
-        final String message;
         if ("TOTP".equals(method)) {
-            message = "MFA方式をTOTPに変更しました。次回ログイン時にQRコード登録画面が表示されます。";
-        } else if ("WebAuthn".equals(method)) {
-            message = "MFA方式をWebAuthnに変更しました。次回ログインからWebAuthnを利用します。";
-        } else {
-            message = "MFA方式をGraphicalMatrixに変更しました。次回ログインからGraphicalMatrixを利用します。";
+            try {
+                final String seed = repository.prepareTotpRegistration(user, now);
+                if (seed == null || seed.isEmpty()) {
+                    clearChange(session);
+                    audit.log("TOTP_REGISTER_START", user, "ENROLL_REQUIRED", null,
+                        "totp_registration_unavailable", request);
+                    GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                        "TOTP登録を開始できません。",
+                        "登録状態が変更されました。最初からやり直してください。");
+                    return;
+                }
+                final String enrollmentKey = GraphicalMatrixSupport.token();
+                final String enrollmentCsrf = GraphicalMatrixSupport.token();
+                clearChange(session);
+                session.setAttribute("totpEnroll.key", enrollmentKey);
+                session.setAttribute("totpEnroll.user", user);
+                session.setAttribute("totpEnroll.csrfToken", enrollmentCsrf);
+                session.setAttribute("totpEnroll.expiresAt",
+                    Long.valueOf(now + config.getChallengeMillis()));
+                session.setAttribute("totpEnroll.used", Boolean.FALSE);
+                session.setAttribute("totpEnroll.selfServiceAuthorized", Boolean.TRUE);
+                audit.log("TOTP_REGISTER_START", user, "OK", null,
+                    "authorization=self_service", request);
+                GraphicalMatrixStartServlet.renderTotpRegistration(request, response,
+                    enrollmentKey, user, seed, enrollmentCsrf, null);
+                return;
+            } catch (Exception ex) {
+                clearChange(session);
+                audit.log("TOTP_REGISTER_START", user, "DB_ERROR", null,
+                    ex.getClass().getSimpleName(), request);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "TOTP登録を開始できません。",
+                    "時間をおいて再度試すか、管理者に連絡してください。");
+                return;
+            }
         }
-        renderComplete(request, response, config, user, message);
+        clearChange(session);
+        renderComplete(request, response, config, user,
+            "MFA方式をGraphicalMatrixに変更しました。次回ログインからGraphicalMatrixを利用します。");
+    }
+
+    private static void beginWebAuthnRegistration(final HttpServletRequest request,
+            final HttpServletResponse response, final GraphicalMatrixConfig config,
+            final GraphicalMatrixRepository repository, final HttpSession session,
+            final String user, final long expectedStateVersion, final long now) throws IOException {
+        final GraphicalMatrixAuditLogger audit = GraphicalMatrixRuntime.auditLogger();
+        final GraphicalMatrixEnrollment enrollment;
+        try {
+            enrollment = repository.findEnrollment(user);
+        } catch (Exception ex) {
+            audit.log("WEBAUTHN_REGISTER_START", user, "DB_ERROR", null,
+                ex.getClass().getSimpleName(), request);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "WebAuthn登録を開始できません。",
+                "時間をおいて再度試すか、管理者に連絡してください。");
+            return;
+        }
+        if (enrollment == null || !enrollment.isActive()
+                || enrollment.getLockedUntil() > now
+                || enrollment.getStateVersion() != expectedStateVersion) {
+            audit.log("WEBAUTHN_REGISTER_START", user, "ENROLL_REQUIRED", null,
+                "state_changed_after_verification", request);
+            clearChange(session);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "WebAuthn登録を開始できません。",
+                "登録状態が変更されました。最初からやり直してください。");
+            return;
+        }
+
+        final String expectedMethod = enrollment.getMfaMethod();
+        clearChange(session);
+        GraphicalMatrixWebAuthnRegistrationSession.initialize(session, user, expectedMethod,
+            now + config.getSelfServiceTransactionMillis());
+        audit.log("WEBAUTHN_REGISTER_START", user, "OK", null,
+            "authorization=verified_change_session,current_method="
+                + normalizeMethod(expectedMethod), request);
+        response.sendRedirect(response.encodeRedirectURL(request.getContextPath()
+            + GraphicalMatrixWebAuthnRegistrationSession.REGISTRATION_PATH));
     }
 
     private static boolean validNewSequence(final List<String> selected,
@@ -833,7 +925,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         response.sendError(500, "GraphicalMatrix MFA method template is missing.");
     }
 
-    private static void renderComplete(final HttpServletRequest request, final HttpServletResponse response,
+    static void renderComplete(final HttpServletRequest request, final HttpServletResponse response,
             final GraphicalMatrixConfig config, final String user, final String message) throws IOException {
         if (GraphicalMatrixViewRenderer.renderSequenceChangeComplete(request, response, config, user, message)) {
             return;
@@ -927,8 +1019,13 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
     }
 
-    private static boolean validUser(final String user) {
-        return user.matches("[A-Za-z0-9._@-]+");
+    static boolean validUser(final String user) {
+        return user != null && user.length() <= 255 && user.matches("[A-Za-z0-9._@-]+");
+    }
+
+    static boolean legacyGraphicalMatrixAllowed(final GraphicalMatrixEnrollment enrollment) {
+        return enrollment != null
+            && "GraphicalMatrix".equals(normalizeMethod(enrollment.getMfaMethod()));
     }
 
     private static String normalizeMethod(final String method) {
@@ -949,9 +1046,4 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         return value != null ? value.trim() : "";
     }
 
-    private static final class RateLimitState {
-        private final Deque<Long> failures = new ArrayDeque<>();
-        private long lockedUntilMillis;
-        private long lastSeenMillis = System.currentTimeMillis();
-    }
 }

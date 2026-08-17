@@ -1321,16 +1321,13 @@ public final class GraphicalMatrixSpManagementTool {
     private void audit(final String event, final String name, final String entityId,
             final String result, final String detail) {
         try {
-            Files.createDirectories(config.auditLogPath().getParent());
             final String actor = System.getenv().getOrDefault("SUDO_USER",
                 System.getenv().getOrDefault("USER", "unknown"));
             final String line = "ts=" + Instant.now() + " event=" + token(event)
                 + " actor=" + token(actor) + " name=" + token(name)
                 + " entity_id=" + token(entityId) + " result=" + token(result)
                 + " detail=" + token(detail) + System.lineSeparator();
-            Files.writeString(config.auditLogPath(), line, StandardCharsets.UTF_8,
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
-            setPermissions(config.auditLogPath(), "rw-r-----");
+            GraphicalMatrixSpFiles.appendAudit(config.auditLogPath(), line);
         } catch (Exception ex) {
             System.err.println("WARN: unable to write SP management audit log: " + rootMessage(ex));
         }

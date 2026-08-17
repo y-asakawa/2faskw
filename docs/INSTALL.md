@@ -1414,6 +1414,11 @@ graphicalmatrix.change.ldapRateLimit.failureLimit = 5
 graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
 graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
+graphicalmatrix.change.ldapRateLimit.ipFailureLimit = 100
+graphicalmatrix.change.ldapRateLimit.ipWindowSeconds = 60
+graphicalmatrix.change.ldapRateLimit.ipLockSeconds = 300
+# 大規模な共有NATでは、信頼済みCIDRに限り独立IP全体制限だけを除外できる。
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs =
 
 # IdP内のShibboleth再認証済み自己管理flow。導入確認後にtrueへ変更する。
 graphicalmatrix.selfservice.enabled = false
@@ -1449,6 +1454,11 @@ graphicalmatrix.view.css.cacheSeconds = 0
 
 `graphicalmatrix.challenge.seconds` はGraphicalMatrix、TOTP登録、強制sequence変更、
 ユーザー自身の変更画面で利用するチャレンジ有効期限です。設定可能範囲は30〜900秒です。
+
+`graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs`は、指定したIPv4/IPv6 CIDRで
+独立したIP全体制限だけを除外する。利用者ごとのキー別制限は継続するため、大規模な共有NATでは
+`graphicalmatrix.change.ldapRateLimit.key = ip-user`との併用を推奨する。完全なLDAP認証保護の
+ホワイトリストではない。ホスト名は指定せず、単一IPはIPv4では`/32`、IPv6では`/128`を使用する。
 
 GraphicalMatrix画像列照合のロック期限が経過しても、`failed_count` は自動的に0へ戻りません。
 既定では5回目から9回目は15分ロック、10回目以降は30日ロックです。認証成功または
@@ -1580,6 +1590,9 @@ graphicalmatrix.admin.csv.maxDisables = 1000
 ### WebAuthn properties
 
 WebAuthnプラグインを使う場合の代表項目です。FQDN/HTTPSが正しく設定されていることが前提です。
+2FAS-KWの自己管理画面から方式変更する場合は、登録成功hookを備えたShibboleth WebAuthn Plugin
+1.3.0以上を使用します。2FAS-KWは`AddKeyAuditSuccessHook`を自動登録するため、通常は
+`webauthn-registration-config.xml`へ2FAS-KW専用beanを手作業で追加する必要はありません。
 
 ```properties
 idp.authn.webauthn.relyingPartyId = idp.example.com
@@ -1597,6 +1610,12 @@ idp.authn.webauthn.StorageService.jdbcAccelerator.defaultType = QUERY
 idp.authn.webauthn.2fa.enabled = true
 idp.authn.webauthn.2fa.allowedPreviousFactors = authn/Password
 ```
+
+利用者が自己管理画面でWebAuthnを選択すると、2FAS-KWは現在のMFA方式を保持したまま
+`/idp/profile/admin/webauthn-registration`へ遷移します。公式Pluginがcredentialを保存し、
+登録成功hookが同一利用者の一回限りの登録要求を確認した後だけ、MFA方式を`WebAuthn`へ
+切り替えます。画面を閉じる、登録が失敗する、または登録中に管理者がMFA方式を変更した場合は、
+方式を切り替えません。
 
 WebAuthn credentialはDB/JDBC StorageService保存を推奨します。
 LDAPへ保存する場合は `examples/webauthn-ldap-storage-config.xml` をIdP側の読み込み対象に追加し、

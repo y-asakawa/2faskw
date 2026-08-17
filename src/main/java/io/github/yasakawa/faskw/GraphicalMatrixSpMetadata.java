@@ -21,9 +21,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -41,6 +39,13 @@ import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.apache.http.HttpEntity;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.conn.DnsResolver;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -72,27 +77,41 @@ final class GraphicalMatrixSpMetadata {
 
     static Parsed fromUrl(final GraphicalMatrixSpManagementConfig config, final URI source,
             final String expectedEntityId) throws Exception {
-        validateMetadataUri(config, source);
-        final HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(config.connectTimeout())
-            .followRedirects(HttpClient.Redirect.NEVER)
+        final InetAddress[] addresses = validateMetadataUri(config, source);
+        final String sourceHost = source.getHost().toLowerCase(Locale.ROOT);
+        final DnsResolver pinnedResolver = requestedHost -> {
+            if (!sourceHost.equalsIgnoreCase(requestedHost)) {
+                throw new UnknownHostException("metadata request attempted an unapproved host: "
+                    + requestedHost);
+            }
+            return addresses.clone();
+        };
+        final RequestConfig requestConfig = RequestConfig.custom()
+            .setConnectTimeout(timeoutMillis(config.connectTimeout().toMillis()))
+            .setSocketTimeout(timeoutMillis(config.readTimeout().toMillis()))
+            .setConnectionRequestTimeout(timeoutMillis(config.connectTimeout().toMillis()))
+            .setRedirectsEnabled(false)
             .build();
-        final HttpRequest request = HttpRequest.newBuilder(source)
-            .timeout(config.readTimeout())
-            .header("Accept", "application/samlmetadata+xml, application/xml, text/xml")
-            .GET()
-            .build();
-        final HttpResponse<InputStream> response = client.send(request,
-            HttpResponse.BodyHandlers.ofInputStream());
-        if (response.statusCode() != 200) {
-            response.body().close();
-            throw new IOException("metadata endpoint returned HTTP " + response.statusCode());
-        }
+        final HttpGet request = new HttpGet(source);
+        request.setHeader("Accept", "application/samlmetadata+xml, application/xml, text/xml");
         final byte[] bytes;
-        try (InputStream input = response.body()) {
-            bytes = readLimited(input, config.maxMetadataBytes());
+        try (CloseableHttpClient client = HttpClients.custom()
+                .setDefaultRequestConfig(requestConfig)
+                .setDnsResolver(pinnedResolver)
+                .disableRedirectHandling()
+                .build();
+             CloseableHttpResponse response = client.execute(request)) {
+            if (response.getStatusLine().getStatusCode() != 200) {
+                throw new IOException("metadata endpoint returned HTTP "
+                    + response.getStatusLine().getStatusCode());
+            }
+            final HttpEntity entity = response.getEntity();
+            if (entity == null) {
+                throw new IOException("metadata endpoint returned an empty response");
+            }
+            bytes = readLimited(entity.getContent(), config.maxMetadataBytes());
         }
-        return parse(config, bytes, source.toString(), source.getHost(), expectedEntityId);
+        return parse(config, bytes, source.toString(), sourceHost, expectedEntityId);
     }
 
     static Parsed parseExisting(final GraphicalMatrixSpManagementConfig config, final Path source)
@@ -223,7 +242,7 @@ final class GraphicalMatrixSpMetadata {
         return new ArrayList<>(fingerprints);
     }
 
-    private static void validateMetadataUri(final GraphicalMatrixSpManagementConfig config,
+    private static InetAddress[] validateMetadataUri(final GraphicalMatrixSpManagementConfig config,
             final URI uri) throws Exception {
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
             throw new IllegalArgumentException("metadata URL must use HTTPS with a host");
@@ -238,13 +257,58 @@ final class GraphicalMatrixSpMetadata {
         if (isIpLiteral(host)) {
             throw new IllegalArgumentException("metadata URL host must be an allow-listed FQDN, not an IP literal");
         }
-        for (final InetAddress address : InetAddress.getAllByName(host)) {
-            if (address.isAnyLocalAddress() || address.isLoopbackAddress()
-                    || address.isLinkLocalAddress() || address.isMulticastAddress()) {
+        final InetAddress[] addresses = InetAddress.getAllByName(host);
+        validateResolvedAddresses(host, addresses);
+        return addresses;
+    }
+
+    static void validateResolvedAddresses(final String host, final InetAddress[] addresses) {
+        if (addresses == null || addresses.length == 0) {
+            throw new IllegalArgumentException("metadata host did not resolve: " + host);
+        }
+        for (final InetAddress address : addresses) {
+            if (!isPublicAddress(address)) {
                 throw new IllegalArgumentException("metadata host resolves to a prohibited address: "
                     + address.getHostAddress());
             }
         }
+    }
+
+    private static boolean isPublicAddress(final InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                || address.isMulticastAddress()) {
+            return false;
+        }
+        final byte[] bytes = address.getAddress();
+        if (bytes.length == 4) {
+            final int first = bytes[0] & 0xff;
+            final int second = bytes[1] & 0xff;
+            final int third = bytes[2] & 0xff;
+            return first != 0 && first != 10 && first != 127 && first < 224
+                && !(first == 100 && second >= 64 && second <= 127)
+                && !(first == 169 && second == 254)
+                && !(first == 172 && second >= 16 && second <= 31)
+                && !(first == 192 && second == 0 && third == 0)
+                && !(first == 192 && second == 0 && third == 2)
+                && !(first == 192 && second == 168)
+                && !(first == 198 && (second == 18 || second == 19))
+                && !(first == 198 && second == 51 && third == 100)
+                && !(first == 203 && second == 0 && third == 113);
+        }
+        final int first = bytes[0] & 0xff;
+        final int second = bytes[1] & 0xff;
+        final int third = bytes[2] & 0xff;
+        final int fourth = bytes[3] & 0xff;
+        return !(first == 0x00 || first == 0x01)
+            && !(first == 0x20 && second == 0x01
+                && ((third & 0xfe) == 0x00 || (third == 0x0d && fourth == 0xb8)))
+            && !(first == 0x20 && second == 0x02)
+            && first < 0xfc;
+    }
+
+    private static int timeoutMillis(final long milliseconds) {
+        return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, milliseconds));
     }
 
     private static boolean isIpLiteral(final String host) {
@@ -253,7 +317,9 @@ final class GraphicalMatrixSpMetadata {
 
     private static void validateEntityId(final String entityId) {
         if (entityId.length() > MAX_URL_LENGTH || entityId.chars().anyMatch(Character::isISOControl)
-                || entityId.chars().anyMatch(Character::isWhitespace)) {
+                || entityId.chars().anyMatch(Character::isWhitespace)
+                || entityId.indexOf(',') >= 0 || entityId.indexOf(';') >= 0
+                || entityId.indexOf('|') >= 0) {
             throw new IllegalArgumentException("metadata entityID is invalid");
         }
         final URI uri = URI.create(entityId);

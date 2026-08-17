@@ -46,6 +46,11 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_FAILURE_LIMIT = 5;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_WINDOW_SECONDS = 300;
     private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_LOCK_SECONDS = 900;
+    private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_FAILURE_LIMIT = 100;
+    private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_WINDOW_SECONDS = 60;
+    private static final int DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_LOCK_SECONDS = 300;
+    private static final String CHANGE_LDAP_RATE_LIMIT_IP_LIMIT_BYPASS_CIDRS =
+        "graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs";
     private static final int DEFAULT_SELF_SERVICE_TRANSACTION_SECONDS = 600;
     private static final boolean DEFAULT_ALLOW_DUPLICATE_SELECTIONS = false;
     private static final boolean DEFAULT_FORCE_SEQUENCE_CHANGE_ENABLED = false;
@@ -93,6 +98,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final int changeLdapRateLimitFailureLimit;
     private final int changeLdapRateLimitWindowSeconds;
     private final int changeLdapRateLimitLockSeconds;
+    private final int changeLdapRateLimitIpFailureLimit;
+    private final int changeLdapRateLimitIpWindowSeconds;
+    private final int changeLdapRateLimitIpLockSeconds;
+    private final GraphicalMatrixCidrSet changeLdapRateLimitIpLimitBypassCidrs;
     private final String changeLdapRateLimitKey;
     private final boolean selfServiceEnabled;
     private final int selfServiceTransactionSeconds;
@@ -124,7 +133,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
             final boolean changeLdapRateLimitEnabled,
             final int changeLdapRateLimitFailureLimit, final int changeLdapRateLimitWindowSeconds,
-            final int changeLdapRateLimitLockSeconds, final String changeLdapRateLimitKey,
+            final int changeLdapRateLimitLockSeconds,
+            final int changeLdapRateLimitIpFailureLimit,
+            final int changeLdapRateLimitIpWindowSeconds,
+            final int changeLdapRateLimitIpLockSeconds,
+            final GraphicalMatrixCidrSet changeLdapRateLimitIpLimitBypassCidrs,
+            final String changeLdapRateLimitKey,
             final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
             final boolean legacyLdapLoginEnabled,
             final boolean duplicateSelectionsAllowed, final boolean forceSequenceChangeEnabled,
@@ -150,6 +164,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.changeLdapRateLimitFailureLimit = changeLdapRateLimitFailureLimit;
         this.changeLdapRateLimitWindowSeconds = changeLdapRateLimitWindowSeconds;
         this.changeLdapRateLimitLockSeconds = changeLdapRateLimitLockSeconds;
+        this.changeLdapRateLimitIpFailureLimit = changeLdapRateLimitIpFailureLimit;
+        this.changeLdapRateLimitIpWindowSeconds = changeLdapRateLimitIpWindowSeconds;
+        this.changeLdapRateLimitIpLockSeconds = changeLdapRateLimitIpLockSeconds;
+        this.changeLdapRateLimitIpLimitBypassCidrs = changeLdapRateLimitIpLimitBypassCidrs;
         this.changeLdapRateLimitKey = changeLdapRateLimitKey;
         this.selfServiceEnabled = selfServiceEnabled;
         this.selfServiceTransactionSeconds = selfServiceTransactionSeconds;
@@ -215,6 +233,19 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final int changeLdapRateLimitLockSeconds = intProperty(properties,
             "graphicalmatrix.change.ldapRateLimit.lockSeconds",
             DEFAULT_CHANGE_LDAP_RATE_LIMIT_LOCK_SECONDS);
+        final int changeLdapRateLimitIpFailureLimit = intProperty(properties,
+            "graphicalmatrix.change.ldapRateLimit.ipFailureLimit",
+            DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_FAILURE_LIMIT);
+        final int changeLdapRateLimitIpWindowSeconds = intProperty(properties,
+            "graphicalmatrix.change.ldapRateLimit.ipWindowSeconds",
+            DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_WINDOW_SECONDS);
+        final int changeLdapRateLimitIpLockSeconds = intProperty(properties,
+            "graphicalmatrix.change.ldapRateLimit.ipLockSeconds",
+            DEFAULT_CHANGE_LDAP_RATE_LIMIT_IP_LOCK_SECONDS);
+        final GraphicalMatrixCidrSet changeLdapRateLimitIpLimitBypassCidrs =
+            GraphicalMatrixCidrSet.parse(properties.getProperty(
+                CHANGE_LDAP_RATE_LIMIT_IP_LIMIT_BYPASS_CIDRS),
+                CHANGE_LDAP_RATE_LIMIT_IP_LIMIT_BYPASS_CIDRS);
         final String changeLdapRateLimitKey = properties.getProperty(
             "graphicalmatrix.change.ldapRateLimit.key", DEFAULT_CHANGE_LDAP_RATE_LIMIT_KEY)
             .trim().toLowerCase(Locale.ROOT);
@@ -268,6 +299,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
+            changeLdapRateLimitIpFailureLimit, changeLdapRateLimitIpWindowSeconds,
+            changeLdapRateLimitIpLockSeconds,
             changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
             legacyLdapLoginEnabled, duplicateSelectionsAllowed, graphicalIds);
         if (cssCacheSeconds < 0) {
@@ -278,6 +311,9 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
             changeLdapRateLimitWindowSeconds, changeLdapRateLimitLockSeconds,
+            changeLdapRateLimitIpFailureLimit, changeLdapRateLimitIpWindowSeconds,
+            changeLdapRateLimitIpLockSeconds,
+            changeLdapRateLimitIpLimitBypassCidrs,
             changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
             legacyLdapLoginEnabled, duplicateSelectionsAllowed, forceSequenceChangeEnabled,
             graphicalIds, aliases, graphicalDirectory,
@@ -362,6 +398,26 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     public long getChangeLdapRateLimitLockMillis() {
         return changeLdapRateLimitLockSeconds * 1000L;
+    }
+
+    public int getChangeLdapRateLimitIpFailureLimit() {
+        return changeLdapRateLimitIpFailureLimit;
+    }
+
+    public long getChangeLdapRateLimitIpWindowMillis() {
+        return changeLdapRateLimitIpWindowSeconds * 1000L;
+    }
+
+    public long getChangeLdapRateLimitIpLockMillis() {
+        return changeLdapRateLimitIpLockSeconds * 1000L;
+    }
+
+    public List<String> getChangeLdapRateLimitIpLimitBypassCidrs() {
+        return changeLdapRateLimitIpLimitBypassCidrs.values();
+    }
+
+    public boolean isChangeLdapRateLimitIpLimitBypassed(final String clientIp) {
+        return changeLdapRateLimitIpLimitBypassCidrs.contains(clientIp);
     }
 
     public String getChangeLdapRateLimitKey() {
@@ -624,6 +680,9 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
             final boolean changeLdapRateLimitEnabled, final int changeLdapRateLimitFailureLimit,
             final int changeLdapRateLimitWindowSeconds, final int changeLdapRateLimitLockSeconds,
+            final int changeLdapRateLimitIpFailureLimit,
+            final int changeLdapRateLimitIpWindowSeconds,
+            final int changeLdapRateLimitIpLockSeconds,
             final String changeLdapRateLimitKey,
             final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
             final boolean legacyLdapLoginEnabled,
@@ -666,6 +725,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             }
             if (changeLdapRateLimitWindowSeconds < 1 || changeLdapRateLimitLockSeconds < 1) {
                 throw new IllegalArgumentException("GraphicalMatrix change LDAP rate limit seconds must be positive.");
+            }
+            if (changeLdapRateLimitIpFailureLimit < 1
+                    || changeLdapRateLimitIpWindowSeconds < 1
+                    || changeLdapRateLimitIpLockSeconds < 1) {
+                throw new IllegalArgumentException(
+                    "GraphicalMatrix change LDAP IP rate limit values must be positive.");
             }
             if (!"ip".equals(changeLdapRateLimitKey)
                     && !"user".equals(changeLdapRateLimitKey)

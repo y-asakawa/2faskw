@@ -35,8 +35,9 @@ import java.util.Set;
 
 public final class DashboardStore implements AutoCloseable {
 
-    private static final int SCHEMA_VERSION = 4;
+    private static final int SCHEMA_VERSION = 5;
     private static final int LOCKED_USER_DISPLAY_LIMIT = 100;
+    static final int REGEX_CANDIDATE_LIMIT = 10_000;
     static final int DEFAULT_TOP_MISMATCH_LIMIT = 3;
     static final int MAX_TOP_MISMATCH_LIMIT = 100;
     static final int DEFAULT_TOP_SOURCE_NETWORK_LIMIT = 3;
@@ -180,6 +181,10 @@ public final class DashboardStore implements AutoCloseable {
                       result VARCHAR(32) NOT NULL,
                       remote_address VARCHAR(64)
                     )
+                    """);
+            statement.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_access_audit_occurred
+                    ON dashboard_access_audit(occurred_at)
                     """);
             try (PreparedStatement version = connection.prepareStatement("""
                     MERGE INTO dashboard_schema_version (
@@ -817,9 +822,7 @@ public final class DashboardStore implements AutoCloseable {
             sql.append(" AND source_network = ?");
         }
         sql.append(" ORDER BY occurred_at DESC, event_id DESC");
-        if (regexFilter == null) {
-            sql.append(" LIMIT ? OFFSET ?");
-        }
+        sql.append(regexFilter == null ? " LIMIT ? OFFSET ?" : " LIMIT ?");
 
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql.toString())) {
@@ -847,6 +850,8 @@ public final class DashboardStore implements AutoCloseable {
             if (regexFilter == null) {
                 statement.setInt(parameter++, limit);
                 statement.setInt(parameter, offset);
+            } else {
+                statement.setInt(parameter, REGEX_CANDIDATE_LIMIT);
             }
             return readEvents(statement, regexFilter, limit, offset);
         }
@@ -1012,9 +1017,7 @@ public final class DashboardStore implements AutoCloseable {
             sql.append(" AND (occurred_at < ? OR (occurred_at = ? AND event_id < ?))");
         }
         sql.append(" ORDER BY occurred_at DESC, event_id DESC");
-        if (regexFilter == null) {
-            sql.append(" LIMIT ?");
-        }
+        sql.append(" LIMIT ?");
 
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql.toString())) {
@@ -1046,6 +1049,8 @@ public final class DashboardStore implements AutoCloseable {
             }
             if (regexFilter == null) {
                 statement.setInt(parameter, limit);
+            } else {
+                statement.setInt(parameter, REGEX_CANDIDATE_LIMIT);
             }
             return readEvents(statement, regexFilter, limit, 0);
         }
@@ -1136,6 +1141,15 @@ public final class DashboardStore implements AutoCloseable {
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(
                         "DELETE FROM dashboard_hourly WHERE bucket_start < ?")) {
+            statement.setObject(1, utc(cutoff));
+            return statement.executeUpdate();
+        }
+    }
+
+    public long deleteAccessAuditOlderThan(final Instant cutoff) throws SQLException {
+        try (Connection connection = connection();
+                PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM dashboard_access_audit WHERE occurred_at < ?")) {
             statement.setObject(1, utc(cutoff));
             return statement.executeUpdate();
         }

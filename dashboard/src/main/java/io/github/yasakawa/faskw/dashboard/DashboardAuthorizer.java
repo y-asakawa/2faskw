@@ -18,7 +18,9 @@ package io.github.yasakawa.faskw.dashboard;
 import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -53,6 +55,7 @@ final class DashboardAuthorizer {
     private final CidrMatcher localNetworks;
     private final Role localRole;
     private final Properties roles;
+    private final byte[] proxySecret;
 
     DashboardAuthorizer(final DashboardConfig config) throws IOException {
         this.config = config;
@@ -72,6 +75,10 @@ final class DashboardAuthorizer {
                 ? Role.parse(config.localRole())
                 : null;
         roles = new Properties();
+        proxySecret = "proxy".equals(config.authMode())
+                ? Files.readString(config.proxySecretFile(), StandardCharsets.UTF_8)
+                        .strip().getBytes(StandardCharsets.UTF_8)
+                : null;
         if ("proxy".equals(config.authMode())
                 && config.rolesFile() != null
                 && Files.isReadable(config.rolesFile())) {
@@ -110,6 +117,12 @@ final class DashboardAuthorizer {
                     "address:" + address);
         }
         if (!trustedProxies.matches(exchange.getRemoteAddress().getAddress())) {
+            return null;
+        }
+        final String suppliedSecret = header(exchange, config.proxySecretHeader());
+        if (suppliedSecret == null || suppliedSecret.length() > 512
+                || !MessageDigest.isEqual(proxySecret,
+                        suppliedSecret.getBytes(StandardCharsets.UTF_8))) {
             return null;
         }
         final String user = header(exchange, config.remoteUserHeader());

@@ -17,14 +17,20 @@
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
 
 final class GraphicalMatrixSpFiles {
     private GraphicalMatrixSpFiles() {
@@ -52,6 +58,23 @@ final class GraphicalMatrixSpFiles {
             }
         } finally {
             Files.deleteIfExists(temporary);
+        }
+    }
+
+    static void appendAudit(final Path path, final String content) throws IOException {
+        Files.createDirectories(path.getParent());
+        final Set<OpenOption> options = Set.of(
+            StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.APPEND,
+            LinkOption.NOFOLLOW_LINKS);
+        try (SeekableByteChannel channel = Files.newByteChannel(path, options,
+                PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rw-r-----")))) {
+            final ByteBuffer bytes = StandardCharsets.UTF_8.encode(content);
+            while (bytes.hasRemaining()) {
+                channel.write(bytes);
+            }
         }
     }
 

@@ -11,6 +11,7 @@
 - v1.2.4 から v1.2.5 への更新
 - v1.2.6 から v1.2.7 への更新
 - v1.2.7 から v1.3.0 への更新
+- v1.3.0 から v1.3.1 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -25,6 +26,7 @@
 | v1.2.4 | v1.2.5 | 旧JAR削除、ロックアウト4設定の追加、WAR再構築、設定検査 | 通常・最大ロック時間の調整 |
 | v1.2.6 | v1.2.7 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboard導入、SP追加管理CLIの有効化 |
 | v1.2.7 | v1.3.0 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboardのv1.3.0配布物への更新、SP管理CLIの継続利用、SP別LDAP属性アクセス制御・属性カタログCLIの初期化 |
+| v1.3.0 | v1.3.1 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | 大規模な共有NATでLDAP変更画面を使う場合だけIP全体制限の除外CIDRを追加 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -343,6 +345,11 @@ LDAP保存を選択したユーザーの初期投入や一括更新は、LDAP側
 
 WebAuthnはShibboleth WebAuthn pluginが必要です。
 2FAS-KW plugin更新だけでは、Shibboleth WebAuthn pluginの導入や署名鍵truststore登録は完了しません。
+自己管理画面からWebAuthnへ安全に方式変更する機能は、登録成功hookを備えた
+Shibboleth WebAuthn Plugin 1.3.0以上が必要です。2FAS-KW更新後はWARを再構築し、
+`postconfig.xml`が提供する`shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook`を読み込ませます。
+独自hookで同じbean IDを上書きすると、credential登録後に2FAS-KWのMFA方式が切り替わらないため、
+複合hookとして2FAS-KW hookも呼び出してください。
 
 推奨はDB/JDBC StorageServiceです。
 LDAPへ保存する場合は `subtree` 方式を推奨します。
@@ -922,6 +929,33 @@ policy変更はJSONの再読込で反映され、通常はJetty再起動を必�
 ContextCheck設定変更、Plugin JAR更新時だけbuildと再起動を行う。詳細は
 [v1.3.0 SPアクセス制御・属性カタログ設計](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md)
 を参照する。
+
+## v1.3.0からv1.3.1へのLDAP変更画面設定
+
+既定動作を維持する場合、設定追加は不要である。大規模な共有NATから従来LDAP変更画面を
+一斉利用し、IP全体の失敗上限による巻き添えを避ける場合だけ、稼働中の
+`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`へ信頼済みCIDRを追加する。
+
+```properties
+graphicalmatrix.change.ldapRateLimit.key = ip-user
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs = 192.168.0.0/16,10.0.0.0/8
+```
+
+この設定は独立IP全体制限だけを除外する。利用者ごとのキー別制限は残る。`key=ip`のままでは
+キー別制限も共有IP単位になるため、共有NAT用途では`user`または`ip-user`を使用する。
+CIDRは実際の監査ログの`ip`とネットワーク管理情報を照合し、必要最小限にする。
+
+設定値を検査する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+設定ファイルはLDAP変更画面の各リクエストで再読込されるため、CIDR変更だけなら通常は
+Jetty再起動を必要としない。Plugin JARをv1.3.1へ更新した場合は、通常の更新手順どおり
+WAR再構築とJetty再起動を行う。
 
 ***
 ***
