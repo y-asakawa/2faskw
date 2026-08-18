@@ -1,4 +1,4 @@
-<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="40%">
+<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="50%">
 
 # 2FAS-KW GraphicalMatrix MFA for Shibboleth IdP plugin
 
@@ -97,7 +97,7 @@ Do not open public GitHub issues for suspected vulnerabilities. Follow
   <P>
   <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="50%">
 </p>
-
+<P><img src="MFA07.png" alt="2FAS-KW screenshot 1" width="50%"></P>
 <P><img src="MFA10.png" alt="2FAS-KW screenshot 1" width="50%"></P>
 
 ## Releases
@@ -144,6 +144,21 @@ restrict any enabled API with HTTPS, network controls, and bearer tokens.
 Yes. Depending on configuration, it may store GraphicalMatrix sequences and TOTP
 seed material. Production deployments should use protected storage modes such
 as `hash`, `keyword`, or `aes-gcm` as appropriate.
+
+### How do I register a new Service Provider (SP)?
+
+
+Use the SP Management CLI to register the SP information with the Shibboleth IdP.
+
+### How do I control which user attributes are released to an SP?
+
+
+Use the SP Management CLI to select and configure the user attributes that the IdP is allowed to release to each SP.
+
+### How do I configure MFA requirements for an SP?
+
+
+Use the SP Management CLI to specify whether MFA is required or exempted for each SP.
 
 ### Are locally built packages official releases?
 
