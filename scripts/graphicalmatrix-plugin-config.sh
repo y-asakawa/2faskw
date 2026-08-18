@@ -135,13 +135,44 @@ require_dir() {
   [[ -d "$dir" ]] || { echo "ERROR: missing directory: $dir" >&2; exit 1; }
 }
 
+destination_exists() {
+  local path="$1"
+  local probe
+
+  if [[ -e "$path" || -L "$path" ]]; then
+    return 0
+  fi
+
+  if [[ "$APPLY" -eq 1 && "$(id -u)" -ne 0 ]]; then
+    sudo -n test -e "$path" 2>/dev/null || sudo -n test -L "$path" 2>/dev/null
+    return
+  fi
+
+  probe="$(dirname "$path")"
+  while [[ ! -e "$probe" && "$probe" != "/" ]]; do
+    probe="$(dirname "$probe")"
+  done
+  if [[ -x "$probe" ]]; then
+    return 1
+  fi
+
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n test -e "$path" 2>/dev/null || sudo -n test -L "$path" 2>/dev/null
+    return
+  fi
+
+  echo "ERROR: cannot determine whether protected destination exists: $path" >&2
+  echo "action: run the dry-run as root or provide passwordless sudo for destination checks." >&2
+  exit 1
+}
+
 install_copy() {
   local src="$1"
   local dest="$2"
   require_file "$src"
   planned_changes=$((planned_changes + 1))
   run_sudo mkdir -p "$(dirname "$dest")"
-  if [[ -f "$dest" ]]; then
+  if destination_exists "$dest"; then
     run_sudo cp "$dest" "$dest.bak.$TS"
     if [[ "$APPLY" -eq 1 ]]; then
       backups_created=$((backups_created + 1))
@@ -161,7 +192,7 @@ install_executable() {
   require_file "$src"
   planned_changes=$((planned_changes + 1))
   run_sudo mkdir -p "$(dirname "$dest")"
-  if [[ -f "$dest" ]]; then
+  if destination_exists "$dest"; then
     run_sudo cp "$dest" "$dest.bak.$TS"
     if [[ "$APPLY" -eq 1 ]]; then
       backups_created=$((backups_created + 1))
@@ -181,7 +212,7 @@ install_template() {
   require_file "$src"
   planned_changes=$((planned_changes + 1))
   run_sudo mkdir -p "$(dirname "$dest")"
-  if [[ -f "$dest" ]]; then
+  if destination_exists "$dest"; then
     run_sudo install -m 0644 "$src" "$dest.idpnew.$TS"
     if [[ "$APPLY" -eq 1 ]]; then
       templates_deferred=$((templates_deferred + 1))

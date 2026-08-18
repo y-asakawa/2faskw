@@ -90,6 +90,12 @@ sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
 
 sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix \
   /opt/shibboleth-idp/conf/graphicalmatrix.bak.$TS
+
+# 稼働中の画像IDと画像ファイルをロールバックできるように保管する。
+if sudo test -d /opt/shibboleth-idp/edit-webapp/graphicalmatrix; then
+  sudo cp -a /opt/shibboleth-idp/edit-webapp/graphicalmatrix \
+    /opt/shibboleth-idp/edit-webapp/graphicalmatrix.bak.$TS
+fi
 ```
 
 必要に応じて、以下もバックアップする。
@@ -100,7 +106,17 @@ sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml \
 
 sudo cp -a /opt/shibboleth-idp/credentials \
   /opt/shibboleth-idp/credentials.bak.$TS
+
+# Shibboleth IdP本体のLDAP認証・属性Resolver接続設定。
+if sudo test -f /opt/shibboleth-idp/conf/ldap.properties; then
+  sudo cp -a /opt/shibboleth-idp/conf/ldap.properties \
+    /opt/shibboleth-idp/conf/ldap.properties.bak.$TS
+fi
 ```
+
+`/opt/shibboleth-idp/conf/ldap.properties`はShibboleth IdP本体のLDAP設定、
+`/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties`は2FAS-KW enrollmentをLDAPへ
+保存する場合の設定であり、用途が異なる。前者は2FAS-KW Pluginの導入スクリプトでは更新しない。
 
 v1.2.0でWebAuthn設定を使う場合、またはv1.2.4でIdP自己管理フローを有効にする場合は、
 authn設定もバックアップする。
@@ -166,10 +182,14 @@ sudo systemctl stop jetty-idp.service
 新バージョンを配置する。
 
 ```bash
-./bin/graphicalmatrix-plugin-config.sh \
+sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
   --apply
 ```
+
+設定ディレクトリは`root:jetty 0750`などで保護されているため、dry-runとapplyの両方で
+configスクリプト自体を`sudo`から起動する。一般ユーザーでスクリプトを起動し、内部sudoだけに
+依存する実行方法は使用しない。
 
 旧Plugin JARだけを削除する。
 
@@ -258,6 +278,75 @@ sudo diff -u \
 DBのユーザーデータは、Pluginの上書き更新だけでは削除または初期化されない。
 
 secret、DBパスワード、API token、秘密鍵を新しいテンプレートで上書きしないこと。
+`*.idpnew.TIMESTAMP`を既存ファイルへそのままコピーせず、必ず差分を確認して必要なキーだけを
+反映する。
+
+導入スクリプトが既存設定を保持したかは、最新のinstall manifestで確認できる。
+
+```bash
+MANIFEST="$(sudo find /opt/shibboleth-idp/conf/graphicalmatrix \
+  -maxdepth 1 -type f -name 'install-manifest-*.tsv' \
+  -printf '%T@ %p\n' | sort -nr | awk 'NR == 1 { print $2 }')"
+
+if [[ -n "$MANIFEST" ]]; then
+  echo "manifest=$MANIFEST"
+  sudo grep -E \
+    '(graphicalmatrix|db|ldap|sp-management|mfa-policy)\.properties' \
+    "$MANIFEST"
+else
+  echo 'ERROR: install manifest was not found' >&2
+fi
+```
+
+`install_template_deferred`は既存ファイルを保持して`*.idpnew.TIMESTAMP`を作成したことを示す。
+`install_template`は、導入時に既存ファイルが存在せずテンプレートを新規作成したことを示す。
+
+既存環境のアップグレードで、運用済みの設定ファイルに`install_template`が表示された場合は、
+設定が保持された状態ではない。IdPを再起動する前に作業を止め、アップグレード前のバックアップを
+確認する。複数の設定ファイルが同時に`install_template`になっている場合は、
+`conf/graphicalmatrix`ディレクトリ全体がインストール時に存在しなかった可能性が高い。
+
+```bash
+# UPGRADE手順で作成した設定ディレクトリのバックアップを新しい順に表示する。
+sudo find /opt/shibboleth-idp/conf -maxdepth 1 -type d \
+  -name 'graphicalmatrix.bak.*' -printf '%T@ %p\n' | sort -nr
+
+# 個別に作成された設定ファイルのバックアップも確認する。
+sudo find /opt/shibboleth-idp/conf/graphicalmatrix -maxdepth 1 -type f \
+  \( -name '*.bak.*' -o -name '*.rpmsave' -o -name '*.rpmnew' \) \
+  -printf '%T@ %p\n' | sort -nr
+```
+
+バックアップが見つかった場合も、ディレクトリ全体を無条件に上書きして戻さない。旧設定と
+新しい配布テンプレートを比較し、DB/LDAP接続先、保存方式、secretファイルのパス、MFA policy、
+SP管理設定などの運用値を復元した上で、新バージョンで追加されたキーを反映する。diffには
+credentialや内部ホスト名が含まれる可能性があるため、出力を外部へ貼り付けない。
+
+```bash
+# BACKUP_DIRとPACKAGE_DIRは実在するパスへ置き換える。
+BACKUP_DIR='/opt/shibboleth-idp/conf/graphicalmatrix.bak.TIMESTAMP'
+PACKAGE_DIR='/path/to/2faskw-idp-plugin-VERSION'
+
+# 内容を表示せず、変更の有無だけを確認する例。
+for NAME in \
+  graphicalmatrix.properties \
+  db.properties \
+  ldap.properties \
+  webauthn-ldap.properties \
+  mfa-policy.properties \
+  sp-management.properties; do
+  if sudo test -f "$BACKUP_DIR/$NAME"; then
+    sudo diff --brief \
+      "$BACKUP_DIR/$NAME" \
+      "/opt/shibboleth-idp/conf/graphicalmatrix/$NAME" || true
+  fi
+done
+
+# 新バージョンで追加されたキーは、復元した旧設定と配布テンプレートを比較して取り込む。
+sudo diff -u \
+  "$BACKUP_DIR/graphicalmatrix.properties" \
+  "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
+```
 
 ## v1.0.xからv1.1.0への追加手順
 
@@ -840,7 +929,18 @@ graphicalmatrix.sp.attributes.blocked =
 `jetty`だが、異なる環境では次で確認して置き換える。
 
 ```bash
+#コマンドで確認
 sudo systemctl show jetty-idp.service -p User -p Group
+
+User=jetty
+Group=jetty
+
+#設定ファイルを確認
+sudo grep -n '^graphicalmatrix\.sp\.runtimeGroup' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties
+
+#空であればsp-management.propertiesに以下を追加
+graphicalmatrix.sp.runtimeGroup = jetty
 ```
 
 機能を利用する場合は、まずSP管理CLIが初期化済みで、対象SPが`MANAGED`であることを確認する。
@@ -866,9 +966,39 @@ until curl --noproxy '*' -fsSI --connect-timeout 2 --max-time 5 \
   sleep 2
 done
 
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+#展開したv1.3配布物のディレクトリから実行してください。
+sudo ./bin/graphicalmatrix-plugin-check.sh \
   --idp-home /opt/shibboleth-idp \
   --config-only
+
+#
+#エラーが出た場合
+#
+#よくあるエラーの修正
+#
+
+# ERROR: graphicalmatrix.sp.management.enabled must be true before applying SP governance changes
+
+# graphicalmatrix.sp.management.enabled = falseになっているので、trueに変更。
+# managementの設定を行っていない場合は、v1.2.6からv1.2.7への追加手順を行いmanagementnの設定を有効にする。
+
+
+# FAIL: [config] SP managed metadata directory runtime access invalid: IllegalStateException: SP managed metadata directory is not readable by configured runtime group jetty: /opt/shibboleth-idp/metadata/2faskwsp
+
+DIR='/opt/shibboleth-idp/metadata/2faskwsp'
+
+sudo install -d -m 0750 -o root -g jetty "$DIR"
+
+# 配下のmetadata XMLはJettyが読むだけで、管理CLIだけが更新する。
+sudo find "$DIR" -type d -exec chown root:jetty {} \; -exec chmod 0750 {} \;
+sudo find "$DIR" -type f -exec chown root:jetty {} \; -exec chmod 0640 {} \;
+
+sudo restorecon -RFv "$DIR"
+
+# Jetty実行ユーザーから読取り・通過できることを確認する。
+sudo -u jetty test -r "$DIR" && \
+sudo -u jetty test -x "$DIR" && \
+echo 'OK: Jetty can access the managed SP metadata directory'
 ```
 
 `access init --apply`は、`/opt/shibboleth-idp/conf/graphicalmatrix`を`0750`、
@@ -892,7 +1022,7 @@ sudo restorecon -Rv /opt/shibboleth-idp/conf/graphicalmatrix
 上の`jetty`は`graphicalmatrix.sp.runtimeGroup`と同じ値へ読み替える。設定検査でruntime groupの
 読み取りエラーが出た場合は、この所有者・mode・SELinux contextを確認する。
 
-属性候補を確認し、SPへ送信しないIdP内部判定用属性として承認する例を示す。
+属性候補を確認し、SPへ送信しないIdP内部判定用属性としてbusinessCategoryを承認する例を示す。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
@@ -909,8 +1039,14 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
   --classification internal \
   --purpose 'IdP-side SP authorization' \
   --apply --confirm businessCategory
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes show businessCategory
 ```
 
+対象SPを調べておく
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+```
 対象SPに`businessCategory=AA`を要求する場合は、dry-run後にentityIDを確認値として適用する。
 
 ```bash

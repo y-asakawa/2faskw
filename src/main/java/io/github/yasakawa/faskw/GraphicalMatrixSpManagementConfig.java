@@ -208,6 +208,10 @@ final class GraphicalMatrixSpManagementConfig {
         return idpHome.resolve("conf/attribute-filter.xml");
     }
 
+    Path attributeResolverPath() {
+        return idpHome.resolve("conf/attribute-resolver.xml");
+    }
+
     Path mfaPolicyPath() {
         return idpHome.resolve("conf/graphicalmatrix/mfa-policy.properties");
     }

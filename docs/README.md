@@ -84,6 +84,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOGROTATE.md](./LOGROTATE.md) | GraphicalMatrix audit log の logrotate 設定例。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
+| [release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md) | LDAP属性をAttribute Resolverへ安全に追加するSP管理CLI拡張の仕様と手順。 |
 | [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
 | [release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md) | SP別LDAP属性アクセス制御と、SP向け属性profileを管理する属性カタログCLIの詳細設計。 |
 | [release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md) | SP管理CLIの履歴設計。v1.3.0でもmetadata、属性release、SP別MFA方針の管理機能を継承する。 |
@@ -191,9 +192,12 @@ WebAuthn credentialの管理、保存方式移行の詳細は[ADMIN-TOOLS.md](./
 
 ### SP追加管理CLI
 
-v1.3.0では、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
+v1.3.0以降では、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
 SP別MFA方針、属性カタログ、SP別LDAP属性アクセス制御を一括管理できる。初期状態では無効であり、設定を有効化して初期化するまで
 IdP設定を変更しない。SP管理用HTTP APIは提供しない。
+
+v1.3.1では、LDAPに存在する属性をAttribute Resolverへ追加する`attributes resolver add`も提供する。
+この操作は属性解決だけを設定し、属性releaseやSP別アクセスpolicyを自動変更しない。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status

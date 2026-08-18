@@ -345,7 +345,7 @@ TOTP / WebAuthn を使わない場合、それらのoptional plugin未検出WARN
 ## 5. plugin files dry-run
 
 ```bash
-./bin/graphicalmatrix-plugin-config.sh \
+sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp
 ```
 
@@ -354,7 +354,7 @@ dry-runの前に、configスクリプトは配布物の `--package-only` check�
 すでに別手順で配布物確認済みの場合だけ、`--skip-package-check` で省略できます。
 
 ```bash
-./bin/graphicalmatrix-plugin-config.sh \
+sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
   --strict
 ```

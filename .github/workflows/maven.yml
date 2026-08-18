@@ -47,3 +47,6 @@ jobs:
 
       - name: Validate release packages
         run: ./scripts/tests/package-regression.sh
+
+      - name: Validate protected configuration upgrades
+        run: ./scripts/tests/plugin-config-permission-regression.sh

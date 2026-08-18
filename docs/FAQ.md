@@ -908,6 +908,74 @@ sudo env IDP_BASE_URL='http://127.0.0.1:8080/idp' \
 読取り権限の設定が必要である。`--unfiltered`はResolverの確認用であり、通常のSAML属性releaseを
 確認する操作ではない。
 
+LDAPには存在するがAttribute Resolverに未登録の属性は、v1.3.1以降の
+`attributes resolver add`で追加できる。次は`businessCategory`を追加する例である。
+
+```bash
+# 1. LDAPに対象ユーザーの属性が存在することを確認する。
+# 接続先、bind DN、base DN、検索filterは実環境へ置き換える。
+sudo ldapsearch -LLL -x \
+  -H ldap://127.0.0.1:389 \
+  -D 'cn=Directory Manager' -W \
+  -b 'ou=People,dc=example,dc=test' \
+  '(uid=test01)' businessCategory
+
+# 2. SP管理CLIによる設定変更を有効にする。
+# /opt/shibboleth-idp/conf/graphicalmatrix/sp-management.propertiesで次を設定する。
+# graphicalmatrix.sp.management.enabled = true
+
+# 3. LDAP DataConnectorを確認し、存在しなければ追加する予定内容を表示する。
+# 既存のLDAPDirectory DataConnectorが1つあればNO_CHANGEになり、そのIDが表示される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init
+
+# 4. DataConnectorが存在しない場合だけ、dry-runに表示されたコマンドで追加する。
+# 既定の検索属性はuid。利用者検索に別のLDAP属性を使う場合は--search-attributeを指定する。
+# data_connectorがgraphicalmatrixLdapの場合
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm graphicalmatrixLdap
+
+# 5. Attribute Resolverへ属性を追加する予定内容を確認する（dry-run）。
+# LDAPDirectory DataConnectorが1つだけなら自動選択される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory
+
+# 6. dry-runで表示されたDataConnectorを指定して実際に追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm businessCategory
+
+# 7. Attribute Resolver変更をIdPへ反映する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+
+# 8. 対象SPと利用者で属性が実際に解決されることを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes list
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes show \
+  businessCategory
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
+  --sp 2faskwlocaltest \
+  --user test01
+```
+
+`resolver init`が新設する`graphicalmatrixLdap`は、`conf/ldap.properties`と
+`credentials/secrets.properties`の標準的な`idp.attribute.resolver.LDAP.*`設定を参照する。
+既定の利用者検索filterは`(uid=$resolutionContext.principal)`である。ログインIDに対応するLDAP属性が
+`uid`以外なら、init時に`--search-attribute LDAP_ATTRIBUTE`を指定する。
+
+LDAP DataConnectorが複数ある場合、CLIは自動選択せず停止する。エラーに表示された候補から、対象LDAPの
+DataConnector IDを`--data-connector ID`で指定する。IdP属性IDとLDAP属性名が異なる場合は、
+`--source-attribute LDAP_ATTRIBUTE`も指定する。CLIは既存の同名`AttributeDefinition`を
+上書きしない。既存定義がある場合は、その定義を管理者が確認して修正する。
+
+`resolver add`は属性をLDAPから解決可能にするだけで、SPへの送信やSP別アクセス許可を自動承認しない。
+上のruntime確認で対象属性が`runtime-observed`になった後、用途に応じて`attributes approve`と
+`access set`を実行する。
+
 初回はContextCheck連携を明示的に初期化する。既存ContextCheckがある場合は自動上書きされず、
 `CONTEXT_CHECK_CONFLICT`で停止する。
 
@@ -952,6 +1020,26 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
   --apply --confirm 'https://sp.example.org/shibboleth'
 ```
 
+`businessCategory=AA` **または** `businessCategory=BB`の利用者だけを
+`2faskwlocaltest`へ許可する場合は、同じ属性IDに`--allow`を繰り返して指定する。
+
+```bash
+# 5. AAまたはBBを持つ利用者を許可するaccess policyの事前確認（dry-run）。
+# 同じ属性IDに指定した複数の値はOR条件として評価される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest \
+  --allow 'businessCategory=AA' \
+  --allow 'businessCategory=BB'
+
+# 6. 確認したaccess policyを対象SPへ実際に適用する。
+# --confirmには対象SPの実際のentityIDを完全一致で指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest \
+  --allow 'businessCategory=AA' \
+  --allow 'businessCategory=BB' \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+```
+
 異なる属性はAND、同一属性へ繰り返した`--allow`値はORである。denyはallowより先に評価する。
 期待属性がない場合や値が一致しない場合、policy設定済みSPだけをfail closedで拒否する。
 policyを設定していないSPには影響しない。
@@ -964,7 +1052,11 @@ policyを設定していないSPには影響しない。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
   2faskwlocaltest --user user-with-aa
 
-# 6. businessCategory=AAを持たない利用者で、拒否（decision=DENY）を確認する。
+# 6. businessCategory=BBを持つ利用者で、許可（decision=ALLOW）を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
+  2faskwlocaltest --user user-with-bb
+
+# 7. businessCategory=AAまたはBBを持たない利用者で、拒否（decision=DENY）を確認する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
   2faskwlocaltest --user user-without-aa
 ```
@@ -972,6 +1064,47 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
 最後に対象SPの保護URLから実際にSSOを行い、許可利用者はSPへ到達し、非許可利用者は
 IdPで拒否されることを確認する。`access set --apply`後の判定は設定ファイルを定期reloadするため、
 この操作だけを理由に`build.sh`やJetty再起動を行う必要はない。
+
+設定したSPアクセス制御を一時的に無効化する場合は、最初にdry-runで変更内容を確認してから
+適用する。`2faskwlocaltest`はentityIDではなく、`graphicalmatrix-sp.sh list`の`NAME`列に表示される
+SP管理名へ置き換える。
+
+```bash
+# 対象SPの管理名とentityIDを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+# access policyを無効化する予定内容を確認する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access disable \
+  2faskwlocaltest
+
+# 確認したaccess policyの無効化を実際に適用する。
+# --confirmには対象SPの実際のentityIDを完全一致で指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access disable \
+  2faskwlocaltest \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+
+# enabled=falseとrevisionの更新を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access show \
+  2faskwlocaltest
+```
+
+`access disable`はSP登録、MFAポリシー、access policyの条件自体を削除しない。対象SPのLDAP属性による
+アクセス制限だけを無効にし、属性値に関係なく認証を継続させる。設定を再度有効にする場合は、同じ
+SP管理名とentityIDを指定して次を実行する。
+
+```bash
+# 無効化したaccess policyを再度有効にする予定内容を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access enable \
+  2faskwlocaltest
+
+# 確認した再有効化を実際に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access enable \
+  2faskwlocaltest \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+```
+
+無効化・再有効化ではrevisionが更新される。これらの変更も設定ファイルの定期reloadで反映されるため、
+通常は`build.sh`やJetty再起動を必要としない。
 
 ## LDAP属性の候補とSPへ送信できる属性を確認するにはどうすればよいか
 
@@ -1019,6 +1152,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
 # この操作で、対象SP向けmanaged attribute filterにuidとmailの送信設定が反映される。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
   set-attributes 2faskwlocaltest uid-mail-release --apply
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile show uid-mail-release
 ```
 
 `discover`やprofile作成のdry-runだけではattribute filterを変更しない。最後の`set-attributes --apply`

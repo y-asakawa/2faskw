@@ -47,6 +47,63 @@ class GraphicalMatrixSpManagementToolTest {
     }
 
     @Test
+    void addsAnLdapResolverAttributeWithDryRunAndApplyGuidance() throws Exception {
+        prepareIdp();
+        final Path resolver = temporary.resolve("conf/attribute-resolver.xml");
+        final String before = Files.readString(resolver);
+
+        final String dryRun = invokeOutput("attributes", "resolver", "add",
+            "employeeType");
+        assertTrue(dryRun.contains("mode=dry-run"));
+        assertTrue(dryRun.contains("data_connector=localTestLdap"));
+        assertTrue(dryRun.contains("--apply --confirm 'employeeType'"));
+        assertEquals(before, Files.readString(resolver));
+
+        final String applied = invokeOutput("attributes", "resolver", "add",
+            "employeeType", "--apply", "--confirm", "employeeType");
+        assertTrue(applied.contains("result=APPLY_OK"));
+        assertTrue(applied.contains("next_build=sudo "));
+        assertTrue(applied.contains("attributes discover --sp SP_NAME --user USER"));
+        assertTrue(Files.readString(resolver).contains("id=\"employeeType\""));
+
+        final String repeated = invokeOutput("attributes", "resolver", "add",
+            "employeeType");
+        assertTrue(repeated.contains("reason=ALREADY_CONFIGURED"));
+
+        final IllegalArgumentException blocked = assertThrows(IllegalArgumentException.class,
+            () -> new GraphicalMatrixSpGovernanceTool(
+                GraphicalMatrixSpManagementConfig.load(temporary.toString())).execute(
+                    "attributes", new String[] {"resolver", "add", "safeAlias",
+                        "--source-attribute", "userPassword"}));
+        assertTrue(blocked.getMessage().contains("blocked LDAP source attribute"));
+    }
+
+    @Test
+    void initializesAnLdapResolverConnectorWithDryRunAndApplyGuidance() throws Exception {
+        prepareIdp();
+        final Path resolver = temporary.resolve("conf/attribute-resolver.xml");
+        Files.writeString(resolver, Files.readString(resolver).replaceAll(
+            "(?s)\\s*<DataConnector id=\"localTestLdap\".*?</DataConnector>", ""));
+        final String before = Files.readString(resolver);
+
+        final String dryRun = invokeOutput("attributes", "resolver", "init");
+        assertTrue(dryRun.contains("mode=dry-run"));
+        assertTrue(dryRun.contains("data_connector=graphicalmatrixLdap"));
+        assertTrue(dryRun.contains("--apply --confirm 'graphicalmatrixLdap'"));
+        assertEquals(before, Files.readString(resolver));
+
+        final String applied = invokeOutput("attributes", "resolver", "init",
+            "--data-connector", "graphicalmatrixLdap", "--apply", "--confirm",
+            "graphicalmatrixLdap");
+        assertTrue(applied.contains("result=APPLY_OK"));
+        assertTrue(applied.contains("attributes resolver add ATTRIBUTE"));
+        assertTrue(Files.readString(resolver).contains("id=\"graphicalmatrixLdap\""));
+
+        final String repeated = invokeOutput("attributes", "resolver", "init");
+        assertTrue(repeated.contains("reason=LDAP_DATA_CONNECTOR_ALREADY_CONFIGURED"));
+    }
+
+    @Test
     void nextPrintsStateSpecificNumberedGuidance() throws Exception {
         prepareIdp();
         final Path managementConfig = temporary.resolve(
@@ -477,6 +534,9 @@ class GraphicalMatrixSpManagementToolTest {
                 <AttributeEncoder xsi:type="SAML2String" name="urn:oid:0.9.2342.19200300.100.1.3"/>
               </AttributeDefinition>
               <AttributeDefinition id="businessCategory" xsi:type="Simple"/>
+              <DataConnector id="localTestLdap" xsi:type="LDAPDirectory">
+                <ReturnAttributes>uid mail businessCategory</ReturnAttributes>
+              </DataConnector>
             </AttributeResolver>
             """, StandardCharsets.UTF_8);
     }

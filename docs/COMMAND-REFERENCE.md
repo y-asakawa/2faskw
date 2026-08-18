@@ -383,6 +383,48 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
   --sp SP_NAME --user USER
 
+# LDAPDirectory DataConnectorの有無を確認する。設定変更は行わない。
+# 存在しなければgraphicalmatrixLdapを追加するapplyコマンドを表示する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init
+
+# 標準のidp.attribute.resolver.LDAP.*設定を参照するLDAP DataConnectorを追加する。
+# 既定ではuidを利用者検索属性として使用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm graphicalmatrixLdap
+
+# 利用者検索属性がuid以外の場合、そのLDAP属性名を指定してDataConnectorを追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --search-attribute LOGIN_ATTRIBUTE \
+  --apply --confirm graphicalmatrixLdap
+
+# LDAPに存在する属性をAttribute Resolverへ追加する予定内容を表示する。設定は変更しない。
+# LDAPDirectory DataConnectorが1つなら自動選択し、複数ある場合は候補を表示して停止する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE
+
+# 選択したLDAP DataConnectorから属性を解決するAttributeDefinitionを実際に追加する。
+# ATTRIBUTEとLDAP側の属性名が同じ場合、--source-attributeは省略できる。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE \
+  --data-connector DATA_CONNECTOR_ID \
+  --apply --confirm ATTRIBUTE
+
+# IdP属性IDとLDAP側の属性名が異なる場合、LDAP側の属性名を明示して追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE \
+  --source-attribute LDAP_ATTRIBUTE \
+  --data-connector DATA_CONNECTOR_ID \
+  --apply --confirm ATTRIBUTE
+
+# Resolver変更をIdPへ反映する。実行後にattributes discover --sp ... --user ...で確認する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+
 # CLIの属性ガバナンス台帳に登録された全属性を一覧表示する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes list
 
