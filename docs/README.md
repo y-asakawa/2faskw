@@ -84,6 +84,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOGROTATE.md](./LOGROTATE.md) | GraphicalMatrix audit log の logrotate 設定例。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
+| [release-notes/v1.3.1-SP-MFA-POLICY-CLI.md](./release-notes/v1.3.1-SP-MFA-POLICY-CLI.md) | SP単位の`set-mfa`とIdP全体の`mfa`によるMFA方針管理、実効判定、手作業差分修復の仕様と手順。 |
 | [release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md) | LDAP属性をAttribute Resolverへ安全に追加するSP管理CLI拡張の仕様と手順。 |
 | [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
 | [release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md) | SP別LDAP属性アクセス制御と、SP向け属性profileを管理する属性カタログCLIの詳細設計。 |
