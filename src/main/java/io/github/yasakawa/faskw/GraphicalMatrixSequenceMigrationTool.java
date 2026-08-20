@@ -111,7 +111,8 @@ public final class GraphicalMatrixSequenceMigrationTool {
                         count = decoded.size();
                     }
                     migrations.add(new Migration(row.userId, sourceMode, targetMode,
-                        count, encoded, plainInitial));
+                        count, encoded, plainInitial, row.sequence, row.initialSequence,
+                        row.stateVersion));
                     summary.planned++;
                     System.out.println((apply ? "APPLY" : "PLAN") + " user=" + row.userId
                         + " from=" + sourceMode + " to=" + targetMode
@@ -180,12 +181,12 @@ public final class GraphicalMatrixSequenceMigrationTool {
     private static List<Row> loadRows(final Connection conn) throws Exception {
         final List<Row> rows = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT user_id, sequence, initial_sequence "
+                "SELECT user_id, sequence, initial_sequence, state_version "
                 + "FROM graphicalmatrix_enrollment ORDER BY user_id");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 rows.add(new Row(rs.getString("user_id"), rs.getString("sequence"),
-                    rs.getString("initial_sequence")));
+                    rs.getString("initial_sequence"), rs.getLong("state_version")));
             }
         }
         return rows;
@@ -195,16 +196,23 @@ public final class GraphicalMatrixSequenceMigrationTool {
             final List<Migration> migrations) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
                 "UPDATE graphicalmatrix_enrollment "
-                + "SET sequence = ?, initial_sequence = ?, updated_at = ? WHERE user_id = ?")) {
+                + "SET sequence = ?, initial_sequence = ?, state_version = state_version + 1, "
+                + "updated_at = ? WHERE user_id = ? AND state_version = ? "
+                + "AND sequence = ? AND initial_sequence = ?")) {
             final long now = System.currentTimeMillis();
             for (final Migration migration : migrations) {
                 ps.setString(1, migration.encodedSequence);
                 ps.setString(2, migration.plainInitialSequence);
                 ps.setLong(3, now);
                 ps.setString(4, migration.userId);
-                ps.addBatch();
+                ps.setLong(5, migration.stateVersion);
+                ps.setString(6, migration.originalSequence);
+                ps.setString(7, migration.originalInitialSequence);
+                if (ps.executeUpdate() != 1) {
+                    throw new IllegalStateException("Enrollment changed during sequence migration: user="
+                        + migration.userId);
+                }
             }
-            ps.executeBatch();
         }
     }
 
@@ -252,11 +260,14 @@ public final class GraphicalMatrixSequenceMigrationTool {
         private final String userId;
         private final String sequence;
         private final String initialSequence;
+        private final long stateVersion;
 
-        private Row(final String userId, final String sequence, final String initialSequence) {
+        private Row(final String userId, final String sequence, final String initialSequence,
+                final long stateVersion) {
             this.userId = userId;
             this.sequence = sequence;
             this.initialSequence = initialSequence;
+            this.stateVersion = stateVersion;
         }
     }
 
@@ -267,16 +278,23 @@ public final class GraphicalMatrixSequenceMigrationTool {
         private final int count;
         private final String encodedSequence;
         private final String plainInitialSequence;
+        private final String originalSequence;
+        private final String originalInitialSequence;
+        private final long stateVersion;
 
         private Migration(final String userId, final String sourceMode,
                 final String targetMode, final int count, final String encodedSequence,
-                final String plainInitialSequence) {
+                final String plainInitialSequence, final String originalSequence,
+                final String originalInitialSequence, final long stateVersion) {
             this.userId = userId;
             this.sourceMode = sourceMode;
             this.targetMode = targetMode;
             this.count = count;
             this.encodedSequence = encodedSequence;
             this.plainInitialSequence = plainInitialSequence;
+            this.originalSequence = originalSequence;
+            this.originalInitialSequence = originalInitialSequence;
+            this.stateVersion = stateVersion;
         }
     }
 

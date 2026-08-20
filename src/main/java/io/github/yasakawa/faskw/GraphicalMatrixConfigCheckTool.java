@@ -107,6 +107,7 @@ public final class GraphicalMatrixConfigCheckTool {
         ok("aliases valid: count=" + config.getAliases().size());
         ok("challenge valid: seconds=" + config.getChallengeSeconds());
         checkLockout(config);
+        checkLdapRateLimit(config);
         ok("self-service valid: enabled=" + config.isSelfServiceEnabled()
             + " transaction_seconds=" + config.getSelfServiceTransactionSeconds()
             + " legacy_ldap_login=" + config.isLegacyLdapLoginEnabled());
@@ -158,6 +159,25 @@ public final class GraphicalMatrixConfigCheckTool {
         if (config.getLockoutMaxLockFailureCount() > 100) {
             warn("GraphicalMatrix maximum lock threshold is higher than recommended: "
                 + "max_lock_failure_count=" + config.getLockoutMaxLockFailureCount());
+        }
+    }
+
+    private void checkLdapRateLimit(final GraphicalMatrixConfig config) {
+        if (!config.isChangeLdapRateLimitEnabled()) {
+            ok("LDAP change rate limit disabled");
+            return;
+        }
+        final List<String> bypassCidrs = config.getChangeLdapRateLimitIpLimitBypassCidrs();
+        ok("LDAP change rate limit valid: key=" + config.getChangeLdapRateLimitKey()
+            + " failure_limit=" + config.getChangeLdapRateLimitFailureLimit()
+            + " ip_failure_limit=" + config.getChangeLdapRateLimitIpFailureLimit()
+            + " ip_limit_bypass_cidrs=" + bypassCidrs.size());
+        if (!bypassCidrs.isEmpty() && "ip".equals(config.getChangeLdapRateLimitKey())) {
+            warn("LDAP IP-limit bypass does not bypass the keyed limiter when key=ip; "
+                + "use key=user or key=ip-user for shared NAT networks");
+        }
+        if (bypassCidrs.stream().anyMatch(value -> value.endsWith("/0"))) {
+            warn("LDAP IP-limit bypass covers every address; use only the required trusted CIDRs");
         }
     }
 

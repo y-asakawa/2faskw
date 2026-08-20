@@ -47,6 +47,63 @@ class GraphicalMatrixSpManagementToolTest {
     }
 
     @Test
+    void addsAnLdapResolverAttributeWithDryRunAndApplyGuidance() throws Exception {
+        prepareIdp();
+        final Path resolver = temporary.resolve("conf/attribute-resolver.xml");
+        final String before = Files.readString(resolver);
+
+        final String dryRun = invokeOutput("attributes", "resolver", "add",
+            "employeeType");
+        assertTrue(dryRun.contains("mode=dry-run"));
+        assertTrue(dryRun.contains("data_connector=localTestLdap"));
+        assertTrue(dryRun.contains("--apply --confirm 'employeeType'"));
+        assertEquals(before, Files.readString(resolver));
+
+        final String applied = invokeOutput("attributes", "resolver", "add",
+            "employeeType", "--apply", "--confirm", "employeeType");
+        assertTrue(applied.contains("result=APPLY_OK"));
+        assertTrue(applied.contains("next_build=sudo "));
+        assertTrue(applied.contains("attributes discover --sp SP_NAME --user USER"));
+        assertTrue(Files.readString(resolver).contains("id=\"employeeType\""));
+
+        final String repeated = invokeOutput("attributes", "resolver", "add",
+            "employeeType");
+        assertTrue(repeated.contains("reason=ALREADY_CONFIGURED"));
+
+        final IllegalArgumentException blocked = assertThrows(IllegalArgumentException.class,
+            () -> new GraphicalMatrixSpGovernanceTool(
+                GraphicalMatrixSpManagementConfig.load(temporary.toString())).execute(
+                    "attributes", new String[] {"resolver", "add", "safeAlias",
+                        "--source-attribute", "userPassword"}));
+        assertTrue(blocked.getMessage().contains("blocked LDAP source attribute"));
+    }
+
+    @Test
+    void initializesAnLdapResolverConnectorWithDryRunAndApplyGuidance() throws Exception {
+        prepareIdp();
+        final Path resolver = temporary.resolve("conf/attribute-resolver.xml");
+        Files.writeString(resolver, Files.readString(resolver).replaceAll(
+            "(?s)\\s*<DataConnector id=\"localTestLdap\".*?</DataConnector>", ""));
+        final String before = Files.readString(resolver);
+
+        final String dryRun = invokeOutput("attributes", "resolver", "init");
+        assertTrue(dryRun.contains("mode=dry-run"));
+        assertTrue(dryRun.contains("data_connector=graphicalmatrixLdap"));
+        assertTrue(dryRun.contains("--apply --confirm 'graphicalmatrixLdap'"));
+        assertEquals(before, Files.readString(resolver));
+
+        final String applied = invokeOutput("attributes", "resolver", "init",
+            "--data-connector", "graphicalmatrixLdap", "--apply", "--confirm",
+            "graphicalmatrixLdap");
+        assertTrue(applied.contains("result=APPLY_OK"));
+        assertTrue(applied.contains("attributes resolver add ATTRIBUTE"));
+        assertTrue(Files.readString(resolver).contains("id=\"graphicalmatrixLdap\""));
+
+        final String repeated = invokeOutput("attributes", "resolver", "init");
+        assertTrue(repeated.contains("reason=LDAP_DATA_CONNECTOR_ALREADY_CONFIGURED"));
+    }
+
+    @Test
     void nextPrintsStateSpecificNumberedGuidance() throws Exception {
         prepareIdp();
         final Path managementConfig = temporary.resolve(
@@ -291,6 +348,85 @@ class GraphicalMatrixSpManagementToolTest {
     }
 
     @Test
+    void managesAndEvaluatesIdpWideMfaPolicy() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+        final Path metadataFile = Files.writeString(temporary.resolve("sp.xml"),
+            GraphicalMatrixSpMetadataTest.metadata(ENTITY_ID, "https://sp.example.org/acs"));
+        final GraphicalMatrixSpManagementConfig config =
+            GraphicalMatrixSpManagementConfig.load(temporary.toString());
+        final String metadataDigest = GraphicalMatrixSpMetadata.fromFile(
+            config, metadataFile, ENTITY_ID).sha256();
+        invoke("add", "--name", "library", "--entity-id", ENTITY_ID,
+            "--metadata-file", metadataFile.toString(), "--attribute-profile", "uid",
+            "--mfa", "inherit", "--approve-sha256", metadataDigest, "--apply");
+
+        final Path policyPath = temporary.resolve("conf/graphicalmatrix/mfa-policy.properties");
+        final String before = Files.readString(policyPath);
+        final String dryRun = invokeOutput("mfa", "global", "set",
+            "--bypass-cidrs", "10.0.0.0/8");
+        assertTrue(dryRun.contains("mode=dry-run"));
+        assertTrue(dryRun.contains("bypass_cidrs_new=10.0.0.0/8"));
+        assertEquals(before, Files.readString(policyPath));
+
+        final String digest = outputValue(dryRun, "plan_sha256");
+        final String applied = invokeOutput("mfa", "global", "set",
+            "--bypass-cidrs", "10.0.0.0/8", "--confirm-bypass",
+            "--approve-sha256", digest, "--apply");
+        assertTrue(applied.contains("result=APPLY_OK"));
+        assertTrue(applied.contains("restart_required=false"));
+
+        final String shown = invokeOutput("mfa", "show");
+        assertTrue(shown.contains("bypass_cidrs=10.0.0.0/8"));
+        assertTrue(shown.contains("managed_policy_drift=OK"));
+        final String decision = invokeOutput("mfa", "test", "--sp", "library",
+            "--ip", "10.2.3.4");
+        assertTrue(decision.contains("decision=BYPASS"));
+        assertTrue(decision.contains("rule=bypassNetwork"));
+
+        final String clearPlan = invokeOutput("mfa", "global", "set",
+            "--clear-bypass-cidrs");
+        final String clearDigest = outputValue(clearPlan, "plan_sha256");
+        invoke("mfa", "global", "set", "--clear-bypass-cidrs",
+            "--approve-sha256", clearDigest, "--apply");
+        assertTrue(GraphicalMatrixMfaPolicyConfig.load(policyPath).bypassCidrs().isEmpty());
+    }
+
+    @Test
+    void detectsAndReconcilesManualMfaPolicyDrift() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+        final Path metadataFile = Files.writeString(temporary.resolve("sp.xml"),
+            GraphicalMatrixSpMetadataTest.metadata(ENTITY_ID, "https://sp.example.org/acs"));
+        final GraphicalMatrixSpManagementConfig config =
+            GraphicalMatrixSpManagementConfig.load(temporary.toString());
+        final String metadataDigest = GraphicalMatrixSpMetadata.fromFile(
+            config, metadataFile, ENTITY_ID).sha256();
+        invoke("add", "--name", "library", "--entity-id", ENTITY_ID,
+            "--metadata-file", metadataFile.toString(), "--attribute-profile", "uid",
+            "--mfa", "force", "--approve-sha256", metadataDigest, "--apply");
+
+        final Path policyPath = config.mfaPolicyPath();
+        Files.writeString(policyPath, Files.readString(policyPath).replace(
+            "graphicalmatrix.mfa.forceSPs = " + ENTITY_ID,
+            "graphicalmatrix.mfa.forceSPs ="));
+        final String shown = invokeOutput("mfa", "show");
+        assertTrue(shown.contains("managed_policy_drift=MISMATCH"));
+        assertThrows(IllegalStateException.class,
+            () -> GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+                policyPath, GraphicalMatrixSpRegistry.load(config.registryPath()).entries()));
+
+        final String dryRun = invokeOutput("mfa", "reconcile", "--from-registry");
+        assertTrue(dryRun.contains("action=MFA_RECONCILE_FROM_REGISTRY"));
+        final String digest = outputValue(dryRun, "plan_sha256");
+        invoke("mfa", "reconcile", "--from-registry", "--approve-sha256", digest,
+            "--apply");
+        assertTrue(Files.readString(policyPath)
+            .contains("graphicalmatrix.mfa.forceSPs = " + ENTITY_ID));
+        assertTrue(invokeOutput("mfa", "show").contains("managed_policy_drift=OK"));
+    }
+
+    @Test
     void configuresAndRollsBackAnAttributeAccessPolicy() throws Exception {
         prepareIdp();
         invoke("init", "--apply");
@@ -477,6 +613,9 @@ class GraphicalMatrixSpManagementToolTest {
                 <AttributeEncoder xsi:type="SAML2String" name="urn:oid:0.9.2342.19200300.100.1.3"/>
               </AttributeDefinition>
               <AttributeDefinition id="businessCategory" xsi:type="Simple"/>
+              <DataConnector id="localTestLdap" xsi:type="LDAPDirectory">
+                <ReturnAttributes>uid mail businessCategory</ReturnAttributes>
+              </DataConnector>
             </AttributeResolver>
             """, StandardCharsets.UTF_8);
     }
@@ -502,5 +641,14 @@ class GraphicalMatrixSpManagementToolTest {
 
     private String cliCommand(final String arguments) {
         return "sudo " + temporary.resolve("bin/graphicalmatrix-sp.sh") + " " + arguments;
+    }
+
+    private static String outputValue(final String output, final String key) {
+        for (final String line : output.split("\\R")) {
+            if (line.startsWith(key + "=")) {
+                return line.substring(key.length() + 1);
+            }
+        }
+        throw new AssertionError("missing output field: " + key + " in " + output);
     }
 }

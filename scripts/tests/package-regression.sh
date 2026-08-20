@@ -88,6 +88,20 @@ with zipfile.ZipFile(archive) as zf:
     cli = zf.read(f"{expected_root}/bin/graphicalmatrix-sp.sh").decode("utf-8")
     if "IDP_BASE_URL" not in cli or "graphicalmatrix.sp.reload.baseUrl" not in cli:
         raise SystemExit("SP management CLI does not configure the reload base URL")
+    required_runtime_jars = ("httpclient-", "httpcore-", "commons-logging-")
+    bundled_jars = {
+        pathlib.PurePosixPath(name).name
+        for name in names
+        if name.startswith(f"{expected_root}/webapp/WEB-INF/lib/") and name.endswith(".jar")
+    }
+    missing_jars = [
+        prefix for prefix in required_runtime_jars
+        if not any(name.startswith(prefix) for name in bundled_jars)
+    ]
+    if missing_jars:
+        raise SystemExit(
+            "SP management CLI runtime JARs are missing: " + ", ".join(missing_jars)
+        )
     readme = zf.read(f"{expected_root}/README.md").decode("utf-8")
     if "https://github.com/y-asakawa/2faskw/blob/main/docs/INSTALL_NEW_SP.md" not in readme:
         raise SystemExit("SP management documentation URL is missing from package README")

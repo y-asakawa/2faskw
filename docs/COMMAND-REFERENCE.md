@@ -369,6 +369,118 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh restore-legacy SP_NAME \
   --apply --confirm 'ENTITY_ID'
 ```
 
+### 4.4 MFA方針
+
+`set-mfa`は1件のSPに対する方針を管理する。`mfa`はIdP全体の既定方針、評価順、全SPに
+適用される送信元IP例外を管理する。IdP全体設定の変更時も、CLI管理SPの`set-mfa`設定は保持される。
+
+#### 4.4.1 SP単位の`set-mfa`
+
+`SP_NAME`はentityIDやprovider IDではなく、`graphicalmatrix-sp.sh list`の`NAME`列に表示される
+CLI管理名である。1件のSPには1つのMFA profileだけを割り当てる。再度`set-mfa`を実行すると、
+以前のprofileは新しいprofileで置き換えられる。
+
+```bash
+# 対象SPの現在の管理名とMFA profileを確認する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+# 対象SPをIdP全体方針に従わせる変更予定を表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME inherit
+
+# 対象SPをIdP全体方針に従わせる設定を適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME inherit --apply
+
+# 対象SPでMFAを強制する変更予定を表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME force
+
+# 対象SPでMFAを強制する設定を適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME force --apply
+
+# 対象SP全体でMFAを不要にする変更予定を表示する。明示確認が必要である。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME bypass \
+  --confirm-bypass
+
+# 対象SP全体でMFAを不要にする設定を適用する。適用時にも明示確認が必要である。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME bypass \
+  --confirm-bypass \
+  --apply
+
+# 対象SPをrequiredSPsへ登録する変更予定を表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME required
+
+# 対象SPをrequiredSPsへ登録する設定を適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME required --apply
+
+# 対象SPかつ指定IPv4 CIDRの場合だけMFAを不要にする変更予定を表示する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME sp-cidr-bypass \
+  --cidrs '192.168.10.0/24,10.20.0.0/16'
+
+# 対象SPかつ指定IPv4 CIDRの場合だけMFAを不要にする設定を適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa SP_NAME sp-cidr-bypass \
+  --cidrs '192.168.10.0/24,10.20.0.0/16' \
+  --apply
+
+# SP単位設定とIdP全体設定を組み合わせた実効判定を確認する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp SP_NAME --ip 192.168.10.20
+```
+
+| profile | 動作 |
+| --- | --- |
+| `inherit` | SPを4つのSP別ルールから外し、IdP全体方針で判定する。 |
+| `force` | 対象SPを`forceSPs`へ登録し、該当ルール到達時にMFAを要求する。 |
+| `bypass` | 対象SPを`bypassSPs`へ登録し、該当ルール到達時に送信元IPに関係なくMFAを不要にする。 |
+| `required` | 対象SPを`requiredSPs`へ登録する。ルール到達時、未登録SPはMFA不要になるため影響範囲に注意する。 |
+| `sp-cidr-bypass` | 該当ルール到達時、対象SPと`--cidrs`の両方が一致した場合だけMFAを不要にする。IPv4 CIDRだけ指定できる。 |
+
+`--cidrs`は`sp-cidr-bypass`だけで使用でき、少なくとも1件必要である。`required`を1件でも
+設定すると、`requiredSPs`ルール到達時に、列挙されていないSPはMFA不要と判定される。
+適用前後に`mfa test`で対象SPと代表的な送信元IPを確認する。
+
+#### 4.4.2 IdP全体の`mfa`
+
+```bash
+# IdP全体のMFA設定、SP別設定、手作業による差分の有無を表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa show
+
+# 指定したSPと送信元IPについて、実効的な判定結果と一致したルールを表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp SP_NAME --ip 192.0.2.10
+
+# IdP全体でMFAを免除するCIDRの変更予定とplan_sha256を表示する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --bypass-cidrs '192.168.0.0/16,10.0.0.0/8'
+
+# dry-runで確認した完成後設定を適用する。MFA免除を増やすためconfirm-bypassも必要になる。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --bypass-cidrs '192.168.0.0/16,10.0.0.0/8' \
+  --confirm-bypass \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
+
+# IdP全体のMFA免除CIDRを削除する予定を表示する。オプション省略では既存値は削除されない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --clear-bypass-cidrs
+
+# CLI管理SPの手動差分を、SP管理台帳から復元する予定とplan_sha256を表示する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa reconcile --from-registry
+
+# 確認済みの復元内容を適用する。mfa-policy.propertiesのIdP全体設定は保持される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa reconcile \
+  --from-registry \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
+```
+
+`mfa global set`で指定できる値は`--default`、`--policy-order`、`--bypass-ips`、
+`--bypass-cidrs`である。未指定項目は現在値を保持する。IP一覧の削除には
+`--clear-bypass-ips`、CIDR一覧の削除には`--clear-bypass-cidrs`を明示する。
+`default=bypass`、評価順変更、IP/CIDR例外追加は、適用時に`--confirm-bypass`が必要である。
+
+CLI管理SPに対応する`forceSPs`、`bypassSPs`、`requiredSPs`、`bypassSpCidrs`を手作業で
+変更すると、後続のSP管理コマンドは差分を検出して停止する。手作業変更を採用するのではなく、
+`set-mfa`で設定し直すか、`mfa reconcile --from-registry`で台帳の状態へ戻す。
+
 ## 5. 属性profileとSP別アクセス制御
 
 属性候補の検出、属性release承認、SP別アクセス制御は、SP管理CLIのサブコマンドである。
@@ -382,6 +494,48 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
 # 指定SPと指定ユーザーの文脈で、実際に解決される属性候補を確認する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
   --sp SP_NAME --user USER
+
+# LDAPDirectory DataConnectorの有無を確認する。設定変更は行わない。
+# 存在しなければgraphicalmatrixLdapを追加するapplyコマンドを表示する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init
+
+# 標準のidp.attribute.resolver.LDAP.*設定を参照するLDAP DataConnectorを追加する。
+# 既定ではuidを利用者検索属性として使用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm graphicalmatrixLdap
+
+# 利用者検索属性がuid以外の場合、そのLDAP属性名を指定してDataConnectorを追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --search-attribute LOGIN_ATTRIBUTE \
+  --apply --confirm graphicalmatrixLdap
+
+# LDAPに存在する属性をAttribute Resolverへ追加する予定内容を表示する。設定は変更しない。
+# LDAPDirectory DataConnectorが1つなら自動選択し、複数ある場合は候補を表示して停止する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE
+
+# 選択したLDAP DataConnectorから属性を解決するAttributeDefinitionを実際に追加する。
+# ATTRIBUTEとLDAP側の属性名が同じ場合、--source-attributeは省略できる。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE \
+  --data-connector DATA_CONNECTOR_ID \
+  --apply --confirm ATTRIBUTE
+
+# IdP属性IDとLDAP側の属性名が異なる場合、LDAP側の属性名を明示して追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add ATTRIBUTE \
+  --source-attribute LDAP_ATTRIBUTE \
+  --data-connector DATA_CONNECTOR_ID \
+  --apply --confirm ATTRIBUTE
+
+# Resolver変更をIdPへ反映する。実行後にattributes discover --sp ... --user ...で確認する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
 
 # CLIの属性ガバナンス台帳に登録された全属性を一覧表示する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes list

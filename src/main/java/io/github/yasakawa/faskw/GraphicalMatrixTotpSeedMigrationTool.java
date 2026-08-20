@@ -80,7 +80,8 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
                 try {
                     final String plain = storage.decodeForMigration(row.seed);
                     final String encoded = storage.encode(plain);
-                    migrations.add(new Migration(row.userId, sourceMode, targetMode, encoded));
+                    migrations.add(new Migration(row.userId, sourceMode, targetMode, encoded,
+                        row.seed, row.stateVersion));
                     summary.planned++;
                     System.out.println((apply ? "APPLY" : "PLAN") + " user=" + row.userId
                         + " from=" + sourceMode + " to=" + targetMode);
@@ -138,11 +139,12 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
     private static List<Row> loadRows(final Connection conn) throws Exception {
         final List<Row> rows = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT user_id, totp_seed FROM graphicalmatrix_enrollment "
+                "SELECT user_id, totp_seed, state_version FROM graphicalmatrix_enrollment "
                 + "WHERE totp_seed IS NOT NULL AND totp_seed <> '' ORDER BY user_id");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                rows.add(new Row(rs.getString("user_id"), rs.getString("totp_seed")));
+                rows.add(new Row(rs.getString("user_id"), rs.getString("totp_seed"),
+                    rs.getLong("state_version")));
             }
         }
         return rows;
@@ -151,15 +153,21 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
     private static void applyMigrations(final Connection conn,
             final List<Migration> migrations) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
-                "UPDATE graphicalmatrix_enrollment SET totp_seed = ?, updated_at = ? WHERE user_id = ?")) {
+                "UPDATE graphicalmatrix_enrollment SET totp_seed = ?, "
+                + "state_version = state_version + 1, updated_at = ? "
+                + "WHERE user_id = ? AND state_version = ? AND totp_seed = ?")) {
             final long now = System.currentTimeMillis();
             for (final Migration migration : migrations) {
                 ps.setString(1, migration.encodedSeed);
                 ps.setLong(2, now);
                 ps.setString(3, migration.userId);
-                ps.addBatch();
+                ps.setLong(4, migration.stateVersion);
+                ps.setString(5, migration.originalSeed);
+                if (ps.executeUpdate() != 1) {
+                    throw new IllegalStateException("Enrollment changed during TOTP seed migration: user="
+                        + migration.userId);
+                }
             }
-            ps.executeBatch();
         }
     }
 
@@ -189,21 +197,28 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
     private static final class Row {
         private final String userId;
         private final String seed;
+        private final long stateVersion;
 
-        private Row(final String userId, final String seed) {
+        private Row(final String userId, final String seed, final long stateVersion) {
             this.userId = userId;
             this.seed = seed;
+            this.stateVersion = stateVersion;
         }
     }
 
     private static final class Migration {
         private final String userId;
         private final String encodedSeed;
+        private final String originalSeed;
+        private final long stateVersion;
 
         private Migration(final String userId, final String sourceMode,
-                final String targetMode, final String encodedSeed) {
+                final String targetMode, final String encodedSeed,
+                final String originalSeed, final long stateVersion) {
             this.userId = userId;
             this.encodedSeed = encodedSeed;
+            this.originalSeed = originalSeed;
+            this.stateVersion = stateVersion;
         }
     }
 

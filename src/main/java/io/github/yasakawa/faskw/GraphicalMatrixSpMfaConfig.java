@@ -65,6 +65,13 @@ final class GraphicalMatrixSpMfaConfig {
     static void render(final Path path, final List<GraphicalMatrixSpRegistry.Entry> oldEntries,
             final List<GraphicalMatrixSpRegistry.Entry> newEntries,
             final GraphicalMatrixSpRegistry.Entry restoreLegacy) throws IOException {
+        atomicWrite(path, renderContent(path, oldEntries, newEntries, restoreLegacy));
+    }
+
+    static String renderContent(final Path path,
+            final List<GraphicalMatrixSpRegistry.Entry> oldEntries,
+            final List<GraphicalMatrixSpRegistry.Entry> newEntries,
+            final GraphicalMatrixSpRegistry.Entry restoreLegacy) throws IOException {
         final Parsed parsed = parse(path);
         final Set<String> oldManaged = new LinkedHashSet<>();
         for (final GraphicalMatrixSpRegistry.Entry entry : oldEntries) {
@@ -112,7 +119,55 @@ final class GraphicalMatrixSpMfaConfig {
                 output.add(key + " = " + replacements.get(key));
             }
         }
-        atomicWrite(path, String.join("\n", output) + "\n");
+        return String.join("\n", output) + "\n";
+    }
+
+    static List<String> managedDrift(final Path path,
+            final List<GraphicalMatrixSpRegistry.Entry> entries) throws IOException {
+        final Parsed parsed = parse(path);
+        final Set<String> force = csv(parsed.values().get(FORCE));
+        final Set<String> bypass = csv(parsed.values().get(BYPASS));
+        final Set<String> required = csv(parsed.values().get(REQUIRED));
+        final Map<String, List<String>> cidrs = spCidrs(parsed.values().get(SP_CIDR));
+        final List<String> drift = new ArrayList<>();
+        for (final GraphicalMatrixSpRegistry.Entry entry : entries) {
+            final List<String> actual = new ArrayList<>();
+            if (force.contains(entry.entityId())) {
+                actual.add("force");
+            }
+            if (bypass.contains(entry.entityId())) {
+                actual.add("bypass");
+            }
+            if (required.contains(entry.entityId())) {
+                actual.add("required");
+            }
+            if (cidrs.containsKey(entry.entityId())) {
+                actual.add("sp-cidr-bypass");
+            }
+            final String expected = "ACTIVE".equals(entry.status())
+                ? entry.mfaProfile() : "inherit";
+            final String actualProfile = actual.isEmpty() ? "inherit" : String.join("+", actual);
+            if (!expected.equals(actualProfile)) {
+                drift.add(entry.name() + ":expected=" + expected + ",actual=" + actualProfile);
+                continue;
+            }
+            if ("sp-cidr-bypass".equals(expected)
+                    && !entry.cidrs().equals(cidrs.get(entry.entityId()))) {
+                drift.add(entry.name() + ":expected_cidrs=" + String.join(",", entry.cidrs())
+                    + ",actual_cidrs=" + String.join(",", cidrs.get(entry.entityId())));
+            }
+        }
+        return List.copyOf(drift);
+    }
+
+    static void requireNoManagedDrift(final Path path,
+            final List<GraphicalMatrixSpRegistry.Entry> entries) throws IOException {
+        final List<String> drift = managedDrift(path, entries);
+        if (!drift.isEmpty()) {
+            throw new IllegalStateException("manually edited MFA policy entries were detected: "
+                + String.join(";", drift)
+                + "; run mfa reconcile --from-registry before applying SP management changes");
+        }
     }
 
     static void validateProfile(final String profile, final List<String> cidrs) {
@@ -134,6 +189,7 @@ final class GraphicalMatrixSpMfaConfig {
     private static void addProfile(final String profile, final String entityId,
             final List<String> entryCidrs, final Set<String> force, final Set<String> bypass,
             final Set<String> required, final Map<String, List<String>> cidrs) {
+        validateEntityId(entityId);
         switch (profile == null || profile.isBlank() ? "inherit" : profile) {
             case "inherit" -> {
             }
@@ -142,6 +198,15 @@ final class GraphicalMatrixSpMfaConfig {
             case "required" -> required.add(entityId);
             case "sp-cidr-bypass" -> cidrs.put(entityId, List.copyOf(entryCidrs));
             default -> throw new IllegalArgumentException("unknown MFA profile: " + profile);
+        }
+    }
+
+    static void validateEntityId(final String entityId) {
+        if (entityId == null || entityId.isBlank()
+                || entityId.indexOf(',') >= 0 || entityId.indexOf(';') >= 0
+                || entityId.indexOf('|') >= 0) {
+            throw new IllegalArgumentException(
+                "entityID must not contain MFA policy delimiters: comma, semicolon, or pipe");
         }
     }
 

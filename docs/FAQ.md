@@ -123,6 +123,11 @@ graphicalmatrix.aliases = A:img01,B:img02,C:img03
 - `graphicalmatrix.change.ldapRateLimit.windowSeconds` は `1` 以上
 - `graphicalmatrix.change.ldapRateLimit.lockSeconds` は `1` 以上
 - `graphicalmatrix.change.ldapRateLimit.key` は `ip`、`user`、`ip-user` のいずれか
+- `graphicalmatrix.change.ldapRateLimit.ipFailureLimit` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipWindowSeconds` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipLockSeconds` は `1` 以上
+- `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs` は空、またはIPv4/IPv6 CIDRを
+  カンマ区切りで最大256件。ホスト名、prefixなしの単一IP、空要素は使用不可
 
 設定例:
 
@@ -132,6 +137,46 @@ graphicalmatrix.change.ldapRateLimit.failureLimit = 5
 graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
 graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
 graphicalmatrix.change.ldapRateLimit.key = ip-user
+graphicalmatrix.change.ldapRateLimit.ipFailureLimit = 100
+graphicalmatrix.change.ldapRateLimit.ipWindowSeconds = 60
+graphicalmatrix.change.ldapRateLimit.ipLockSeconds = 300
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs =
+```
+
+### 大規模な共有NATからLDAP変更画面を利用するにはどうすればよいか
+
+同じNATアドレスから多数の利用者が一斉に操作する環境では、利用者ごとの入力誤りが
+`ipFailureLimit`へ合算され、正常な利用者までIP全体制限へ巻き込む可能性がある。
+信頼済みの学内・社内ネットワークに限り、独立したIP全体制限だけを除外できる。
+
+```properties
+# 利用者ごとの制限は維持する。
+graphicalmatrix.change.ldapRateLimit.enabled = true
+graphicalmatrix.change.ldapRateLimit.failureLimit = 5
+graphicalmatrix.change.ldapRateLimit.windowSeconds = 300
+graphicalmatrix.change.ldapRateLimit.lockSeconds = 900
+graphicalmatrix.change.ldapRateLimit.key = ip-user
+
+# このCIDRでは独立IP全体制限だけを除外する。
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs = 192.168.0.0/16,10.0.0.0/8
+```
+
+CIDRに一致しても、`failureLimit`によるキー別制限は継続する。既定の`key=ip-user`なら、
+同じNAT配下でもユーザーIDごとに別の失敗カウンターとなる。`key=ip`ではキー別制限も
+共有IP単位になるため、この用途では`user`または`ip-user`を使用する。
+
+この設定はLDAP保護全体のホワイトリストではなく、`ipFailureLimit`、`ipWindowSeconds`、
+`ipLockSeconds`で構成する独立IP全体制限だけの除外である。通常のShibboleth Password認証、
+GraphicalMatrix画像照合のロック、LDAPサーバー自身のロック方針には影響しない。
+接続元はServletが認識したIPを使用する。リバースプロキシ環境ではプロキシIPになる場合があるため、
+信頼できるプロキシ構成と実際の`graphicalmatrix-audit.log`の`ip`を確認してCIDRを決定する。
+
+設定保存後は次のリクエストから反映され、通常はJetty再起動を必要としない。適用前に設定検査を行う。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
 ```
 
 ### GraphicalMatrixロックアウト設定が不正
@@ -414,56 +459,104 @@ propertiesの変更は次回のCLI起動から読み込まれるため、その�
 
 ## SPごと、送信元IPごとにMFAの要否を変更するにはどうすればよいか
 
-次のファイルを編集する。
+SP単位の設定は`set-mfa`、IdP全体の設定は`mfa`を使用する。まず現在の実効設定と
+CLI管理SPに手作業差分がないことを確認する。
+
+```bash
+# IdP全体設定、SP別設定、手作業差分の有無を表示する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa show
+
+# 指定したSPと送信元IPに対する実効判定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp SP_NAME --ip 192.0.2.10
+```
+
+`managed_policy_drift`が`OK`でない場合は、CLI管理SPに対応する設定へ手作業差分があるため、
+以後の変更を行う前に台帳との差分を確認してCLIで修復する。
+
+```bash
+# 台帳から復元される内容とplan_sha256を確認する。まだファイルは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  mfa reconcile --from-registry
+
+# 内容を確認後、表示されたplan_sha256を指定して台帳の状態へ戻す。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  mfa reconcile --from-registry \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
+```
+
+CLIは次のファイルを安全に更新する。
 
 ```text
 /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 ```
 
-代表的な設定は次のとおり。
+全SPに適用する送信元CIDR例外を変更する例を示す。
 
-```properties
-# 既定では全SPでMFAを要求する。
-graphicalmatrix.mfa.default = require
+```bash
+# 変更後の全設定とplan_sha256を確認する。まだファイルは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --bypass-cidrs '192.168.10.0/24,10.20.0.0/16'
 
-# 指定したSPでは、後続のbypassルールより優先してMFAを要求する。
-graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
-
-# 左から評価し、最初に結論を返したルールを採用する。
-graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
-
-# 指定したSPではMFAを要求しない。
-graphicalmatrix.mfa.bypassSPs = https://sp-public.example.org/shibboleth
-
-# 指定したSPだけでMFAを要求する。設定時は、それ以外のSPではMFAを要求しない。
-graphicalmatrix.mfa.requiredSPs =
-
-# 指定した送信元IPまたはIPv4 CIDRではMFAを要求しない。
-graphicalmatrix.mfa.bypassIPs = 192.0.2.10
-graphicalmatrix.mfa.bypassCIDRs = 192.168.10.0/24,10.20.0.0/16
+# 同じ値と確認済みplan_sha256を指定して適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --bypass-cidrs '192.168.10.0/24,10.20.0.0/16' \
+  --confirm-bypass \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
 ```
 
-`graphicalmatrix.mfa.requiredSPs` には複数のSP entityIDをカンマ区切りで指定できる。
+MFA方針の運用変更はCLIで行う。CLI管理SPに対応する`forceSPs`、`bypassSPs`、`requiredSPs`、
+`bypassSpCidrs`をpropertiesファイルで直接変更してはならない。最初に`list`で対象SPのCLI管理名を確認する。
 
-```properties
-graphicalmatrix.mfa.requiredSPs = https://sp1.example.org/shibboleth,https://sp2.example.org/shibboleth
+```bash
+# NAME列に表示されるCLI管理名を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
 ```
 
-このプロパティを1つでも指定すると、`requiredSPs`ルールを評価した時点で、列挙したSPだけがMFA必須となり、
-それ以外のSPではMFAを要求しない。既定順序では、先行するbypassルールに一致せず、かつ
-`requiredSPs`が空の場合だけ後続の`default`へ進む。
-同じ`graphicalmatrix.mfa.requiredSPs`を複数行に重ねて書くと、Java Propertiesの後ろの値で上書きされるため、1つの値にまとめる。
+機微なSPで常にMFAを要求する場合は`force`を使用する。
 
-`graphicalmatrix.mfa.bypassSPs` も複数のSP entityIDをカンマ区切りで指定できる。
+```bash
+# 変更予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sensitive-sp force
 
-```properties
-graphicalmatrix.mfa.bypassSPs = https://sp-public1.example.org/shibboleth,https://sp-public2.example.org/shibboleth
+# 確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sensitive-sp force --apply
 ```
 
-既定の`policyOrder`では、`bypassSPs`に一致したSPは、送信元IPおよび`requiredSPs`の判定より先にMFA不要となる。
-同じ`graphicalmatrix.mfa.bypassSPs`も複数行に重ねず、1つの値にまとめる。
+公開SP全体でMFAを不要にする場合は`bypass`を使用する。MFAを弱める変更であるため、適用時に
+`--confirm-bypass`が必要である。
 
-`policyOrder`はプロパティファイルの行順ではなく、カンマ区切りで指定した左から順に評価する。
+```bash
+# 変更予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa public-sp bypass --confirm-bypass
+
+# 確認後に明示承認して適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa public-sp bypass --confirm-bypass --apply
+```
+
+指定したSP群だけをMFA必須にする選択型運用では、対象SPごとに`required`を設定する。
+
+```bash
+# 1件目の変更予定を確認し、確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sp1 required
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sp1 required --apply
+
+# 2件目の変更予定を確認し、確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sp2 required
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sp2 required --apply
+```
+
+`required`を1件でも設定すると、`requiredSPs`ルールを評価した時点で、設定したSPだけがMFA必須となり、
+それ以外のSPではMFAを要求しない。既定順序では先行するbypassルールが先に評価される。
+全SPをMFA必須にしたい環境で、単に新規SPのMFAを有効にする目的では`required`を使用しない。
+
+`--policy-order`はpropertiesファイルの行順ではなく、カンマ区切りで指定した左から順に評価する。
 最初にMFA必須またはMFA不要を決定したルールで評価を終了する。指定できるルールは次の6つである。
 
 | ルール | 意味 |
@@ -479,32 +572,28 @@ graphicalmatrix.mfa.bypassSPs = https://sp-public1.example.org/shibboleth,https:
 設定エラーとなる。`requiredSPs`が空でない場合は必ずMFA必須またはMFA不要を決定するため、
 その後ろのルールには到達しない。自己管理フローはこの順序の対象外で、常にMFAを要求する。
 
-`bypassSPs` はSP全体、`bypassIPs` と `bypassCIDRs` は全SPに対して適用される。
-特定のSPに対して、かつローカルIPの場合だけMFAを不要にする場合は、
-`graphicalmatrix.mfa.bypassSpCidrs` を使用する。
+`bypass`はSP全体、`mfa global set`の`--bypass-ips`と`--bypass-cidrs`は全SPを判定対象とする。
+特定のSPで、かつ指定CIDRの場合だけMFAを不要にする場合は`sp-cidr-bypass`を使用する。
+単一のIPv4アドレスは`/32`で指定する。
 
-```properties
-# <SP entityID>|<IPv4 CIDR>[,<IPv4 CIDR>] をセミコロンで区切る。
-# 単一のIPv4アドレスは /32 で指定する。
-graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24;https://sp2.example.org/shibboleth|10.20.0.0/16,10.21.0.0/16
+```bash
+# sp1で指定CIDRの場合だけMFAを不要にする変更予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sp1 sp-cidr-bypass --cidrs '192.168.10.0/24'
+
+# 確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sp1 sp-cidr-bypass --cidrs '192.168.10.0/24' --apply
+
+# sp2に複数CIDRを指定する場合も、同じ方法で設定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sp2 sp-cidr-bypass --cidrs '10.20.0.0/16,10.21.0.0/16'
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa sp2 sp-cidr-bypass --cidrs '10.20.0.0/16,10.21.0.0/16' --apply
 ```
 
-この設定は、指定したSP entityIDとIPv4 CIDRの両方に一致した場合だけMFAを不要にする。指定していないSPには適用されない。
-
-`bypassSpCidrs`の左側には、利用者がアクセスする画面URLではなく、SPメタデータの`entityID`を指定する。
-IdPのSSOエンドポイントURL、SPのACS URL、利用者向けアプリケーションURLは指定しない。
-
-```xml
-<md:EntityDescriptor entityID="https://sp1.example.org/shibboleth">
-```
-
-この場合の設定は次のとおり。
-
-```properties
-graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24
-```
-
-`https`/`http`、ポート番号、末尾スラッシュ、パスを含めて完全一致するため、SPメタデータの値をそのままコピーする。
+CLIは管理名からSP entityIDを解決するため、利用者向けURL、ACS URL、IdPのSSOエンドポイントを
+コマンドへ指定しない。適用後は`mfa show`と`mfa test`で設定と実効判定を確認する。
 通常のSPログインを実行した後は、IdPログの`sp=`からも実際に判定されたentityIDを確認できる。
 
 ```bash
@@ -512,29 +601,152 @@ sudo grep -E 'MFA (policy decision|method decision)' \
   /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
 ```
 
-次のログの場合、設定へ指定する値は`https://sp1.example.org/shibboleth`である。
+次のログの場合、MFA判定で使用されたSP entityIDは`https://sp1.example.org/shibboleth`である。
 
 ```text
 MFA policy decision: rule=default, result=require, sp=https://sp1.example.org/shibboleth, ip=192.168.10.20
 ```
 
 学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけは同じCIDRからでもMFAを強制する場合は、
-`forceSPs`を`bypassNetwork`より前に置く。
+機微なSPを`force`にし、IdP全体の既定値、評価順、CIDR例外をCLIで設定する。
 
-```properties
-graphicalmatrix.mfa.default = require
-graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
-graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
-graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+```bash
+# 機微なSPをforceへ変更する予定を確認し、確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sensitive-sp force
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh set-mfa sensitive-sp force --apply
+
+# IdP全体設定の変更予定とplan_sha256を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --default require \
+  --policy-order 'forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default' \
+  --bypass-cidrs '192.168.0.0/24'
+
+# 同じ値と確認済みplan_sha256を指定して適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --default require \
+  --policy-order 'forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default' \
+  --bypass-cidrs '192.168.0.0/24' \
+  --confirm-bypass \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
 ```
 
 この例では、`192.168.0.1`から機微なSPへアクセスすると`forceSPs`でMFA必須となり、通常SPへ
 アクセスすると`bypassNetwork`でMFA不要となる。学外IPから通常SPへアクセスした場合は
 `default=require`が適用される。
 
-優先順位を変更する場合は6ルールを残したまま並び替える。例えば`bypassNetwork`を`forceSPs`より
-前に置くと、学内・社内CIDRから機微なSPへアクセスした場合もMFA不要になるため、変更前に
-`graphicalmatrix-plugin-check.sh --config-only`と検証用SPで確認する。
+### `mfa show`でSPが`force`の場合、全体CIDR除外は適用されるか
+
+次のように、対象SPが`mfa=force`で、既定の評価順では`forceSPs`が`bypassNetwork`より前にある場合、
+送信元が`bypass_cidrs`に含まれていても、そのSPではMFAが強制される。
+
+```text
+default=require
+policy_order=forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
+bypass_ips=
+bypass_cidrs=192.0.2.0/24
+use_forwarded_for=false
+managed_policy_drift=OK
+sp=local-test-sp status=ACTIVE mfa=force cidrs=
+```
+
+この例では、`local-test-sp`へのアクセスは最初の`forceSPs`でMFA必須と確定するため、後続の
+`bypassNetwork`は評価されない。
+
+このSPにも全体CIDR除外を適用する場合は、SP単位方針を`inherit`へ変更する。
+
+```bash
+# 変更予定を確認する。まだ設定ファイルは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp inherit
+
+# 確認後、SP単位方針をinheritへ変更する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp inherit --apply
+
+# 指定した送信元IPで実際にどのルールが適用されるか確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp local-test-sp --ip 192.0.2.10
+```
+
+`inherit`へ変更した後、この例の`192.0.2.0/24`からのアクセスは`bypassNetwork`でMFA不要となる。
+CIDR外からのアクセスは、最後の`default=require`によってMFA必須となる。
+
+### `force`、`required`、`inherit`はどう使い分けるか
+
+`set-mfa`で指定する3つの代表的なprofileには、次の違いがある。
+
+| profile | 対象SPの動作 | 全体CIDR除外 | 他のSPへの影響 |
+| --- | --- | --- | --- |
+| `force` | 対象SPでMFAを強制する。 | 既定順序では適用されない。 | なし。 |
+| `required` | 対象SPをMFA必須リストへ追加する。 | 既定順序では先に適用される。 | リスト外のSPがMFA不要になる可能性がある。 |
+| `inherit` | IdP全体のMFA方針に従う。 | 適用される。 | なし。 |
+
+`force`は最初の`forceSPs`でMFA必須と確定する。全体CIDR除外の`bypassNetwork`より前に評価されるため、
+機微なSPを送信元ネットワークにかかわらずMFA必須にする場合に使用する。
+
+```bash
+# 対象SPで常にMFAを要求する設定の変更予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp force
+
+# 確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp force --apply
+```
+
+`required`は`requiredSPs`へ対象SPを追加する。既定順序では`bypassNetwork`より後に評価されるため、
+送信元が全体CIDR除外に一致した場合は対象SPでもMFA不要となる。
+
+```bash
+# 対象SPをMFA必須リストへ追加する設定の変更予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp required
+
+# 確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  set-mfa local-test-sp required --apply
+```
+
+`required`を1件でも設定すると、`requiredSPs`に含まれないSPは、そのルールを評価した時点でMFA不要と判定される。
+全SPをMFA必須にしたい環境で、単に対象SPのMFAを有効にする目的では使用しない。
+
+通常の「全SPでMFA必須、ただし全体CIDR除外を適用する」という方針では、各SPを`inherit`、
+IdP全体を`default=require`とする。特定のSPだけCIDR除外の対象外にする場合は、そのSPを`force`とする。
+
+設定後は、対象SPとCIDR内外のIPを指定して実効判定を確認する。
+
+```bash
+# CIDR内の送信元IPに対する実効判定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp local-test-sp --ip 192.0.2.10
+
+# CIDR外の送信元IPに対する実効判定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp local-test-sp --ip 203.0.113.10
+```
+
+優先順位を変更する場合は、`mfa global set --policy-order`で6ルールを残したまま並び替える。
+例えば`bypassNetwork`を`forceSPs`より前に置くと、学内・社内CIDRから機微なSPへアクセスした場合も
+MFA不要になるため、影響を理解した場合だけ適用する。
+
+```bash
+# 評価順の変更予定とplan_sha256を確認する。まだファイルは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --policy-order 'bypassNetwork,forceSPs,bypassSPs,bypassSpCidrs,requiredSPs,default'
+
+# 同じ評価順、確認済みplan_sha256、bypassの明示確認を指定して適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa global set \
+  --policy-order 'bypassNetwork,forceSPs,bypassSPs,bypassSpCidrs,requiredSPs,default' \
+  --confirm-bypass \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
+
+# 適用後の設定と、代表的なSP・送信元IPの実効判定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa show
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp sensitive-sp --ip 192.168.0.10
+```
 
 ## 画面のHTMLやCSSを編集するにはどうすればよいか
 
@@ -655,6 +867,25 @@ sudo /opt/shibboleth-idp/bin/build.sh
 sudo systemctl restart jetty-idp.service
 ```
 
+## WebAuthnへMFA方式を変更するとき、登録の途中で失敗したらどうなるか
+
+自己管理画面でWebAuthnを選択しても、2FAS-KWはその時点でMFA方式を変更しない。
+現在のMFA方式を保持したまま、Shibboleth WebAuthn Pluginの公式登録flowを開始する。
+
+公式Pluginがcredentialの保存に成功し、登録成功hookで同一利用者の一回限り要求を
+確認できた場合だけ、2FAS-KWのMFA方式を`WebAuthn`へ切り替える。次の場合は元の
+MFA方式が維持される。
+
+- 利用者が登録画面を閉じた。
+- authenticator登録が失敗した。
+- 一回限りの登録要求が期限切れになった。
+- 登録中に管理者または別の操作がMFA方式を変更した。
+
+この連携にはShibboleth WebAuthn Plugin 1.3.0以上が必要である。管理CLIの
+`set-method USER WebAuthn`はcredentialの存在を検査しない強制操作のため、通常の利用者登録には
+使用しない。動作確認では、監査ログの`WEBAUTHN_REGISTER_START result=OK`と
+`WEBAUTHN_REGISTER_ACTIVATE result=OK`を確認する。
+
 ## Jettyの再起動が必要になるのはどのような場合か
 
 変更対象がJavaクラス、Servlet登録、IdP認証フロー、JVM設定に関係する場合は、原則としてJettyを再起動する。
@@ -716,10 +947,10 @@ Javaクラス、Servlet登録、IdP認証フロー、JVM設定を変更:
   通常はJetty再起動不要
 ```
 
-## v1.0.1からv1.1.0へは上書きインストールできるか
+## バージョンアップで上書きインストールできるか
 
-既存設定を維持した上書き更新は可能だが、旧バージョンJARの削除、設定差分の確認、
-WAR再構築、Jetty再起動が必要である。
+既存設定を維持した上書き更新は可能。
+旧バージョンJARの削除、設定差分の確認、WAR再構築、Jetty再起動が必要。
 
 詳細な更新、動作試験、ロールバック手順は
 [UPGRADE.md](./UPGRADE.md) を参照する。
@@ -844,6 +1075,74 @@ sudo env IDP_BASE_URL='http://127.0.0.1:8080/idp' \
 読取り権限の設定が必要である。`--unfiltered`はResolverの確認用であり、通常のSAML属性releaseを
 確認する操作ではない。
 
+LDAPには存在するがAttribute Resolverに未登録の属性は、v1.3.1以降の
+`attributes resolver add`で追加できる。次は`businessCategory`を追加する例である。
+
+```bash
+# 1. LDAPに対象ユーザーの属性が存在することを確認する。
+# 接続先、bind DN、base DN、検索filterは実環境へ置き換える。
+sudo ldapsearch -LLL -x \
+  -H ldap://127.0.0.1:389 \
+  -D 'cn=Directory Manager' -W \
+  -b 'ou=People,dc=example,dc=test' \
+  '(uid=test01)' businessCategory
+
+# 2. SP管理CLIによる設定変更を有効にする。
+# /opt/shibboleth-idp/conf/graphicalmatrix/sp-management.propertiesで次を設定する。
+# graphicalmatrix.sp.management.enabled = true
+
+# 3. LDAP DataConnectorを確認し、存在しなければ追加する予定内容を表示する。
+# 既存のLDAPDirectory DataConnectorが1つあればNO_CHANGEになり、そのIDが表示される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init
+
+# 4. DataConnectorが存在しない場合だけ、dry-runに表示されたコマンドで追加する。
+# 既定の検索属性はuid。利用者検索に別のLDAP属性を使う場合は--search-attributeを指定する。
+# data_connectorがgraphicalmatrixLdapの場合
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm graphicalmatrixLdap
+
+# 5. Attribute Resolverへ属性を追加する予定内容を確認する（dry-run）。
+# LDAPDirectory DataConnectorが1つだけなら自動選択される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory
+
+# 6. dry-runで表示されたDataConnectorを指定して実際に追加する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm businessCategory
+
+# 7. Attribute Resolver変更をIdPへ反映する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+
+# 8. 対象SPと利用者で属性が実際に解決されることを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes list
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes show \
+  businessCategory
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
+  --sp 2faskwlocaltest \
+  --user test01
+```
+
+`resolver init`が新設する`graphicalmatrixLdap`は、`conf/ldap.properties`と
+`credentials/secrets.properties`の標準的な`idp.attribute.resolver.LDAP.*`設定を参照する。
+既定の利用者検索filterは`(uid=$resolutionContext.principal)`である。ログインIDに対応するLDAP属性が
+`uid`以外なら、init時に`--search-attribute LDAP_ATTRIBUTE`を指定する。
+
+LDAP DataConnectorが複数ある場合、CLIは自動選択せず停止する。エラーに表示された候補から、対象LDAPの
+DataConnector IDを`--data-connector ID`で指定する。IdP属性IDとLDAP属性名が異なる場合は、
+`--source-attribute LDAP_ATTRIBUTE`も指定する。CLIは既存の同名`AttributeDefinition`を
+上書きしない。既存定義がある場合は、その定義を管理者が確認して修正する。
+
+`resolver add`は属性をLDAPから解決可能にするだけで、SPへの送信やSP別アクセス許可を自動承認しない。
+上のruntime確認で対象属性が`runtime-observed`になった後、用途に応じて`attributes approve`と
+`access set`を実行する。
+
 初回はContextCheck連携を明示的に初期化する。既存ContextCheckがある場合は自動上書きされず、
 `CONTEXT_CHECK_CONFLICT`で停止する。
 
@@ -888,6 +1187,26 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
   --apply --confirm 'https://sp.example.org/shibboleth'
 ```
 
+`businessCategory=AA` **または** `businessCategory=BB`の利用者だけを
+`2faskwlocaltest`へ許可する場合は、同じ属性IDに`--allow`を繰り返して指定する。
+
+```bash
+# 5. AAまたはBBを持つ利用者を許可するaccess policyの事前確認（dry-run）。
+# 同じ属性IDに指定した複数の値はOR条件として評価される。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest \
+  --allow 'businessCategory=AA' \
+  --allow 'businessCategory=BB'
+
+# 6. 確認したaccess policyを対象SPへ実際に適用する。
+# --confirmには対象SPの実際のentityIDを完全一致で指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access set \
+  2faskwlocaltest \
+  --allow 'businessCategory=AA' \
+  --allow 'businessCategory=BB' \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+```
+
 異なる属性はAND、同一属性へ繰り返した`--allow`値はORである。denyはallowより先に評価する。
 期待属性がない場合や値が一致しない場合、policy設定済みSPだけをfail closedで拒否する。
 policyを設定していないSPには影響しない。
@@ -900,7 +1219,11 @@ policyを設定していないSPには影響しない。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
   2faskwlocaltest --user user-with-aa
 
-# 6. businessCategory=AAを持たない利用者で、拒否（decision=DENY）を確認する。
+# 6. businessCategory=BBを持つ利用者で、許可（decision=ALLOW）を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
+  2faskwlocaltest --user user-with-bb
+
+# 7. businessCategory=AAまたはBBを持たない利用者で、拒否（decision=DENY）を確認する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
   2faskwlocaltest --user user-without-aa
 ```
@@ -908,6 +1231,47 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access test \
 最後に対象SPの保護URLから実際にSSOを行い、許可利用者はSPへ到達し、非許可利用者は
 IdPで拒否されることを確認する。`access set --apply`後の判定は設定ファイルを定期reloadするため、
 この操作だけを理由に`build.sh`やJetty再起動を行う必要はない。
+
+設定したSPアクセス制御を一時的に無効化する場合は、最初にdry-runで変更内容を確認してから
+適用する。`2faskwlocaltest`はentityIDではなく、`graphicalmatrix-sp.sh list`の`NAME`列に表示される
+SP管理名へ置き換える。
+
+```bash
+# 対象SPの管理名とentityIDを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+# access policyを無効化する予定内容を確認する。設定は変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access disable \
+  2faskwlocaltest
+
+# 確認したaccess policyの無効化を実際に適用する。
+# --confirmには対象SPの実際のentityIDを完全一致で指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access disable \
+  2faskwlocaltest \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+
+# enabled=falseとrevisionの更新を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access show \
+  2faskwlocaltest
+```
+
+`access disable`はSP登録、MFAポリシー、access policyの条件自体を削除しない。対象SPのLDAP属性による
+アクセス制限だけを無効にし、属性値に関係なく認証を継続させる。設定を再度有効にする場合は、同じ
+SP管理名とentityIDを指定して次を実行する。
+
+```bash
+# 無効化したaccess policyを再度有効にする予定内容を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access enable \
+  2faskwlocaltest
+
+# 確認した再有効化を実際に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh access enable \
+  2faskwlocaltest \
+  --apply --confirm 'https://sp.example.org/shibboleth'
+```
+
+無効化・再有効化ではrevisionが更新される。これらの変更も設定ファイルの定期reloadで反映されるため、
+通常は`build.sh`やJetty再起動を必要としない。
 
 ## LDAP属性の候補とSPへ送信できる属性を確認するにはどうすればよいか
 
@@ -955,6 +1319,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
 # この操作で、対象SP向けmanaged attribute filterにuidとmailの送信設定が反映される。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
   set-attributes 2faskwlocaltest uid-mail-release --apply
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes profile show uid-mail-release
 ```
 
 `discover`やprofile作成のdry-runだけではattribute filterを変更しない。最後の`set-attributes --apply`

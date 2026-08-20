@@ -24,13 +24,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -42,7 +38,8 @@ import jakarta.servlet.http.HttpServletResponse;
 public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
     private static final Pattern USER_ID = Pattern.compile("[A-Za-z0-9._@-]{1,255}");
-    private static final Map<String, RateLimitState> AUTH_FAILURES = new ConcurrentHashMap<>();
+    private static final GraphicalMatrixLdapLoginRateLimiter AUTH_FAILURES =
+        new GraphicalMatrixLdapLoginRateLimiter(10_000);
     private static final AtomicBoolean SCHEMA_INITIALIZED = new AtomicBoolean(false);
     private static final int MAX_JSON_BODY_BYTES = 64 * 1024;
 
@@ -180,13 +177,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         if (!config.rateLimitEnabled()) {
             return false;
         }
-        final RateLimitState state = AUTH_FAILURES.get(remoteAddress);
-        if (state == null) {
-            return false;
-        }
-        synchronized (state) {
-            return state.lockedUntilMillis > System.currentTimeMillis();
-        }
+        return AUTH_FAILURES.isLimited(remoteAddress, System.currentTimeMillis(),
+            authFailureMaximumAge(config));
     }
 
     private static void recordAuthFailure(final String remoteAddress, final GraphicalMatrixApiConfig config) {
@@ -194,22 +186,19 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             return;
         }
         final long now = System.currentTimeMillis();
-        final RateLimitState state = AUTH_FAILURES.computeIfAbsent(remoteAddress, ignored -> new RateLimitState());
-        synchronized (state) {
-            while (!state.failures.isEmpty()
-                    && now - state.failures.peekFirst().longValue() > config.authFailureWindowMillis()) {
-                state.failures.removeFirst();
-            }
-            state.failures.addLast(Long.valueOf(now));
-            if (state.failures.size() >= config.authFailureLimit()) {
-                state.lockedUntilMillis = now + config.authFailureLockMillis();
-                state.failures.clear();
-            }
-        }
+        AUTH_FAILURES.recordFailure(remoteAddress, now, config.authFailureWindowMillis(),
+            config.authFailureLimit(), config.authFailureLockMillis(),
+            authFailureMaximumAge(config));
     }
 
     private static void clearAuthFailures(final String remoteAddress) {
-        AUTH_FAILURES.remove(remoteAddress);
+        AUTH_FAILURES.clear(remoteAddress);
+    }
+
+    private static long authFailureMaximumAge(final GraphicalMatrixApiConfig config) {
+        final long window = config.authFailureWindowMillis();
+        final long lock = config.authFailureLockMillis();
+        return window > Long.MAX_VALUE - lock ? Long.MAX_VALUE : window + lock;
     }
 
     private static void health(final HttpServletResponse response) throws Exception {
@@ -337,82 +326,90 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
 
     private static DbUser upsertUser(final String user, final JsonBody body,
             final GraphicalMatrixConfig config) throws Exception {
-        final DbUser existing = findUser(user);
         final GraphicalMatrixSequenceStorage storage = GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome());
         final long now = System.currentTimeMillis();
-        final String method = normalizeMethod(defaultString(body.string("mfaMethod"),
-            existing != null ? existing.mfaMethod : "GraphicalMatrix"));
-        final String status = normalizeStatus(defaultString(body.string("status"),
-            existing != null ? existing.status : "ACTIVE"));
-        final Integer force = body.boolAsInt("forceSequenceChange");
-        final int forceValue = force != null ? force.intValue()
-            : (existing != null ? existing.forceSequenceChange : 0);
-
-        final List<String> initialTokens = body.sequence("initialSequence");
-        final List<String> sequenceTokens = body.sequence("sequence");
-        String storedInitialSequence = existing != null ? existing.initialSequence : "";
-        String storedSequence = existing != null ? existing.sequence : "";
-        String plainSequence = existing != null
-            ? String.join(",", storage.displayTokens(existing.sequence))
-            : "";
-
-        if (!initialTokens.isEmpty()) {
-            final List<String> initial = config.resolveSequenceToGraphicals(initialTokens);
-            config.validateSequence(initial);
-            storedInitialSequence = String.join(",", config.normalizeInitialSequence(initial));
-        }
-        if (!sequenceTokens.isEmpty()) {
-            plainSequence = String.join(",", config.resolveSequenceToGraphicals(sequenceTokens));
-        } else if (!initialTokens.isEmpty()) {
-            plainSequence = String.join(",", config.resolveSequenceToGraphicals(initialTokens));
-        }
-        if (plainSequence.isEmpty() && storedSequence.isEmpty()) {
-            throw new ApiException(400, "SEQUENCE_REQUIRED", "API_BAD_REQUEST", user, "BAD_REQUEST", "sequence_required");
-        }
-        if (!plainSequence.isEmpty()) {
-            config.validateSequence(GraphicalMatrixSupport.csv(plainSequence));
-            storedSequence = storage.encode(GraphicalMatrixSupport.csv(plainSequence),
-                config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
-        }
-        if (storedInitialSequence.isEmpty()) {
-            storedInitialSequence = String.join(",",
-                config.normalizeInitialSequence(GraphicalMatrixSupport.csv(plainSequence)));
-        }
-
         try (Connection c = db()) {
             initDbIfEnabled(c);
-            if (existing == null) {
-                try (PreparedStatement ps = c.prepareStatement(
-                        "INSERT INTO graphicalmatrix_enrollment "
-                        + "(user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, "
-                        + "failed_count, locked_until, totp_seed, totp_status, totp_registered_at, "
-                        + "last_success_at, state_version, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 'UNREGISTERED', 0, 0, 0, ?, ?)")) {
-                    ps.setString(1, user);
-                    ps.setString(2, method);
-                    ps.setInt(3, forceValue);
-                    ps.setString(4, storedInitialSequence);
-                    ps.setString(5, storedSequence);
-                    ps.setString(6, status);
-                    ps.setLong(7, now);
-                    ps.setLong(8, now);
-                    ps.executeUpdate();
+            c.setAutoCommit(false);
+            try {
+                final DbUser existing = findUser(c, user, true);
+                final String method = normalizeMethod(defaultString(body.string("mfaMethod"),
+                    existing != null ? existing.mfaMethod : "GraphicalMatrix"));
+                final String status = normalizeStatus(defaultString(body.string("status"),
+                    existing != null ? existing.status : "ACTIVE"));
+                final Integer force = body.boolAsInt("forceSequenceChange");
+                final int forceValue = force != null ? force.intValue()
+                    : (existing != null ? existing.forceSequenceChange : 0);
+                final List<String> initialTokens = body.sequence("initialSequence");
+                final List<String> sequenceTokens = body.sequence("sequence");
+                String storedInitialSequence = existing != null ? existing.initialSequence : "";
+                String storedSequence = existing != null ? existing.sequence : "";
+                String plainSequence = existing != null
+                    ? String.join(",", storage.displayTokens(existing.sequence)) : "";
+
+                if (!initialTokens.isEmpty()) {
+                    final List<String> initial = config.resolveSequenceToGraphicals(initialTokens);
+                    config.validateSequence(initial);
+                    storedInitialSequence = String.join(",", config.normalizeInitialSequence(initial));
                 }
-            } else {
-                try (PreparedStatement ps = c.prepareStatement(
-                        "UPDATE graphicalmatrix_enrollment "
-                        + "SET mfa_method = ?, force_sequence_change = ?, initial_sequence = ?, "
-                        + "sequence = ?, status = ?, state_version = state_version + 1, updated_at = ? "
-                        + "WHERE user_id = ?")) {
-                    ps.setString(1, method);
-                    ps.setInt(2, forceValue);
-                    ps.setString(3, storedInitialSequence);
-                    ps.setString(4, storedSequence);
-                    ps.setString(5, status);
-                    ps.setLong(6, now);
-                    ps.setString(7, user);
-                    ps.executeUpdate();
+                if (!sequenceTokens.isEmpty()) {
+                    plainSequence = String.join(",", config.resolveSequenceToGraphicals(sequenceTokens));
+                } else if (!initialTokens.isEmpty()) {
+                    plainSequence = String.join(",", config.resolveSequenceToGraphicals(initialTokens));
                 }
+                if (plainSequence.isEmpty() && storedSequence.isEmpty()) {
+                    throw new ApiException(400, "SEQUENCE_REQUIRED", "API_BAD_REQUEST",
+                        user, "BAD_REQUEST", "sequence_required");
+                }
+                if (!plainSequence.isEmpty()) {
+                    config.validateSequence(GraphicalMatrixSupport.csv(plainSequence));
+                    storedSequence = storage.encode(GraphicalMatrixSupport.csv(plainSequence),
+                        config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+                }
+                if (storedInitialSequence.isEmpty()) {
+                    storedInitialSequence = String.join(",",
+                        config.normalizeInitialSequence(GraphicalMatrixSupport.csv(plainSequence)));
+                }
+
+                if (existing == null) {
+                    try (PreparedStatement ps = c.prepareStatement(
+                            "INSERT INTO graphicalmatrix_enrollment "
+                            + "(user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, "
+                            + "failed_count, locked_until, totp_seed, totp_status, totp_registered_at, "
+                            + "last_success_at, state_version, created_at, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 'UNREGISTERED', 0, 0, 0, ?, ?)")) {
+                        ps.setString(1, user);
+                        ps.setString(2, method);
+                        ps.setInt(3, forceValue);
+                        ps.setString(4, storedInitialSequence);
+                        ps.setString(5, storedSequence);
+                        ps.setString(6, status);
+                        ps.setLong(7, now);
+                        ps.setLong(8, now);
+                        ps.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement ps = c.prepareStatement(
+                            "UPDATE graphicalmatrix_enrollment "
+                            + "SET mfa_method = ?, force_sequence_change = ?, initial_sequence = ?, "
+                            + "sequence = ?, status = ?, state_version = state_version + 1, updated_at = ? "
+                            + "WHERE user_id = ?")) {
+                        ps.setString(1, method);
+                        ps.setInt(2, forceValue);
+                        ps.setString(3, storedInitialSequence);
+                        ps.setString(4, storedSequence);
+                        ps.setString(5, status);
+                        ps.setLong(6, now);
+                        ps.setString(7, user);
+                        if (ps.executeUpdate() != 1) {
+                            throw new IllegalStateException("Locked enrollment row disappeared: user=" + user);
+                        }
+                    }
+                }
+                c.commit();
+            } catch (Exception ex) {
+                c.rollback();
+                throw ex;
             }
         }
         return findUser(user);
@@ -498,19 +495,25 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
     private static DbUser findUser(final String user) throws Exception {
         try (Connection c = db()) {
             initDbIfEnabled(c);
-            try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, "
-                    + "status, failed_count, locked_until, totp_status, "
-                    + "CASE WHEN totp_seed IS NULL OR totp_seed = '' THEN 0 ELSE 1 END AS totp_seed_set, "
-                    + "totp_registered_at, last_success_at, created_at, updated_at "
-                    + "FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
-                ps.setString(1, user);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (!rs.next()) {
-                        return null;
-                    }
-                    return DbUser.from(rs);
+            return findUser(c, user, false);
+        }
+    }
+
+    private static DbUser findUser(final Connection c, final String user,
+            final boolean forUpdate) throws Exception {
+        final String lockClause = forUpdate ? " FOR UPDATE" : "";
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, "
+                + "status, failed_count, locked_until, totp_status, "
+                + "CASE WHEN totp_seed IS NULL OR totp_seed = '' THEN 0 ELSE 1 END AS totp_seed_set, "
+                + "totp_registered_at, last_success_at, created_at, updated_at "
+                + "FROM graphicalmatrix_enrollment WHERE user_id = ?" + lockClause)) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
                 }
+                return DbUser.from(rs);
             }
         }
     }
@@ -1014,8 +1017,4 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         }
     }
 
-    private static final class RateLimitState {
-        private final Deque<Long> failures = new ArrayDeque<>();
-        private long lockedUntilMillis;
-    }
 }

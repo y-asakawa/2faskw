@@ -21,7 +21,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -231,7 +230,7 @@ public final class DashboardAgent {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
-        final HttpResponse<String> response = send(request);
+        final HttpResponse<Void> response = send(request);
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             Files.deleteIfExists(batch);
             lastSuccessfulContact = Instant.now();
@@ -266,7 +265,7 @@ public final class DashboardAgent {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
-        final HttpResponse<String> response = send(request);
+        final HttpResponse<Void> response = send(request);
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             lastSuccessfulContact = now;
             return true;
@@ -274,11 +273,11 @@ public final class DashboardAgent {
         throw new IOException("Dashboard heartbeat returned HTTP " + response.statusCode());
     }
 
-    private HttpResponse<String> send(final HttpRequest request)
+    private HttpResponse<Void> send(final HttpRequest request)
             throws IOException, InterruptedException {
         return client.send(
                 request,
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse.BodyHandlers.discarding());
     }
 
     private void enforceSpoolLimit(final long incomingBytes) throws IOException {

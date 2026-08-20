@@ -19,6 +19,7 @@ package io.github.yasakawa.faskw;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
 import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
@@ -166,6 +167,19 @@ class GraphicalMatrixMfaPolicyTest {
             "graphicalmatrix.mfa.bypassSpCidrs", SENSITIVE_SP + "|not-a-cidr"));
         assertThrows(IllegalArgumentException.class, () -> parse(
             "graphicalmatrix.mfa.useForwardedFor", "yes"));
+    }
+
+    @Test
+    void normalizesGlobalMfaSettingsBeforeRendering() {
+        final GraphicalMatrixMfaPolicyConfig.Settings settings =
+            new GraphicalMatrixMfaPolicyConfig.Settings(
+                " BYPASS ",
+                " forceSPs, bypassSPs, bypassSpCidrs, bypassNetwork, requiredSPs, default ",
+                List.of(), List.of(), false);
+
+        assertEquals("bypass", settings.defaultPolicy());
+        assertEquals("forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default",
+            settings.policyOrder());
     }
 
     private static void assertInvalidOrder(final String order) {

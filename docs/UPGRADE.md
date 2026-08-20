@@ -11,6 +11,7 @@
 - v1.2.4 から v1.2.5 への更新
 - v1.2.6 から v1.2.7 への更新
 - v1.2.7 から v1.3.0 への更新
+- v1.3.0 から v1.3.1 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -25,6 +26,7 @@
 | v1.2.4 | v1.2.5 | 旧JAR削除、ロックアウト4設定の追加、WAR再構築、設定検査 | 通常・最大ロック時間の調整 |
 | v1.2.6 | v1.2.7 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboard導入、SP追加管理CLIの有効化 |
 | v1.2.7 | v1.3.0 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboardのv1.3.0配布物への更新、SP管理CLIの継続利用、SP別LDAP属性アクセス制御・属性カタログCLIの初期化 |
+| v1.3.0 | v1.3.1 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | SP・IdP全体MFA方針CLI、LDAP Resolver属性追加CLI、大規模共有NAT向けLDAP変更画面設定 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -58,6 +60,11 @@ v1.3.0では、SP別のIdP属性アクセス制御と属性カタログを`graph
 v1.2.7で導入したDashboardとSP管理CLIもv1.3.0の配布物へ含まれます。既にSP管理CLIを初期化済みの
 環境では`init`を再実行せず、必要な場合だけ`access init`を実行します。
 
+v1.3.1では、SP単位の`set-mfa`に加えてIdP全体のMFA方針を管理・検証する`mfa`、LDAP属性を
+Attribute Resolverへ安全に追加する`attributes resolver init/add`、LDAP変更画面の共有NAT向け
+保護設定を追加します。更新だけでは既存MFA方針、Attribute Resolver、rate limit設定を変更しません。
+必要な機能だけdry-runで内容を確認してから明示的にapplyします。
+
 ## 事前確認
 
 更新前に以下を確認する。
@@ -88,6 +95,12 @@ sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
 
 sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix \
   /opt/shibboleth-idp/conf/graphicalmatrix.bak.$TS
+
+# 稼働中の画像IDと画像ファイルをロールバックできるように保管する。
+if sudo test -d /opt/shibboleth-idp/edit-webapp/graphicalmatrix; then
+  sudo cp -a /opt/shibboleth-idp/edit-webapp/graphicalmatrix \
+    /opt/shibboleth-idp/edit-webapp/graphicalmatrix.bak.$TS
+fi
 ```
 
 必要に応じて、以下もバックアップする。
@@ -98,7 +111,17 @@ sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml \
 
 sudo cp -a /opt/shibboleth-idp/credentials \
   /opt/shibboleth-idp/credentials.bak.$TS
+
+# Shibboleth IdP本体のLDAP認証・属性Resolver接続設定。
+if sudo test -f /opt/shibboleth-idp/conf/ldap.properties; then
+  sudo cp -a /opt/shibboleth-idp/conf/ldap.properties \
+    /opt/shibboleth-idp/conf/ldap.properties.bak.$TS
+fi
 ```
+
+`/opt/shibboleth-idp/conf/ldap.properties`はShibboleth IdP本体のLDAP設定、
+`/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties`は2FAS-KW enrollmentをLDAPへ
+保存する場合の設定であり、用途が異なる。前者は2FAS-KW Pluginの導入スクリプトでは更新しない。
 
 v1.2.0でWebAuthn設定を使う場合、またはv1.2.4でIdP自己管理フローを有効にする場合は、
 authn設定もバックアップする。
@@ -164,10 +187,14 @@ sudo systemctl stop jetty-idp.service
 新バージョンを配置する。
 
 ```bash
-./bin/graphicalmatrix-plugin-config.sh \
+sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
   --apply
 ```
+
+設定ディレクトリは`root:jetty 0750`などで保護されているため、dry-runとapplyの両方で
+configスクリプト自体を`sudo`から起動する。一般ユーザーでスクリプトを起動し、内部sudoだけに
+依存する実行方法は使用しない。
 
 旧Plugin JARだけを削除する。
 
@@ -256,6 +283,80 @@ sudo diff -u \
 DBのユーザーデータは、Pluginの上書き更新だけでは削除または初期化されない。
 
 secret、DBパスワード、API token、秘密鍵を新しいテンプレートで上書きしないこと。
+`*.idpnew.TIMESTAMP`を既存ファイルへそのままコピーせず、必ず差分を確認して必要なキーだけを
+反映する。
+
+導入スクリプトが既存設定を保持したかは、最新のinstall manifestで確認できる。
+
+```bash
+MANIFEST="$(sudo find /opt/shibboleth-idp/conf/graphicalmatrix \
+  -maxdepth 1 -type f -name 'install-manifest-*.tsv' \
+  -printf '%T@ %p\n' | sort -nr | awk 'NR == 1 { print $2 }')"
+
+if [[ -n "$MANIFEST" ]]; then
+  echo "manifest=$MANIFEST"
+  sudo grep -E \
+    '(graphicalmatrix|db|ldap|sp-management|mfa-policy)\.properties' \
+    "$MANIFEST"
+else
+  echo 'ERROR: install manifest was not found' >&2
+fi
+```
+
+`install_template_deferred`は既存ファイルを保持して`*.idpnew.TIMESTAMP`を作成したことを示す。
+`install_template`は、導入時に既存ファイルが存在せずテンプレートを新規作成したことを示す。
+
+既存環境のアップグレードで、運用済みの設定ファイルに`install_template`が表示された場合は、
+設定が保持された状態ではない。IdPを再起動する前に作業を止め、アップグレード前のバックアップを
+確認する。複数の設定ファイルが同時に`install_template`になっている場合は、
+`conf/graphicalmatrix`ディレクトリ全体がインストール時に存在しなかった可能性が高い。
+
+```bash
+# UPGRADE手順で作成した設定ディレクトリのバックアップを新しい順に表示する。
+sudo find /opt/shibboleth-idp/conf -maxdepth 1 -type d \
+  -name 'graphicalmatrix.bak.*' -printf '%T@ %p\n' | sort -nr
+
+# 個別に作成された設定ファイルのバックアップも確認する。
+sudo find /opt/shibboleth-idp/conf/graphicalmatrix -maxdepth 1 -type f \
+  \( -name '*.bak.*' -o -name '*.rpmsave' -o -name '*.rpmnew' \) \
+  -printf '%T@ %p\n' | sort -nr
+```
+
+バックアップが見つかった場合も、ディレクトリ全体を無条件に上書きして戻さない。旧設定と
+新しい配布テンプレートを比較し、DB/LDAP接続先、保存方式、secretファイルのパス、MFA policy、
+SP管理設定などの運用値を復元した上で、新バージョンで追加されたキーを反映する。diffには
+credentialや内部ホスト名が含まれる可能性があるため、出力を外部へ貼り付けない。
+
+```bash
+# BACKUP_DIRとPACKAGE_DIRは実在するパスへ置き換える。
+BACKUP_DIR='/opt/shibboleth-idp/conf/graphicalmatrix.bak.TIMESTAMP'
+PACKAGE_DIR='/path/to/2faskw-idp-plugin-VERSION'
+
+# 内容を表示せず、変更の有無だけを確認する例。
+for NAME in \
+  graphicalmatrix.properties \
+  db.properties \
+  ldap.properties \
+  webauthn-ldap.properties \
+  mfa-policy.properties \
+  sp-management.properties; do
+  if sudo test -f "$BACKUP_DIR/$NAME"; then
+    sudo diff --brief \
+      "$BACKUP_DIR/$NAME" \
+      "/opt/shibboleth-idp/conf/graphicalmatrix/$NAME" || true
+  fi
+done
+
+# 新バージョンで追加されたキーは、復元した旧設定と配布テンプレートを比較して取り込む。
+sudo diff -u \
+  "$BACKUP_DIR/graphicalmatrix.properties" \
+  "$PACKAGE_DIR/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
+```
+***
+***
+
+## 以下の追加手順が必要ない場合は、設定検査から始めてください。
+
 
 ## v1.0.xからv1.1.0への追加手順
 
@@ -270,11 +371,6 @@ v1.1.0では、DB状態とsequence保存方式の安全性を上げるための�
 - 管理APIを使う場合はtoken、許可CIDR、sequence露出制御を確認する
 
 v1.0.xから直接v1.2.0へ更新する場合も、このv1.1.0の確認を先に完了してください。
-
-***
-***
-
-## 以下の追加手順が必要ない場合は、設定検査から始めてください。
 
 ## 追加手順
 ## v1.1.0からv1.2.0への追加手順
@@ -343,6 +439,11 @@ LDAP保存を選択したユーザーの初期投入や一括更新は、LDAP側
 
 WebAuthnはShibboleth WebAuthn pluginが必要です。
 2FAS-KW plugin更新だけでは、Shibboleth WebAuthn pluginの導入や署名鍵truststore登録は完了しません。
+自己管理画面からWebAuthnへ安全に方式変更する機能は、登録成功hookを備えた
+Shibboleth WebAuthn Plugin 1.3.0以上が必要です。2FAS-KW更新後はWARを再構築し、
+`postconfig.xml`が提供する`shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook`を読み込ませます。
+独自hookで同じbean IDを上書きすると、credential登録後に2FAS-KWのMFA方式が切り替わらないため、
+複合hookとして2FAS-KW hookも呼び出してください。
 
 推奨はDB/JDBC StorageServiceです。
 LDAPへ保存する場合は `subtree` 方式を推奨します。
@@ -833,7 +934,18 @@ graphicalmatrix.sp.attributes.blocked =
 `jetty`だが、異なる環境では次で確認して置き換える。
 
 ```bash
+#コマンドで確認
 sudo systemctl show jetty-idp.service -p User -p Group
+
+User=jetty
+Group=jetty
+
+#設定ファイルを確認
+sudo grep -n '^graphicalmatrix\.sp\.runtimeGroup' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties
+
+#空であればsp-management.propertiesに以下を追加
+graphicalmatrix.sp.runtimeGroup = jetty
 ```
 
 機能を利用する場合は、まずSP管理CLIが初期化済みで、対象SPが`MANAGED`であることを確認する。
@@ -859,9 +971,39 @@ until curl --noproxy '*' -fsSI --connect-timeout 2 --max-time 5 \
   sleep 2
 done
 
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+#展開したv1.3配布物のディレクトリから実行してください。
+sudo ./bin/graphicalmatrix-plugin-check.sh \
   --idp-home /opt/shibboleth-idp \
   --config-only
+
+#
+#エラーが出た場合
+#
+#よくあるエラーの修正
+#
+
+# ERROR: graphicalmatrix.sp.management.enabled must be true before applying SP governance changes
+
+# graphicalmatrix.sp.management.enabled = falseになっているので、trueに変更。
+# managementの設定を行っていない場合は、v1.2.6からv1.2.7への追加手順を行いmanagementnの設定を有効にする。
+
+
+# FAIL: [config] SP managed metadata directory runtime access invalid: IllegalStateException: SP managed metadata directory is not readable by configured runtime group jetty: /opt/shibboleth-idp/metadata/2faskwsp
+
+DIR='/opt/shibboleth-idp/metadata/2faskwsp'
+
+sudo install -d -m 0750 -o root -g jetty "$DIR"
+
+# 配下のmetadata XMLはJettyが読むだけで、管理CLIだけが更新する。
+sudo find "$DIR" -type d -exec chown root:jetty {} \; -exec chmod 0750 {} \;
+sudo find "$DIR" -type f -exec chown root:jetty {} \; -exec chmod 0640 {} \;
+
+sudo restorecon -RFv "$DIR"
+
+# Jetty実行ユーザーから読取り・通過できることを確認する。
+sudo -u jetty test -r "$DIR" && \
+sudo -u jetty test -x "$DIR" && \
+echo 'OK: Jetty can access the managed SP metadata directory'
 ```
 
 `access init --apply`は、`/opt/shibboleth-idp/conf/graphicalmatrix`を`0750`、
@@ -885,7 +1027,7 @@ sudo restorecon -Rv /opt/shibboleth-idp/conf/graphicalmatrix
 上の`jetty`は`graphicalmatrix.sp.runtimeGroup`と同じ値へ読み替える。設定検査でruntime groupの
 読み取りエラーが出た場合は、この所有者・mode・SELinux contextを確認する。
 
-属性候補を確認し、SPへ送信しないIdP内部判定用属性として承認する例を示す。
+属性候補を確認し、SPへ送信しないIdP内部判定用属性としてbusinessCategoryを承認する例を示す。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover
@@ -902,8 +1044,14 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes approve \
   --classification internal \
   --purpose 'IdP-side SP authorization' \
   --apply --confirm businessCategory
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes show businessCategory
 ```
 
+対象SPを調べておく
+```
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+```
 対象SPに`businessCategory=AA`を要求する場合は、dry-run後にentityIDを確認値として適用する。
 
 ```bash
@@ -922,6 +1070,241 @@ policy変更はJSONの再読込で反映され、通常はJetty再起動を必�
 ContextCheck設定変更、Plugin JAR更新時だけbuildと再起動を行う。詳細は
 [v1.3.0 SPアクセス制御・属性カタログ設計](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md)
 を参照する。
+
+## v1.3.0からv1.3.1への更新手順
+
+v1.3.1は、v1.3.0の認証、SP管理台帳、SP metadata、属性release、SP別アクセス制御、MFA方針を
+引き継ぐ。更新だけでは、既存SPのMFA profile、IdP全体のMFA方針、Attribute Resolver、
+LDAP変更画面のrate limit設定を変更しない。DB schemaの追加migrationも不要である。
+
+v1.3.1で追加または拡張する主な管理機能は次のとおりである。
+
+| 機能 | コマンド | 更新直後の動作 |
+| --- | --- | --- |
+| SP単位MFA方針 | `set-mfa` | 既存profileを維持する。明示的にapplyしたSPだけ変更する。 |
+| IdP全体MFA方針 | `mfa show/test/global set/reconcile` | 既存の全体設定を維持する。参照コマンドだけでは変更しない。 |
+| LDAP Resolver属性追加 | `attributes resolver init/add` | `attribute-resolver.xml`を変更しない。明示的にapplyした場合だけ変更する。 |
+| LDAP変更画面のNAT除外 | properties設定 | 既定では無効であり、既存rate limitを維持する。 |
+
+### 事前バックアップ
+
+この文書の共通バックアップに加え、v1.3.1の任意機能を使用する場合はMFA方針、SP管理台帳、
+Attribute Resolverを個別に復元できるよう保管する。
+
+```bash
+TS=$(date +%Y%m%d%H%M%S)
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties \
+  /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties.bak.$TS
+
+if sudo test -f \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management-registry.json; then
+  sudo cp -a \
+    /opt/shibboleth-idp/conf/graphicalmatrix/sp-management-registry.json \
+    /opt/shibboleth-idp/conf/graphicalmatrix/sp-management-registry.json.bak.$TS
+fi
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/attribute-resolver.xml \
+  /opt/shibboleth-idp/conf/attribute-resolver.xml.bak.$TS
+```
+
+backupにはMFA方針や内部ホスト情報が含まれるため、root以外へ不要な読取り権限を与えない。
+
+### Plugin JARをv1.3.1へ更新する
+
+先に本書の「配布物の事前検査」「Pluginファイルの更新」「既存設定ファイルの更新」を実施する。
+`graphicalmatrix-plugin-config.sh --apply`は既存設定を直接上書きせず、新テンプレートを
+`*.idpnew.TIMESTAMP`として配置する。既存のDB、LDAP、MFA、SP管理設定へ新テンプレートを
+そのまま上書きしない。
+
+v1.3.1 JARを配置した後、旧v1.3.0 JARだけを削除する。
+
+```bash
+sudo rm -f \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.0.jar
+
+sudo find /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 -type f -name '2faskw-idp-plugin-*.jar' -print
+```
+
+期待値は次の1ファイルだけである。
+
+```text
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.1.jar
+```
+
+新旧JARが同時に残っている状態でWARを再構築しない。`*.idpnew.TIMESTAMP`とinstall manifestを
+確認し、既存設定が`install_template_deferred`として保持されたことを確認する。
+
+### SP管理CLIを使用している環境の確認
+
+SP管理CLIを初期化していない環境は、v1.3.1への更新だけを理由に`init --apply`を実行しない。
+既にSP管理CLIを使用している環境だけ、管理台帳とMFA方針の整合性を確認する。
+
+```bash
+# SP管理CLIの有効設定を確認する。
+sudo grep -n '^graphicalmatrix\.sp\.management\.enabled' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties
+
+# CLI管理SPと現在のMFA profileを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+# IdP全体設定、SP別設定、手作業差分の有無を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa show
+```
+
+`managed_policy_drift=OK`であれば、移行操作は不要である。`MISMATCH`の場合はapplyを続行せず、
+更新前backup、SP管理台帳、`mfa-policy.properties`の差分を確認する。台帳を正として戻す場合だけ、
+次のdry-runとplan SHA-256承認を使用する。
+
+```bash
+# 台帳から復元する内容とplan_sha256を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  mfa reconcile --from-registry
+
+# 内容確認後、表示されたplan_sha256を指定して適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  mfa reconcile --from-registry \
+  --approve-sha256 PLAN_SHA256 \
+  --apply
+```
+
+`reconcile`は手作業値を台帳へ取り込むコマンドではない。CLI管理SPに対応するMFA方針を台帳から
+再生成する。手作業差分を維持したい場合は適用せず、正しいprofileを確認してから`set-mfa`で
+SPごとに設定し直す。
+
+代表的なCLI管理SPについて、CIDR内外の送信元IPで実効判定を確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp SP_NAME --ip 192.0.2.10
+
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa test \
+  --sp SP_NAME --ip 203.0.113.10
+```
+
+更新確認だけで`set-mfa`または`mfa global set`を実行する必要はない。MFA方針を実際に変更する
+場合は、先にdry-runを実行し、[v1.3.1 SP・IdP全体MFA方針管理CLI](./release-notes/v1.3.1-SP-MFA-POLICY-CLI.md)
+の確認・承認手順に従う。
+
+### 任意: LDAP Resolver属性追加CLIを使用する
+
+LDAP上に存在するが`attributes discover --sp SP_NAME --user USER`へ表示されない属性を、
+SP別アクセス制御または属性releaseに利用する場合だけ実施する。更新確認だけなら、この項目はスキップする。
+applyにはSP管理CLIが初期化済みで、`graphicalmatrix.sp.management.enabled = true`であることが必要である。
+未初期化の環境では、この機能だけを使う前にSP管理CLIの導入・権限設定を完了する。
+
+```bash
+# 対象ユーザーについて、現在IdPが解決できる属性を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh attributes discover \
+  --sp SP_NAME --user USER
+
+# LDAP DataConnectorの追加要否をdry-runで確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init
+```
+
+既存のLDAP DataConnectorが1件ある場合は`NO_CHANGE`となり、そのDataConnectorを利用できる。
+LDAP DataConnectorがない場合だけ、表示内容を確認して初期化する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver init \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm graphicalmatrixLdap
+```
+
+対象属性を追加する場合も、先にdry-runを行う。
+
+```bash
+# 追加予定を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory \
+  --data-connector graphicalmatrixLdap
+
+# 内容を確認後に適用する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh \
+  attributes resolver add businessCategory \
+  --data-connector graphicalmatrixLdap \
+  --apply --confirm businessCategory
+```
+
+Resolver変更は実行中IdPへ即時反映しない。この後の共通手順でWARを再構築してJettyを再起動し、
+同じ`attributes discover`で対象属性が`runtime-observed`になることを確認する。LDAP ACL/ACI、
+base DN、検索filter、service accountのread権限はこのCLIでは変更しない。詳細は
+[v1.3.1 LDAP Resolver属性追加CLI](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md)を参照する。
+
+### 任意: LDAP変更画面の共有NAT設定
+
+既定動作を維持する場合、設定追加は不要である。大規模な共有NATから従来LDAP変更画面を
+一斉利用し、IP全体の失敗上限による巻き添えを避ける場合だけ、稼働中の
+`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`へ信頼済みCIDRを追加する。
+
+```properties
+graphicalmatrix.change.ldapRateLimit.key = ip-user
+graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs = 192.168.0.0/16,10.0.0.0/8
+```
+
+この設定は独立IP全体制限だけを除外する。利用者ごとのキー別制限は残る。`key=ip`のままでは
+キー別制限も共有IP単位になるため、共有NAT用途では`user`または`ip-user`を使用する。
+CIDRは実際の監査ログの`ip`とネットワーク管理情報を照合し、必要最小限にする。
+
+設定値を検査する。
+
+```bash
+# 展開したv1.3.1配布物のディレクトリから実行する。
+sudo ./bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+設定ファイルはLDAP変更画面の各リクエストで再読込されるため、CIDR変更だけなら通常は
+Jetty再起動を必要としない。Plugin JARをv1.3.1へ更新した場合は、通常の更新手順どおり
+WAR再構築とJetty再起動を行う。
+
+### v1.3.1更新後の確認
+
+この後の共通手順に従い、設定検査、WAR再構築、Jetty起動、既存認証の回帰試験を行う。
+SP管理CLIを使用している場合は、起動後に次も確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh mfa show
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh list
+
+sudo grep -E 'MFA (policy decision|method decision)' \
+  /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
+```
+
+最低限、次を確認する。
+
+- `managed_policy_drift=OK`である。
+- 更新前と同じSPが同じMFA profileで表示される。
+- `force`のSPは、既定順序では全体CIDR例外にかかわらずMFA必須となる。
+- `inherit`のSPは、IdP全体設定と送信元IPに従って判定される。
+- LDAP Resolverを変更した場合は、対象属性が`runtime-observed`になる。
+- LDAP変更画面のCIDR除外を設定した場合も、利用者単位のrate limitが維持される。
+
+### v1.3.1固有変更のロールバック
+
+JARをv1.3.0へ戻す場合は、後述の共通ロールバック手順に従う。さらに、v1.3.1導入後に
+MFA方針またはAttribute Resolverをapplyしていた場合だけ、事前backupから対応ファイルを復元する。
+
+```bash
+# TIMESTAMPは事前バックアップで作成した値へ置き換える。
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties.bak.TIMESTAMP \
+  /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/attribute-resolver.xml.bak.TIMESTAMP \
+  /opt/shibboleth-idp/conf/attribute-resolver.xml
+```
+
+SP管理台帳は、v1.3.1で`set-mfa`をapplyして台帳自体を変更した場合だけ、対応するbackupを
+復元する。MFA方針だけを旧状態へ戻して台帳を新状態のまま残すとdriftになるため、両者のrevisionを
+合わせる。復元後は所有者、group、mode、SELinux contextを確認し、WARを再構築してJettyを起動する。
 
 ***
 ***

@@ -86,9 +86,131 @@ final class GraphicalMatrixSpGovernanceTool {
             case "approve" -> attributeApprove(options);
             case "block" -> attributeBlock(options);
             case "profile" -> attributeProfile(options);
+            case "resolver" -> attributeResolver(options);
             default -> throw new IllegalArgumentException(
                 "unknown attributes subcommand: " + command);
         }
+    }
+
+    private void attributeResolver(final Arguments options) throws Exception {
+        if (options.positionals().isEmpty()) {
+            throw new IllegalArgumentException("missing attributes resolver subcommand");
+        }
+        final String command = options.positionals().get(0);
+        final Arguments nested = options.withoutFirstPositional();
+        switch (command) {
+            case "init" -> resolverInit(nested);
+            case "add" -> resolverAdd(nested);
+            default -> throw new IllegalArgumentException(
+                "unknown attributes resolver subcommand: " + command);
+        }
+    }
+
+    private void resolverInit(final Arguments options) throws Exception {
+        options.allow(Set.of("data-connector", "search-attribute", "confirm"),
+            Set.of("apply"));
+        options.noPositionals("attributes resolver init [--data-connector ID]");
+        final String requestedConnector = options.single("data-connector", "");
+        final String searchAttribute = options.single("search-attribute", "uid");
+        final GraphicalMatrixLdapResolverConfig.InitializationPlan plan =
+            GraphicalMatrixLdapResolverConfig.inspectInitialization(
+                config.attributeResolverPath(), requestedConnector, searchAttribute);
+        System.out.println("mode=" + mode(options));
+        System.out.println("action=LDAP_RESOLVER_INIT");
+        System.out.println("data_connector=" + plan.dataConnector());
+        System.out.println("search_attribute=" + plan.searchAttribute());
+        if (plan.alreadyConfigured()) {
+            System.out.println("result=NO_CHANGE");
+            System.out.println("reason=LDAP_DATA_CONNECTOR_ALREADY_CONFIGURED");
+            return;
+        }
+        if (!options.apply()) {
+            System.out.println("next_command=sudo " + executable
+                + " attributes resolver init --data-connector "
+                + shellQuote(plan.dataConnector())
+                + ("uid".equals(searchAttribute) ? "" : " --search-attribute "
+                    + shellQuote(searchAttribute))
+                + " --apply --confirm " + shellQuote(plan.dataConnector()));
+            return;
+        }
+        confirm(options, plan.dataConnector());
+        final Snapshot snapshot = snapshot(config.attributeResolverPath());
+        try {
+            GraphicalMatrixLdapResolverConfig.initialize(config.attributeResolverPath(),
+                plan.dataConnector(), plan.searchAttribute());
+            audit("LDAP_RESOLVER_INIT", "-", "-", "OK",
+                "connector=" + plan.dataConnector()
+                    + ",search_attribute=" + plan.searchAttribute());
+        } catch (Exception ex) {
+            snapshot.restore();
+            audit("LDAP_RESOLVER_INIT", "-", "-", "FAILED", rootMessage(ex));
+            throw ex;
+        }
+        System.out.println("result=APPLY_OK");
+        System.out.println("next_command=sudo " + executable
+            + " attributes resolver add ATTRIBUTE --data-connector "
+            + shellQuote(plan.dataConnector()));
+        System.out.println("next_build=sudo " + config.idpHome().resolve("bin/build.sh"));
+        System.out.println("next_restart=sudo systemctl restart jetty-idp.service");
+    }
+
+    private void resolverAdd(final Arguments options) throws Exception {
+        options.allow(Set.of("source-attribute", "data-connector", "confirm"),
+            Set.of("apply"));
+        final String id = one(options,
+            "attributes resolver add ATTRIBUTE [--data-connector ID]");
+        GraphicalMatrixSpAccessPolicy.validateAttributeId(id);
+        if (config.isBlockedAttribute(id)) {
+            throw new IllegalArgumentException(
+                "blocked attribute cannot be added to the resolver: " + id);
+        }
+        final String source = options.single("source-attribute", id);
+        GraphicalMatrixSpAccessPolicy.validateAttributeId(source);
+        if (config.isBlockedAttribute(source)) {
+            throw new IllegalArgumentException(
+                "blocked LDAP source attribute cannot be added to the resolver: " + source);
+        }
+        final String requestedConnector = options.single("data-connector", "");
+        final GraphicalMatrixLdapResolverConfig.Plan plan =
+            GraphicalMatrixLdapResolverConfig.inspect(config.attributeResolverPath(),
+                id, source, requestedConnector);
+        System.out.println("mode=" + mode(options));
+        System.out.println("action=LDAP_RESOLVER_ATTRIBUTE_ADD");
+        System.out.println("attribute=" + id);
+        System.out.println("source_attribute=" + source);
+        System.out.println("data_connector=" + plan.dataConnector());
+        System.out.println("return_attributes_update=" + plan.returnAttributesUpdated());
+        if (plan.alreadyConfigured()) {
+            System.out.println("result=NO_CHANGE");
+            System.out.println("reason=ALREADY_CONFIGURED");
+            return;
+        }
+        if (!options.apply()) {
+            System.out.println("next_command=sudo " + executable
+                + " attributes resolver add " + shellQuote(id)
+                + (source.equals(id) ? "" : " --source-attribute " + shellQuote(source))
+                + " --data-connector " + shellQuote(plan.dataConnector())
+                + " --apply --confirm " + shellQuote(id));
+            return;
+        }
+        confirm(options, id);
+        final Snapshot snapshot = snapshot(config.attributeResolverPath());
+        try {
+            GraphicalMatrixLdapResolverConfig.add(config.attributeResolverPath(),
+                id, source, plan.dataConnector());
+            audit("LDAP_RESOLVER_ATTRIBUTE_ADD", "-", "-", "OK",
+                "attribute=" + id + ",connector=" + plan.dataConnector());
+        } catch (Exception ex) {
+            snapshot.restore();
+            audit("LDAP_RESOLVER_ATTRIBUTE_ADD", "-", "-", "FAILED",
+                rootMessage(ex));
+            throw ex;
+        }
+        System.out.println("result=APPLY_OK");
+        System.out.println("next_build=sudo " + config.idpHome().resolve("bin/build.sh"));
+        System.out.println("next_restart=sudo systemctl restart jetty-idp.service");
+        System.out.println("next_verify=sudo " + executable
+            + " attributes discover --sp SP_NAME --user USER");
     }
 
     private void accessInit(final Arguments options) throws Exception {
@@ -1009,17 +1131,13 @@ final class GraphicalMatrixSpGovernanceTool {
     private void audit(final String event, final String name, final String entityId,
             final String result, final String detail) {
         try {
-            Files.createDirectories(config.auditLogPath().getParent());
             final String actor = System.getenv().getOrDefault("SUDO_USER",
                 System.getenv().getOrDefault("USER", "unknown"));
             final String line = "ts=" + Instant.now() + " event=" + token(event)
                 + " actor=" + token(actor) + " name=" + token(name)
                 + " entity_id=" + token(entityId) + " result=" + token(result)
                 + " detail=" + token(detail) + System.lineSeparator();
-            Files.writeString(config.auditLogPath(), line, StandardCharsets.UTF_8,
-                java.nio.file.StandardOpenOption.CREATE,
-                java.nio.file.StandardOpenOption.APPEND);
-            setPermissions(config.auditLogPath(), "rw-r-----");
+            GraphicalMatrixSpFiles.appendAudit(config.auditLogPath(), line);
         } catch (Exception ex) {
             System.err.println("WARN: unable to write SP management audit log: "
                 + rootMessage(ex));
@@ -1193,7 +1311,8 @@ final class GraphicalMatrixSpGovernanceTool {
         if ("access".equals(group)) {
             System.err.println("Access: init, list, show, set, disable, enable, clear, test");
         } else {
-            System.err.println("Attributes: discover, list, show, approve, block, profile");
+            System.err.println(
+                "Attributes: discover, list, show, approve, block, profile, resolver");
         }
     }
 

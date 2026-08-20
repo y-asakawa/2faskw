@@ -24,6 +24,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 
 public final class GraphicalMatrixAuditLogger {
+    private static final String AUDIT_CORRELATION_ID =
+        "io.github.yasakawa.faskw.auditCorrelationId";
     private final File logFile;
 
     public GraphicalMatrixAuditLogger(final String idpHome) {
@@ -39,7 +41,7 @@ public final class GraphicalMatrixAuditLogger {
             + " user=" + value(user)
             + " result=" + value(result)
             + " ip=" + value(request.getRemoteAddr())
-            + " session=" + value(session != null ? session.getId() : null)
+            + " session=" + value(auditCorrelationId(session))
             + " challenge=" + value(challengeId)
             + " detail=" + value(detail)
             + System.lineSeparator();
@@ -50,6 +52,21 @@ public final class GraphicalMatrixAuditLogger {
             } catch (Exception ignored) {
                 // Authentication must not fail only because audit logging failed.
             }
+        }
+    }
+
+    static String auditCorrelationId(final HttpSession session) {
+        if (session == null) {
+            return null;
+        }
+        synchronized (session) {
+            final Object existing = session.getAttribute(AUDIT_CORRELATION_ID);
+            if (existing instanceof String value && !value.isBlank()) {
+                return value;
+            }
+            final String value = GraphicalMatrixSupport.token();
+            session.setAttribute(AUDIT_CORRELATION_ID, value);
+            return value;
         }
     }
 

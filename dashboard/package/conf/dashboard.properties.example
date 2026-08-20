@@ -22,6 +22,8 @@ dashboard.auth.trustedProxies = 127.0.0.1/32,::1/128
 dashboard.auth.remoteUserHeader = X-Remote-User
 dashboard.auth.roleHeader = X-2FASKW-Role
 dashboard.auth.rolesFile = /etc/2faskw-dashboard/roles.properties
+dashboard.auth.proxySecretHeader = X-2FASKW-Proxy-Secret
+dashboard.auth.proxySecretFile = /etc/2faskw-dashboard/credentials/proxy.secret
 
 # Local management-network mode. These values are ignored unless auth.mode=local.
 # Bind to a specific interface address and list every permitted IPv4/IPv6 CIDR.

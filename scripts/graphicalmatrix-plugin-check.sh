@@ -300,7 +300,7 @@ check_package() {
 
   need_dir "$PACKAGE_DIR"
 
-  local package_base package_version package_archive_base plugin_jar zxing_core_jar hikari_jar bootstrap_props metadata_props metadata_base_name manifest_version bootstrap_version
+  local package_base package_version package_archive_base plugin_jar zxing_core_jar hikari_jar httpclient_jar httpcore_jar commons_logging_jar bootstrap_props metadata_props metadata_base_name manifest_version bootstrap_version
   package_base="$(basename "$PACKAGE_DIR")"
   if [[ "$package_base" == 2faskw-idp-plugin-* && "$package_base" != "2faskw-idp-plugin-" ]]; then
     package_version="${package_base#2faskw-idp-plugin-}"
@@ -335,6 +335,14 @@ check_package() {
     ok "PostgreSQL JDBC driver exists"
   else
     fail "PostgreSQL JDBC driver missing: $PACKAGE_DIR/webapp/WEB-INF/lib/postgresql-*.jar"
+  fi
+  httpclient_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/httpclient-*.jar")"
+  httpcore_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/httpcore-*.jar")"
+  commons_logging_jar="$(first_match "$PACKAGE_DIR/webapp/WEB-INF/lib/commons-logging-*.jar")"
+  if [[ -n "$httpclient_jar" && -n "$httpcore_jar" && -n "$commons_logging_jar" ]]; then
+    ok "Apache HttpClient runtime dependencies exist"
+  else
+    fail "Apache HttpClient runtime dependencies missing: httpclient, httpcore, or commons-logging"
   fi
 
   bootstrap_props="$PACKAGE_DIR/bootstrap/plugin.properties"

@@ -89,27 +89,11 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
 
             final GraphicalMatrixMfaSettings settings = repository.findMfaSettings(user);
             if (settings != null && "TOTP".equalsIgnoreCase(normalizeMethod(settings.getMethod()))) {
-                final String seed = repository.prepareTotpRegistration(user, now);
-                if (seed == null || seed.isEmpty()) {
-                    audit.log("TOTP_REGISTER_START", user, "ENROLL_REQUIRED", null,
-                        "totp_registration_unavailable", request);
-                    renderUnavailable(request, response,
-                        "TOTP登録を開始できません。",
-                        "時間をおいて再度ログインするか、管理者に連絡してください。");
-                    return;
-                }
-
-                final String csrfToken = GraphicalMatrixSupport.token();
-                final HttpSession session = request.getSession();
-                session.setAttribute("totpEnroll.key", key);
-                session.setAttribute("totpEnroll.user", user);
-                session.setAttribute("totpEnroll.csrfToken", csrfToken);
-                session.setAttribute("totpEnroll.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
-                session.setAttribute("totpEnroll.used", Boolean.FALSE);
-
-                audit.log("TOTP_REGISTER_START", user, "OK", null,
-                    "status=" + settings.getTotpStatus(), request);
-                renderTotpRegistration(request, response, key, user, seed, csrfToken, null);
+                audit.log("TOTP_REGISTER_START", user, "ENROLL_REQUIRED", null,
+                    "self_service_authorization_required,status=" + settings.getTotpStatus(), request);
+                renderUnavailable(request, response,
+                    "TOTP登録が完了していません。",
+                    "TOTP登録は現在のMFAを確認した自己管理画面から完了してください。管理者によるリセット後は、管理者に再登録手順を確認してください。");
                 return;
             }
 

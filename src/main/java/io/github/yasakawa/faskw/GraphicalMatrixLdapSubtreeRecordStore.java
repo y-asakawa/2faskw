@@ -26,11 +26,13 @@ import java.util.List;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
+import javax.naming.directory.AttributeInUseException;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.BasicAttribute;
 import javax.naming.directory.BasicAttributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.ModificationItem;
+import javax.naming.directory.NoSuchAttributeException;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
 import javax.naming.ldap.LdapContext;
@@ -62,7 +64,12 @@ final class GraphicalMatrixLdapSubtreeRecordStore implements GraphicalMatrixLdap
                 ldap.createSubcontext(recordDn(context, key),
                     addAttributes(context, key, value, expiration, INITIAL_VERSION));
             } else {
-                ldap.modifyAttributes(existing.dn, replaceRecord(value, expiration, INITIAL_VERSION));
+                try {
+                    ldap.modifyAttributes(existing.dn, replaceRecord(value, expiration,
+                        existing.record.version(), INITIAL_VERSION));
+                } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                    return false;
+                }
             }
             return true;
         } catch (NamingException ex) {
@@ -112,7 +119,12 @@ final class GraphicalMatrixLdapSubtreeRecordStore implements GraphicalMatrixLdap
                 throw new VersionMismatchException("LDAP storage record version mismatch");
             }
             final long newVersion = value != null ? version + 1L : version;
-            ldap.modifyAttributes(entry.dn, replaceRecord(value, expiration, newVersion));
+            try {
+                ldap.modifyAttributes(entry.dn,
+                    replaceRecord(value, expiration, version, newVersion));
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                throw new VersionMismatchException("LDAP storage record version mismatch");
+            }
             return newVersion;
         } catch (NamingException ex) {
             throw new IOException("Unable to update WebAuthn LDAP storage record", ex);
@@ -132,6 +144,11 @@ final class GraphicalMatrixLdapSubtreeRecordStore implements GraphicalMatrixLdap
             if (entry.record.version != version) {
                 throw new VersionMismatchException("LDAP storage record version mismatch");
             }
+            try {
+                ldap.modifyAttributes(entry.dn, stateVersionUpdate(config.versionAttr(), version, -1L));
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                throw new VersionMismatchException("LDAP storage record version mismatch");
+            }
             ldap.destroySubcontext(entry.dn);
             return true;
         } catch (NamingException ex) {
@@ -146,7 +163,13 @@ final class GraphicalMatrixLdapSubtreeRecordStore implements GraphicalMatrixLdap
             final LdapContext ldap = session.context();
             for (Entry entry : findContextEntries(ldap, context)) {
                 if (entry.record.expired(System.currentTimeMillis())) {
-                    ldap.destroySubcontext(entry.dn);
+                    try {
+                        ldap.modifyAttributes(entry.dn,
+                            stateVersionUpdate(config.versionAttr(), entry.record.version(), -1L));
+                        ldap.destroySubcontext(entry.dn);
+                    } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                        // A concurrent writer renewed the record; leave its new value intact.
+                    }
                 }
             }
         } catch (NamingException ex) {
@@ -253,17 +276,26 @@ final class GraphicalMatrixLdapSubtreeRecordStore implements GraphicalMatrixLdap
         return attributes;
     }
 
-    private ModificationItem[] replaceRecord(final String value, final Long expiration, final long version) {
+    private ModificationItem[] replaceRecord(final String value, final Long expiration,
+            final long currentVersion, final long newVersion) {
+        final List<ModificationItem> updates = new ArrayList<>();
         if (value == null) {
-            return new ModificationItem[] {
-                replace(config.expiresAttr(), expiration),
-                replace(config.versionAttr(), String.valueOf(version))
-            };
+            updates.add(replace(config.expiresAttr(), expiration));
+        } else {
+            updates.add(replace(config.valueAttr(), value));
+            updates.add(replace(config.expiresAttr(), expiration));
         }
+        updates.addAll(List.of(stateVersionUpdate(config.versionAttr(), currentVersion, newVersion)));
+        return updates.toArray(ModificationItem[]::new);
+    }
+
+    static ModificationItem[] stateVersionUpdate(final String attribute,
+            final long currentVersion, final long newVersion) {
         return new ModificationItem[] {
-            replace(config.valueAttr(), value),
-            replace(config.expiresAttr(), expiration),
-            replace(config.versionAttr(), String.valueOf(version))
+            new ModificationItem(DirContext.REMOVE_ATTRIBUTE,
+                new BasicAttribute(attribute, String.valueOf(currentVersion))),
+            new ModificationItem(DirContext.ADD_ATTRIBUTE,
+                new BasicAttribute(attribute, String.valueOf(newVersion)))
         };
     }
 

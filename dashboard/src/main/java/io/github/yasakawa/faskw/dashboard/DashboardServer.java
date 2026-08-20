@@ -44,7 +44,6 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import javax.net.ssl.SSLParameters;
 
@@ -57,6 +56,7 @@ public final class DashboardServer implements AutoCloseable {
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
     private static final Pattern SAFE_NETWORK =
             Pattern.compile("[0-9A-Fa-f:.]+(?:/[0-9]{1,3})?");
+    private static final int MAX_RATE_LIMIT_ENTRIES = 10_000;
     private static final Set<String> AUTH_EVENTS = Set.of(
             "START", "CHALLENGE_CREATED", "VERIFY",
             "FORCE_SEQUENCE_CHANGE_START", "FORCE_SEQUENCE_CHANGE_SAVE");
@@ -124,6 +124,8 @@ public final class DashboardServer implements AutoCloseable {
                 store.deleteOlderThan(Instant.now().minus(Duration.ofDays(config.retentionDays())));
                 store.deleteAggregatesOlderThan(
                         Instant.now().minus(Duration.ofDays(config.aggregateRetentionDays())));
+                store.deleteAccessAuditOlderThan(
+                        Instant.now().minus(Duration.ofDays(config.retentionDays())));
             } catch (SQLException e) {
                 System.err.println("dashboard retention failed: " + e.getMessage());
             }
@@ -755,29 +757,55 @@ public final class DashboardServer implements AutoCloseable {
     private record TimeRange(Instant from, Instant to) {
     }
 
-    private static final class RequestRateLimiter {
+    static final class RequestRateLimiter {
         private record Window(long minute, int count) {
         }
 
         private final int requestsPerMinute;
-        private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
+        private final int maximumEntries;
+        private final LinkedHashMap<String, Window> windows =
+                new LinkedHashMap<>(16, 0.75f, true);
+        private long lastCleanupMinute = Long.MIN_VALUE;
 
-        private RequestRateLimiter(final int requestsPerMinute) {
-            this.requestsPerMinute = requestsPerMinute;
+        RequestRateLimiter(final int requestsPerMinute) {
+            this(requestsPerMinute, MAX_RATE_LIMIT_ENTRIES);
         }
 
-        private boolean allow(final String key) {
-            final long minute = System.currentTimeMillis() / 60000;
-            final Window updated = windows.compute(key, (ignored, current) -> {
-                if (current == null || current.minute() != minute) {
-                    return new Window(minute, 1);
-                }
-                return new Window(minute, current.count() + 1);
-            });
-            if (windows.size() > 10_000) {
-                windows.entrySet().removeIf(entry -> entry.getValue().minute() < minute - 1);
+        RequestRateLimiter(final int requestsPerMinute, final int maximumEntries) {
+            if (requestsPerMinute < 1 || maximumEntries < 1) {
+                throw new IllegalArgumentException("rate-limit values must be positive");
             }
+            this.requestsPerMinute = requestsPerMinute;
+            this.maximumEntries = maximumEntries;
+        }
+
+        synchronized boolean allow(final String key) {
+            final long minute = System.currentTimeMillis() / 60000;
+            if (lastCleanupMinute != minute) {
+                windows.entrySet().removeIf(entry -> entry.getValue().minute() < minute - 1);
+                lastCleanupMinute = minute;
+            }
+            final Window current = windows.get(key);
+            if (current == null && windows.size() >= maximumEntries) {
+                final var oldest = windows.entrySet().iterator();
+                if (oldest.hasNext()) {
+                    oldest.next();
+                    oldest.remove();
+                }
+            }
+            final Window updated = current == null || current.minute() != minute
+                    ? new Window(minute, 1)
+                    : new Window(minute, current.count() + 1);
+            windows.put(key, updated);
             return updated.count() <= requestsPerMinute;
+        }
+
+        synchronized int size() {
+            return windows.size();
+        }
+
+        synchronized boolean contains(final String key) {
+            return windows.containsKey(key);
         }
     }
 }

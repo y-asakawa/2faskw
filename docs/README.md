@@ -84,6 +84,8 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOGROTATE.md](./LOGROTATE.md) | GraphicalMatrix audit log の logrotate 設定例。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
+| [release-notes/v1.3.1-SP-MFA-POLICY-CLI.md](./release-notes/v1.3.1-SP-MFA-POLICY-CLI.md) | SP単位の`set-mfa`とIdP全体の`mfa`によるMFA方針管理、実効判定、手作業差分修復の仕様と手順。 |
+| [release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md) | LDAP属性をAttribute Resolverへ安全に追加するSP管理CLI拡張の仕様と手順。 |
 | [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
 | [release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md](./release-notes/v1.3.0-SP-ACCESS-ATTRIBUTE-CATALOG-DESIGN.md) | SP別LDAP属性アクセス制御と、SP向け属性profileを管理する属性カタログCLIの詳細設計。 |
 | [release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md](./release-notes/v1.2.7-SP-MANAGEMENT-CLI-DESIGN.md) | SP管理CLIの履歴設計。v1.3.0でもmetadata、属性release、SP別MFA方針の管理機能を継承する。 |
@@ -140,12 +142,15 @@ sudo tail -n 50 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 | --- | --- | --- |
 | IdP状態確認 | `https://idp.example.org/idp/status` | IdPのstatus endpointを公開している場合。 |
 | 通常ログイン | SPが開始するSAML認証URL | 利用者へIdPログインURLを直接案内しない。 |
-| 従来の変更画面 | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`の場合。LDAP ID・パスワードと現在のGraphicalMatrixを使用する。 |
+| 従来の変更画面 | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`かつ現在選択中のMFA方式がGraphicalMatrixの場合。LDAP ID・パスワードと現在のGraphicalMatrixを使用し、保存されている未選択factorでは変更できない。 |
 | 推奨の自己管理画面 | `https://idp.example.org/idp/profile/2faskw/self-service` | `graphicalmatrix.selfservice.enabled=true`の場合。Shibboleth Password認証と現在のMFA方式で再認証する。 |
 | 管理API | `https://idp.example.org/idp/graphicalmatrix-admin/api/v1/` | APIを明示的に有効化した管理クライアントだけが使用する。 |
 
 TOTP登録とWebAuthn登録は、自己管理画面または変更メニューでMFA方式を選択して開始する。
 登録用URLを利用者へ直接案内せず、既存の認証・認可条件を通して開始する。
+WebAuthnでは、Shibboleth WebAuthn Pluginがcredentialの保存に成功した後だけ、
+2FAS-KWが利用者のMFA方式を`WebAuthn`へ切り替える。登録を中断または失敗した場合は、
+登録開始前のMFA方式を維持する。
 
 ### DB保存時の管理CLI
 
@@ -170,6 +175,10 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh unlock user001
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh user001 RESET
 ```
 
+`set-method ... WebAuthn`はcredentialの存在を確認せず強制的に方式を変更する管理操作である。
+通常のWebAuthn登録には自己管理画面を使い、復旧操作以外でcredential未登録の利用者へ
+`WebAuthn`を直接設定しない。
+
 CSV投入は、最初にdry-runを実行する。`--apply`を付けたときだけDBへ反映する。
 
 ```bash
@@ -184,9 +193,12 @@ WebAuthn credentialの管理、保存方式移行の詳細は[ADMIN-TOOLS.md](./
 
 ### SP追加管理CLI
 
-v1.3.0では、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
+v1.3.0以降では、IdPサーバ上の`graphicalmatrix-sp.sh`でSP metadata、属性リリース、
 SP別MFA方針、属性カタログ、SP別LDAP属性アクセス制御を一括管理できる。初期状態では無効であり、設定を有効化して初期化するまで
 IdP設定を変更しない。SP管理用HTTP APIは提供しない。
+
+v1.3.1では、LDAPに存在する属性をAttribute Resolverへ追加する`attributes resolver add`も提供する。
+この操作は属性解決だけを設定し、属性releaseやSP別アクセスpolicyを自動変更しない。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-sp.sh status

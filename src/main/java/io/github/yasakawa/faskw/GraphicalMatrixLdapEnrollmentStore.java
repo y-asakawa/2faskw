@@ -24,6 +24,7 @@ import java.util.Set;
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
+import javax.naming.directory.AttributeInUseException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.BasicAttribute;
@@ -31,10 +32,12 @@ import javax.naming.directory.DirContext;
 import javax.naming.directory.ModificationItem;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
+import javax.naming.directory.NoSuchAttributeException;
 import javax.naming.ldap.InitialLdapContext;
 import javax.naming.ldap.LdapContext;
 
 final class GraphicalMatrixLdapEnrollmentStore {
+    private static final int VERIFY_UPDATE_ATTEMPTS = 3;
     private final GraphicalMatrixLdapConfig config;
     private final GraphicalMatrixSequenceStorage sequenceStorage;
     private final GraphicalMatrixTotpSeedStorage totpSeedStorage;
@@ -89,11 +92,11 @@ final class GraphicalMatrixLdapEnrollmentStore {
             }
 
             final String seed = GraphicalMatrixTotpSupport.newBase32Seed();
-            modify(context, entry.dn,
+            modify(context, entry.dn, withStateVersionUpdate(entry, true,
                 replace(config.totpSeedAttr(), totpSeedStorage.encode(seed)),
                 replace(config.totpStatusAttr(), "PENDING"),
                 replace(config.updatedAtAttr(), String.valueOf(now))
-            );
+            ));
             return seed;
         }
     }
@@ -125,12 +128,17 @@ final class GraphicalMatrixLdapEnrollmentStore {
                 return GraphicalMatrixVerifyResult.failed("totp_registration_code_mismatch");
             }
 
-            modify(context, entry.dn,
-                replace(config.totpStatusAttr(), "ACTIVE"),
-                replace(config.totpRegisteredAtAttr(), String.valueOf(now)),
-                replace(config.lastSuccessAtAttr(), String.valueOf(now)),
-                replace(config.updatedAtAttr(), String.valueOf(now))
-            );
+            try {
+                modify(context, entry.dn, withStateVersionUpdate(entry, true,
+                    replace(config.totpStatusAttr(), "ACTIVE"),
+                    replace(config.totpRegisteredAtAttr(), String.valueOf(now)),
+                    replace(config.lastSuccessAtAttr(), String.valueOf(now)),
+                    replace(config.updatedAtAttr(), String.valueOf(now))
+                ));
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                return GraphicalMatrixVerifyResult.enrollRequired(
+                    "totp_state_changed_after_verification");
+            }
             return GraphicalMatrixVerifyResult.success("totp_registered");
         }
     }
@@ -142,12 +150,7 @@ final class GraphicalMatrixLdapEnrollmentStore {
             final boolean duplicateSelectionsAllowed) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
-            final Entry entry = findEntry(context, user);
-            final GraphicalMatrixVerifyResult precheck = precheckGraphical(entry, now);
-            if (precheck != null) {
-                return precheck;
-            }
-            return verifySelection(context, entry, selected, displayOrder, now, lockoutPolicy,
+            return verifyWithRetry(context, user, selected, displayOrder, now, lockoutPolicy,
                 orderedSelectionRequired, duplicateSelectionsAllowed, false);
         }
     }
@@ -159,14 +162,32 @@ final class GraphicalMatrixLdapEnrollmentStore {
             final boolean duplicateSelectionsAllowed) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
+            return verifyWithRetry(context, user, selected, displayOrder, now, lockoutPolicy,
+                orderedSelectionRequired, duplicateSelectionsAllowed, true);
+        }
+    }
+
+    private GraphicalMatrixVerifyResult verifyWithRetry(final LdapContext context, final String user,
+            final List<String> selected, final List<String> displayOrder, final long now,
+            final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed,
+            final boolean sequenceChange) throws Exception {
+        for (int attempt = 1; attempt <= VERIFY_UPDATE_ATTEMPTS; attempt++) {
             final Entry entry = findEntry(context, user);
             final GraphicalMatrixVerifyResult precheck = precheckGraphical(entry, now);
             if (precheck != null) {
                 return precheck;
             }
-            return verifySelection(context, entry, selected, displayOrder, now, lockoutPolicy,
-                orderedSelectionRequired, duplicateSelectionsAllowed, true);
+            try {
+                return verifySelection(context, entry, selected, displayOrder, now, lockoutPolicy,
+                    orderedSelectionRequired, duplicateSelectionsAllowed, sequenceChange);
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                if (attempt == VERIFY_UPDATE_ATTEMPTS) {
+                    throw ex;
+                }
+            }
         }
+        throw new NamingException("LDAP verification state could not be updated atomically");
     }
 
     boolean updateSequence(final String user, final String storedSequence, final long now,
@@ -195,6 +216,31 @@ final class GraphicalMatrixLdapEnrollmentStore {
     boolean updateMfaMethodIfCurrent(final String user, final String method, final long now,
             final long expectedStateVersion) throws Exception {
         return updateMfaMethod(user, method, now, Long.valueOf(expectedStateVersion));
+    }
+
+    boolean activateWebAuthnIfMethodCurrent(final String user,
+            final String expectedMethod, final long now) throws Exception {
+        try (LdapSession session = context()) {
+            final LdapContext context = session.context;
+            final Entry entry = findEntry(context, user);
+            if (entry == null || !"ACTIVE".equals(entry.record.status)
+                    || entry.record.lockedUntil > now
+                    || !normalizeMethod(expectedMethod).equals(
+                        normalizeMethod(entry.record.mfaMethod))) {
+                return false;
+            }
+            try {
+                modify(context, entry.dn, withStateVersionUpdate(entry, true,
+                    replace(config.mfaMethodAttr(), "WebAuthn"),
+                    replace(config.failedCountAttr(), "0"),
+                    replace(config.lockedUntilAttr(), "0"),
+                    replace(config.updatedAtAttr(), String.valueOf(now))
+                ));
+                return true;
+            } catch (AttributeInUseException | NoSuchAttributeException ex) {
+                return false;
+            }
+        }
     }
 
     private boolean updateMfaMethod(final String user, final String method, final long now,
@@ -274,6 +320,9 @@ final class GraphicalMatrixLdapEnrollmentStore {
         if (entry.record.sequence.isEmpty() || !"ACTIVE".equals(entry.record.status)) {
             return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
         }
+        if (!isGraphicalMatrixMethod(entry.record.mfaMethod)) {
+            return GraphicalMatrixVerifyResult.enrollRequired("not_graphicalmatrix_method");
+        }
         if (!sequenceStorage.acceptedForRuntime(entry.record.sequence)) {
             return GraphicalMatrixVerifyResult.enrollRequired("sequence_storage_migration_required");
         }
@@ -299,19 +348,19 @@ final class GraphicalMatrixLdapEnrollmentStore {
         if (selectedShapeOk && sequenceStorage.matches(entry.record.sequence, selected,
                 orderedSelectionRequired, duplicateSelectionsAllowed)) {
             if (sequenceChange) {
-                modify(context, entry.dn,
+                modify(context, entry.dn, withStateVersionUpdate(entry, true,
                     replace(config.failedCountAttr(), "0"),
                     replace(config.lockedUntilAttr(), "0"),
                     replace(config.updatedAtAttr(), String.valueOf(now))
-                );
+                ));
                 return GraphicalMatrixVerifyResult.success("sequence_change_verified");
             }
-            modify(context, entry.dn,
+            modify(context, entry.dn, withStateVersionUpdate(entry, true,
                 replace(config.failedCountAttr(), "0"),
                 replace(config.lockedUntilAttr(), "0"),
                 replace(config.lastSuccessAtAttr(), String.valueOf(now)),
                 replace(config.updatedAtAttr(), String.valueOf(now))
-            );
+            ));
             return GraphicalMatrixVerifyResult.success();
         }
 
@@ -321,11 +370,11 @@ final class GraphicalMatrixLdapEnrollmentStore {
         final long newLockedUntil = lockDecision.isLocked()
             ? now + lockDecision.getLockMillis()
             : 0L;
-        modify(context, entry.dn,
+        modify(context, entry.dn, withStateVersionUpdate(entry, true,
             replace(config.failedCountAttr(), String.valueOf(failed)),
             replace(config.lockedUntilAttr(), String.valueOf(newLockedUntil)),
             replace(config.updatedAtAttr(), String.valueOf(now))
-        );
+        ));
 
         final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
             + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
@@ -384,18 +433,32 @@ final class GraphicalMatrixLdapEnrollmentStore {
 
     private ModificationItem[] withStateVersionUpdate(final Entry entry, final boolean compareCurrent,
             final ModificationItem... items) {
-        final int extraItems = compareCurrent && entry.record.stateVersionPresent ? 2 : 1;
+        return stateVersionUpdate(config.stateVersionAttr(), entry.record.stateVersion,
+            entry.record.stateVersionPresent, compareCurrent, items);
+    }
+
+    static ModificationItem[] stateVersionUpdate(final String attributeName,
+            final long stateVersion, final boolean stateVersionPresent,
+            final boolean compareCurrent, final ModificationItem... items) {
+        final int extraItems = compareCurrent && stateVersionPresent ? 2 : 1;
         final ModificationItem[] all = new ModificationItem[items.length + extraItems];
         System.arraycopy(items, 0, all, 0, items.length);
-        final String current = String.valueOf(entry.record.stateVersion);
-        final String next = String.valueOf(entry.record.stateVersion + 1);
-        if (compareCurrent && entry.record.stateVersionPresent) {
-            all[items.length] = remove(config.stateVersionAttr(), current);
-            all[items.length + 1] = add(config.stateVersionAttr(), next);
+        final String current = String.valueOf(stateVersion);
+        final String next = String.valueOf(stateVersion + 1);
+        if (compareCurrent && stateVersionPresent) {
+            all[items.length] = remove(attributeName, current);
+            all[items.length + 1] = add(attributeName, next);
+        } else if (compareCurrent) {
+            all[items.length] = add(attributeName, next);
         } else {
-            all[items.length] = replace(config.stateVersionAttr(), next);
+            all[items.length] = replace(attributeName, next);
         }
         return all;
+    }
+
+    private static boolean isGraphicalMatrixMethod(final String method) {
+        return "GraphicalMatrix".equalsIgnoreCase(method)
+            || "MFA:GraphicalMatrix".equalsIgnoreCase(method);
     }
 
     private static ModificationItem replace(final String attr, final String value) {
@@ -554,7 +617,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
 
         private GraphicalMatrixEnrollment toEnrollment() {
             return new GraphicalMatrixEnrollment(
-                sequence, status, failedCount, lockedUntil, forceSequenceChange, stateVersion);
+                sequence, status, failedCount, lockedUntil, forceSequenceChange, stateVersion,
+                mfaMethod);
         }
 
         private static String defaultValue(final String value, final String defaultValue) {

@@ -16,6 +16,7 @@
 package io.github.yasakawa.faskw.dashboard;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,6 +36,23 @@ class DashboardServerTest {
 
     @TempDir
     Path temporary;
+
+    @Test
+    void requestRateLimiterEnforcesPerKeyLimitAndHardCapacity() {
+        final DashboardServer.RequestRateLimiter limiter =
+                new DashboardServer.RequestRateLimiter(2, 2);
+
+        assertTrue(limiter.allow("user-a"));
+        assertTrue(limiter.allow("user-a"));
+        assertFalse(limiter.allow("user-a"));
+        assertTrue(limiter.allow("user-b"));
+        assertTrue(limiter.allow("user-c"));
+
+        assertEquals(2, limiter.size());
+        assertFalse(limiter.contains("user-a"));
+        assertTrue(limiter.contains("user-b"));
+        assertTrue(limiter.contains("user-c"));
+    }
 
     @Test
     void servesReadOnlyUiAndSummaryWithSecurityHeaders() throws Exception {
@@ -241,6 +259,9 @@ class DashboardServerTest {
     @Test
     void rejectsForgedProxyHeadersFromAnUntrustedAddress() throws Exception {
         final int port = freePort();
+        final String proxySecret = "untrusted-test-proxy-secret-123456789";
+        final Path proxySecretFile = Files.writeString(
+                temporary.resolve("untrusted-proxy.secret"), proxySecret);
         final Path configuration = temporary.resolve("untrusted.properties");
         Files.writeString(configuration, """
                 dashboard.enabled=true
@@ -248,9 +269,10 @@ class DashboardServerTest {
                 dashboard.http.port=%d
                 dashboard.auth.mode=proxy
                 dashboard.auth.trustedProxies=192.0.2.0/24
+                dashboard.auth.proxySecretFile=%s
                 dashboard.ingest.enabled=false
                 dashboard.storage.path=%s
-                """.formatted(port, temporary.resolve("untrusted-db")));
+                """.formatted(port, proxySecretFile, temporary.resolve("untrusted-db")));
 
         try (DashboardServer server =
                 new DashboardServer(DashboardConfig.load(configuration))) {
@@ -260,6 +282,7 @@ class DashboardServerTest {
                                     + "/2faskw-dashboard/api/v1/summary"))
                             .header("X-Remote-User", "attacker")
                             .header("X-2FASKW-Role", "DASHBOARD_ADMIN")
+                            .header("X-2FASKW-Proxy-Secret", proxySecret)
                             .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(403, response.statusCode());
@@ -386,6 +409,9 @@ class DashboardServerTest {
     @Test
     void enforcesEndpointRolesAtTheApi() throws Exception {
         final int port = freePort();
+        final String proxySecret = "roles-test-proxy-secret-123456789012";
+        final Path proxySecretFile = Files.writeString(
+                temporary.resolve("roles-proxy.secret"), proxySecret);
         final Path configuration = temporary.resolve("roles.properties");
         Files.writeString(configuration, """
                 dashboard.enabled=true
@@ -393,9 +419,10 @@ class DashboardServerTest {
                 dashboard.http.port=%d
                 dashboard.auth.mode=proxy
                 dashboard.auth.trustedProxies=127.0.0.1/32
+                dashboard.auth.proxySecretFile=%s
                 dashboard.ingest.enabled=false
                 dashboard.storage.path=%s
-                """.formatted(port, temporary.resolve("roles-db")));
+                """.formatted(port, proxySecretFile, temporary.resolve("roles-db")));
 
         try (DashboardServer server =
                 new DashboardServer(DashboardConfig.load(configuration))) {
@@ -407,17 +434,26 @@ class DashboardServerTest {
                     HttpRequest.newBuilder(uri)
                             .header("X-Remote-User", "viewer")
                             .header("X-2FASKW-Role", "DASHBOARD_VIEWER")
+                            .header("X-2FASKW-Proxy-Secret", proxySecret)
                             .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             final HttpResponse<String> operator = client.send(
                     HttpRequest.newBuilder(uri)
                             .header("X-Remote-User", "operator")
                             .header("X-2FASKW-Role", "DASHBOARD_OPERATOR")
+                            .header("X-2FASKW-Proxy-Secret", proxySecret)
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            final HttpResponse<String> forgedAdmin = client.send(
+                    HttpRequest.newBuilder(uri)
+                            .header("X-Remote-User", "attacker")
+                            .header("X-2FASKW-Role", "DASHBOARD_ADMIN")
                             .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
 
             assertEquals(403, viewer.statusCode());
             assertEquals(200, operator.statusCode());
+            assertEquals(403, forgedAdmin.statusCode());
         }
     }
 

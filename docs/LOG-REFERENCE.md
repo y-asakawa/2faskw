@@ -3,7 +3,7 @@
 この文書は、2FAS-KW、Shibboleth IdP、Admin Tools、任意のDashboardで参照するログの
 用途、形式、eventの意味、障害時の確認順序をまとめたリファレンスである。
 
-ログにはユーザーID、送信元IPアドレス、SP entityID、セッションIDなどの個人情報・運用情報が
+ログにはユーザーID、送信元IPアドレス、SP entityID、監査相関IDなどの個人情報・運用情報が
 含まれ得る。閲覧権限、転送先、保存期間を組織の監査・個人情報保護方針に合わせて定める。
 パスワード、GraphicalMatrix sequence、TOTP seed、API bearer token、WebAuthnの秘密鍵は
 ログに記録してはならない。
@@ -42,7 +42,7 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 | `user` | 認証・操作対象のユーザーID | 不明な場合は`-`。 |
 | `result` | 操作結果または拒否理由の分類 | eventごとに取り得る値が異なる。 |
 | `ip` | Servletが受け取った送信元IPアドレス | リバースプロキシ構成では、プロキシのIPになる場合がある。X-Forwarded-Forをこのログが自動採用するわけではない。 |
-| `session` | HTTP session ID | 相関確認用。認証秘密ではないが、不要に外部共有しない。 |
+| `session` | HTTP session単位のランダムな監査相関ID | Servlet containerのsession IDやcookie値ではない。同一session内のevent相関確認用。 |
 | `challenge` | Matrix challenge ID | 該当しない操作は`-`。challenge内容や正解sequenceは記録しない。 |
 | `detail` | event固有の補足情報 | `key=value`を含む場合がある。値中の空白、`=`、改行などはエスケープされる。 |
 
@@ -61,6 +61,8 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 | `TOTP_REGISTER_START` | `OK`、`ENROLL_REQUIRED` | TOTP初回登録画面を開始した。seedは記録しない。 |
 | `TOTP_REGISTER_VERIFY` | `OK`、`FAIL`、`BAD_REQUEST` | TOTP初回登録時のコード確認結果。 |
 | `TOTP_REGISTER_CANCEL` | `OK` | TOTP登録を利用者が取り消した。 |
+| `WEBAUTHN_REGISTER_START` | `OK`、`ENROLL_REQUIRED`、`DB_ERROR` | 現在のMFA方式で本人確認済みの一回限り登録要求を作成し、公式WebAuthn登録flowへ遷移した。 |
+| `WEBAUTHN_REGISTER_ACTIVATE` | `OK`、`DENIED`、`ENROLL_REQUIRED`、`DB_ERROR` | 公式Pluginのcredential保存成功hookを受け、2FAS-KWのMFA方式をWebAuthnへ切り替えた結果。credentialや公開鍵は記録しない。 |
 
 `VERIFY result=FAIL`が連続した後に`VERIFY result=LOCKED`または`START result=LOCKED`が出る場合は、
 GraphicalMatrixロックアウトが働いている。`locked_until`が`detail`に出る場合はUnix epoch millisecondsであり、
@@ -77,6 +79,10 @@ GraphicalMatrixロックアウトが働いている。`locked_until`が`detail`�
 | `CHANGE_CHOOSE_SEQUENCE`、`CHANGE_SAVE` | `OK`、`BAD_REQUEST`、`ENROLL_REQUIRED`、`DB_ERROR` | 新しいMatrix選択と保存。sequence値は記録しない。 |
 | `CHANGE_CHOOSE_METHOD`、`CHANGE_METHOD_SAVE` | `OK`、`BAD_REQUEST`、`ENROLL_REQUIRED`、`DB_ERROR` | MFA方式の選択・保存。`CHANGE_METHOD_SAVE`のdetailには選択方式だけが記録される。 |
 | `CHANGE_BACK_MENU` | `OK`、`BAD_REQUEST` | 変更途中でメニューへ戻った操作。 |
+
+`graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs`に送信元IPが一致したLDAP認証では、
+`CHANGE_LDAP_AUTH`の`detail`に`ip_limit=bypassed`を付加する。これは独立IP全体制限だけを
+除外したことを示し、キー別制限やLDAP認証そのものを省略したことを意味しない。
 
 ### 2.4 管理API event
 

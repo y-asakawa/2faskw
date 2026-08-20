@@ -253,9 +253,85 @@ EOF
     || fail "management output does not display the initial password and raw protected sequence: $list"
 }
 
+test_h2_password_is_not_forwarded_in_process_arguments() {
+  if grep -Eq -- '-password[[:space:]]+"?\$db_password|DB_PASSWORD=' \
+      "$ROOT/graphicalmatrix-db.sh"; then
+    fail "H2 password is still expanded into a child process argument"
+  fi
+  grep -q 'GraphicalMatrixH2Command' "$ROOT/graphicalmatrix-db.sh" \
+    || fail "H2 command bridge is not used"
+}
+
+test_migration_h2_password_is_not_forwarded() {
+  local script="$ROOT/scripts/graphicalmatrix-db-migration.sh"
+  ! grep -Eq -- '-password[[:space:]]+"?\$H2_PASSWORD|H2_PASSWORD="\$H2_PASSWORD"' "$script" \
+    || fail "migration H2 password is still expanded into child process metadata"
+  ! grep -q -- '--h2-password)' "$script" \
+    || fail "migration helper still accepts a plaintext H2 password argument"
+  grep -q 'GraphicalMatrixH2Command' "$script" \
+    || fail "migration helper does not use the stdin password bridge"
+}
+
+test_api_curl_token_is_not_forwarded_in_arguments() {
+  local script="$ROOT/scripts/graphicalmatrix-api-curl-test.sh"
+  ! grep -q -- '-H "Authorization: Bearer \$TOKEN"' "$script" \
+    || fail "API test bearer token is still expanded into curl arguments"
+  ! grep -q -- '--token)' "$script" \
+    || fail "API test helper still accepts a plaintext bearer token argument"
+  grep -q -- '--config "$curl_config"' "$script" \
+    || fail "API test helper does not use a protected curl config"
+}
+
+test_dashboard_security_bounds_are_present() {
+  local installer="$ROOT/dashboard/package/bin/2faskw-dashboard-install.sh"
+  local server="$ROOT/dashboard/src/main/java/io/github/yasakawa/faskw/dashboard/DashboardServer.java"
+  local store="$ROOT/dashboard/src/main/java/io/github/yasakawa/faskw/dashboard/DashboardStore.java"
+  local agent="$ROOT/dashboard/src/main/java/io/github/yasakawa/faskw/dashboard/DashboardAgent.java"
+  local config_install_line credentials_reject_line credentials_install_line
+  grep -q 'reject_symlink "$CONFIG_DIR/credentials/proxy.secret"' "$installer" \
+    || fail "Dashboard installer does not reject a proxy-secret symlink"
+  config_install_line="$(grep -nF 'install -d -o root -g "$SERVICE_USER" -m 0750 "$CONFIG_DIR"' \
+    "$installer" | cut -d: -f1)"
+  credentials_reject_line="$(grep -nF 'reject_symlink "$CONFIG_DIR/credentials"' \
+    "$installer" | cut -d: -f1)"
+  credentials_install_line="$(grep -nF 'install -d -o root -g "$SERVICE_USER" -m 0750 "$CONFIG_DIR/credentials"' \
+    "$installer" | cut -d: -f1)"
+  [[ -n "$config_install_line" && -n "$credentials_reject_line" \
+      && -n "$credentials_install_line" \
+      && "$config_install_line" -lt "$credentials_reject_line" \
+      && "$credentials_reject_line" -lt "$credentials_install_line" ]] \
+    || fail "Dashboard credentials directory is checked before its parent is root controlled"
+  grep -q 'MAX_RATE_LIMIT_ENTRIES = 10_000' "$server" \
+    || fail "Dashboard request rate limiter has no hard capacity"
+  grep -q 'windows.size() >= maximumEntries' "$server" \
+    || fail "Dashboard request rate limiter does not evict at capacity"
+  grep -q 'REGEX_CANDIDATE_LIMIT' "$store" \
+    || fail "Dashboard regex event scans are not bounded"
+  grep -q 'deleteAccessAuditOlderThan' "$store" \
+    || fail "Dashboard access audit has no retention delete"
+  grep -q 'BodyHandlers.discarding()' "$agent" \
+    || fail "Dashboard agent still buffers response bodies"
+}
+
+test_ldap_rate_limit_capacity_does_not_globally_deny() {
+  local limiter="$ROOT/src/main/java/io/github/yasakawa/faskw/GraphicalMatrixLdapLoginRateLimiter.java"
+  local servlet="$ROOT/src/main/java/io/github/yasakawa/faskw/GraphicalMatrixChangeServlet.java"
+  ! grep -q 'return states.size() >= maximumEntries' "$limiter" \
+    || fail "LDAP rate limiter still rejects every unknown key at capacity"
+  grep -q 'evictOldestUnlocked' "$limiter" \
+    || fail "LDAP rate limiter does not bound capacity through eviction"
+  grep -q 'LDAP_IP_FAILURES' "$servlet" \
+    || fail "legacy LDAP login does not apply the independent IP guard"
+}
+
 test_token_symlink_replacement
 test_csv_immutable_snapshot
 test_csv_rejects_symlink_source
 test_csv_preview_displays_initial_and_encoded_sequence
 test_management_reset_restores_plaintext_initial_factor
+test_h2_password_is_not_forwarded_in_process_arguments
+test_migration_h2_password_is_not_forwarded
+test_api_curl_token_is_not_forwarded_in_arguments
+test_dashboard_security_bounds_are_present
+test_ldap_rate_limit_capacity_does_not_globally_deny
 echo "security regression tests: PASS"

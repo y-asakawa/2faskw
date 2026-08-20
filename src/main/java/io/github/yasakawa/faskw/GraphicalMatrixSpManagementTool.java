@@ -43,7 +43,7 @@ import java.util.Set;
 public final class GraphicalMatrixSpManagementTool {
     private static final Set<String> MUTATING = Set.of(
         "init", "add", "update", "set-attributes", "set-mfa", "disable", "enable",
-        "remove", "adopt", "rollback", "restore-legacy");
+        "remove", "adopt", "rollback", "restore-legacy", "mfa");
     private static final String GUIDANCE_RULE =
         "============================================================";
 
@@ -95,6 +95,7 @@ public final class GraphicalMatrixSpManagementTool {
             case "update" -> update(options);
             case "set-attributes" -> setAttributes(options);
             case "set-mfa" -> setMfa(options);
+            case "mfa" -> mfa(options);
             case "disable" -> setEnabled(options, false);
             case "enable" -> setEnabled(options, true);
             case "remove" -> remove(options);
@@ -532,6 +533,212 @@ public final class GraphicalMatrixSpManagementTool {
             readMetadata(current), null);
     }
 
+    private void mfa(final Options options) throws Exception {
+        final List<String> command = options.positionals();
+        if (command.equals(List.of("show")) || command.equals(List.of("global", "show"))) {
+            mfaShow(options);
+        } else if (command.equals(List.of("test"))) {
+            mfaTest(options);
+        } else if (command.equals(List.of("global", "set"))) {
+            mfaGlobalSet(options);
+        } else if (command.equals(List.of("reconcile"))) {
+            mfaReconcile(options);
+        } else {
+            throw new IllegalArgumentException("usage: mfa show | mfa test --sp NAME --ip ADDRESS | "
+                + "mfa global set [OPTIONS] | mfa reconcile --from-registry");
+        }
+    }
+
+    private void mfaShow(final Options options) throws Exception {
+        options.allow(Set.of(), Set.of());
+        final GraphicalMatrixMfaPolicyConfig.Settings settings =
+            GraphicalMatrixMfaPolicyConfig.load(config.mfaPolicyPath());
+        final GraphicalMatrixSpRegistry current = registry();
+        final List<String> drift = GraphicalMatrixSpMfaConfig.managedDrift(
+            config.mfaPolicyPath(), current.entries());
+        System.out.println("default=" + settings.defaultPolicy());
+        System.out.println("policy_order=" + settings.policyOrder());
+        System.out.println("bypass_ips=" + String.join(",", settings.bypassIps()));
+        System.out.println("bypass_cidrs=" + String.join(",", settings.bypassCidrs()));
+        System.out.println("use_forwarded_for=" + settings.useForwardedFor());
+        System.out.println("managed_policy_drift=" + (drift.isEmpty() ? "OK" : "MISMATCH"));
+        for (final String item : drift) {
+            System.out.println("drift=" + item);
+        }
+        for (final GraphicalMatrixSpRegistry.Entry entry : current.entries()) {
+            System.out.println("sp=" + entry.name() + " status=" + entry.status()
+                + " mfa=" + entry.mfaProfile() + " cidrs=" + String.join(",", entry.cidrs()));
+        }
+    }
+
+    private void mfaTest(final Options options) throws Exception {
+        options.allow(Set.of("sp", "ip"), Set.of());
+        final String name = options.required("sp");
+        final String ip = options.required("ip");
+        final GraphicalMatrixSpRegistry.Entry entry = registry().get(name);
+        final GraphicalMatrixMfaPolicy policy = GraphicalMatrixMfaPolicy.parse(
+            GraphicalMatrixMfaPolicyConfig.loadProperties(config.mfaPolicyPath()));
+        final GraphicalMatrixMfaPolicy.Decision decision = policy.evaluate(entry.entityId(), ip);
+        System.out.println("sp=" + entry.name());
+        System.out.println("entity_id=" + entry.entityId());
+        System.out.println("client_ip=" + ip);
+        System.out.println("decision=" + decision.outcome());
+        System.out.println("rule=" + decision.rule());
+        System.out.println("configuration_changed=false");
+    }
+
+    private void mfaGlobalSet(final Options options) throws Exception {
+        options.allow(Set.of("default", "policy-order", "bypass-ips", "bypass-cidrs",
+            "approve-sha256"), Set.of("apply", "confirm-bypass", "clear-bypass-ips",
+                "clear-bypass-cidrs"));
+        if (options.has("bypass-ips") && options.flag("clear-bypass-ips")) {
+            throw new IllegalArgumentException(
+                "--bypass-ips and --clear-bypass-ips cannot be used together");
+        }
+        if (options.has("bypass-cidrs") && options.flag("clear-bypass-cidrs")) {
+            throw new IllegalArgumentException(
+                "--bypass-cidrs and --clear-bypass-cidrs cannot be used together");
+        }
+        if (!options.has("default") && !options.has("policy-order")
+                && !options.has("bypass-ips") && !options.has("bypass-cidrs")
+                && !options.flag("clear-bypass-ips")
+                && !options.flag("clear-bypass-cidrs")) {
+            throw new IllegalArgumentException("mfa global set requires at least one setting");
+        }
+
+        final GraphicalMatrixSpRegistry currentRegistry = registry();
+        GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+            config.mfaPolicyPath(), currentRegistry.entries());
+        final GraphicalMatrixMfaPolicyConfig.Settings current =
+            GraphicalMatrixMfaPolicyConfig.load(config.mfaPolicyPath());
+        final List<String> bypassIps = options.flag("clear-bypass-ips") ? List.of()
+            : options.has("bypass-ips") ? csv(options.value("bypass-ips", ""))
+            : current.bypassIps();
+        final List<String> bypassCidrs = options.flag("clear-bypass-cidrs") ? List.of()
+            : options.has("bypass-cidrs") ? csv(options.value("bypass-cidrs", ""))
+            : current.bypassCidrs();
+        if (options.has("bypass-ips") && bypassIps.isEmpty()) {
+            throw new IllegalArgumentException(
+                "--bypass-ips must not be empty; use --clear-bypass-ips to remove all values");
+        }
+        if (options.has("bypass-cidrs") && bypassCidrs.isEmpty()) {
+            throw new IllegalArgumentException(
+                "--bypass-cidrs must not be empty; use --clear-bypass-cidrs to remove all values");
+        }
+        final GraphicalMatrixMfaPolicyConfig.Settings proposed =
+            new GraphicalMatrixMfaPolicyConfig.Settings(
+                options.value("default", current.defaultPolicy()),
+                options.value("policy-order", current.policyOrder()),
+                bypassIps, bypassCidrs, current.useForwardedFor());
+        final byte[] rendered = GraphicalMatrixMfaPolicyConfig.render(
+            config.mfaPolicyPath(), proposed);
+        final String digest = GraphicalMatrixMfaPolicyConfig.sha256(rendered);
+        final boolean bypassRisk = (!"bypass".equals(current.defaultPolicy())
+                && "bypass".equals(proposed.defaultPolicy()))
+            || !current.policyOrder().equals(proposed.policyOrder())
+            || addsValues(current.bypassIps(), proposed.bypassIps())
+            || addsValues(current.bypassCidrs(), proposed.bypassCidrs());
+        if (bypassRisk && options.apply() && !options.flag("confirm-bypass")) {
+            throw new IllegalArgumentException(
+                "this global MFA change can bypass authentication; add --confirm-bypass");
+        }
+
+        printGlobalMfaPlan(current, proposed, digest, options);
+        if (!options.apply()) {
+            return;
+        }
+        requirePlanDigest(options, digest);
+        applyMfaPolicy("MFA_GLOBAL_SET", rendered,
+            "plan_sha256=" + digest);
+    }
+
+    private void mfaReconcile(final Options options) throws Exception {
+        options.allow(Set.of("approve-sha256"), Set.of("apply", "from-registry"));
+        if (!options.flag("from-registry")) {
+            throw new IllegalArgumentException("mfa reconcile requires --from-registry");
+        }
+        final GraphicalMatrixSpRegistry current = registry();
+        final List<String> drift = GraphicalMatrixSpMfaConfig.managedDrift(
+            config.mfaPolicyPath(), current.entries());
+        System.out.println("mode=" + mode(options));
+        System.out.println("action=MFA_RECONCILE_FROM_REGISTRY");
+        if (drift.isEmpty()) {
+            System.out.println("result=NO_CHANGE");
+            return;
+        }
+        for (final String item : drift) {
+            System.out.println("drift=" + item);
+        }
+        final byte[] rendered = GraphicalMatrixSpMfaConfig.renderContent(
+            config.mfaPolicyPath(), current.entries(), current.entries(), null)
+            .getBytes(StandardCharsets.UTF_8);
+        final String digest = GraphicalMatrixMfaPolicyConfig.sha256(rendered);
+        System.out.println("plan_sha256=" + digest);
+        if (!options.apply()) {
+            System.out.println("approval_required=--approve-sha256 " + digest);
+            return;
+        }
+        requirePlanDigest(options, digest);
+        applyMfaPolicy("MFA_RECONCILE", rendered,
+            "source=registry plan_sha256=" + digest);
+    }
+
+    private void applyMfaPolicy(final String event, final byte[] rendered,
+            final String detail) throws Exception {
+        final Snapshot snapshot = snapshot(config.mfaPolicyPath());
+        try {
+            atomicWrite(config.mfaPolicyPath(), rendered);
+            GraphicalMatrixMfaPolicyConfig.load(config.mfaPolicyPath());
+            secureMfaPolicy();
+            audit(event, "-", "-", "OK", detail);
+            System.out.println("result=APPLY_OK");
+            System.out.println("restart_required=false");
+        } catch (Exception ex) {
+            snapshot.restore();
+            secureMfaPolicy();
+            audit(event, "-", "-", "FAILED", rootMessage(ex));
+            throw ex;
+        }
+    }
+
+    private void secureMfaPolicy() {
+        if (!config.runtimeGroup().isBlank()) {
+            setRuntimeGroup(config.mfaPolicyPath());
+        }
+        setPermissions(config.mfaPolicyPath(), "rw-r-----");
+    }
+
+    private static boolean addsValues(final List<String> current, final List<String> proposed) {
+        return proposed.stream().anyMatch(value -> !current.contains(value));
+    }
+
+    private static void printGlobalMfaPlan(
+            final GraphicalMatrixMfaPolicyConfig.Settings current,
+            final GraphicalMatrixMfaPolicyConfig.Settings proposed,
+            final String digest, final Options options) {
+        System.out.println("mode=" + mode(options));
+        System.out.println("action=MFA_GLOBAL_SET");
+        System.out.println("default_current=" + current.defaultPolicy());
+        System.out.println("default_new=" + proposed.defaultPolicy());
+        System.out.println("policy_order_current=" + current.policyOrder());
+        System.out.println("policy_order_new=" + proposed.policyOrder());
+        System.out.println("bypass_ips_current=" + String.join(",", current.bypassIps()));
+        System.out.println("bypass_ips_new=" + String.join(",", proposed.bypassIps()));
+        System.out.println("bypass_cidrs_current=" + String.join(",", current.bypassCidrs()));
+        System.out.println("bypass_cidrs_new=" + String.join(",", proposed.bypassCidrs()));
+        System.out.println("plan_sha256=" + digest);
+        if (!options.apply()) {
+            System.out.println("approval_required=--approve-sha256 " + digest);
+        }
+    }
+
+    private static void requirePlanDigest(final Options options, final String digest) {
+        if (!digest.equalsIgnoreCase(options.value("approve-sha256", ""))) {
+            throw new IllegalArgumentException(
+                "--approve-sha256 must match displayed plan_sha256");
+        }
+    }
+
     private void setEnabled(final Options options, final boolean enable) throws Exception {
         options.allow(Set.of(), Set.of("apply"));
         final String name = onePositional(options, (enable ? "enable" : "disable") + " NAME");
@@ -572,6 +779,8 @@ public final class GraphicalMatrixSpManagementTool {
         if (!name.equals(options.value("confirm", ""))) {
             throw new IllegalArgumentException("--confirm must exactly match SP name: " + name);
         }
+        GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+            config.mfaPolicyPath(), oldRegistry.entries());
         final GraphicalMatrixSpRegistry newRegistry = oldRegistry.copy();
         newRegistry.remove(name);
         final GraphicalMatrixSpRegistry.Entry removed = current.withStatus("REMOVED", Instant.now())
@@ -756,6 +965,8 @@ public final class GraphicalMatrixSpManagementTool {
         if (!current.entityId().equals(options.value("confirm", ""))) {
             throw new IllegalArgumentException("--confirm must exactly match entityID");
         }
+        GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+            config.mfaPolicyPath(), oldRegistry.entries());
         if (!current.entityId().equals(target.entityId()) || !current.name().equals(target.name())) {
             throw new IllegalStateException("revision identity does not match current registry entry");
         }
@@ -808,6 +1019,8 @@ public final class GraphicalMatrixSpManagementTool {
         if (!current.entityId().equals(options.value("confirm", ""))) {
             throw new IllegalArgumentException("--confirm must exactly match entityID");
         }
+        GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+            config.mfaPolicyPath(), oldRegistry.entries());
         final Path originalRevision = revisionDirectory(name, 1).resolve("metadata.xml");
         if (!Files.isRegularFile(originalRevision)) {
             throw new IllegalStateException("legacy-original metadata revision is missing");
@@ -849,6 +1062,8 @@ public final class GraphicalMatrixSpManagementTool {
     private void applyEntry(final String event, final GraphicalMatrixSpRegistry oldRegistry,
             final GraphicalMatrixSpRegistry.Entry proposed, final byte[] metadata,
             final String detail) throws Exception {
+        GraphicalMatrixSpMfaConfig.requireNoManagedDrift(
+            config.mfaPolicyPath(), oldRegistry.entries());
         final Snapshot snapshot = snapshot(config.registryPath(), config.attributeFilterPath(),
             config.mfaPolicyPath(), managedMetadataPath(proposed.entityId(), true),
             managedMetadataPath(proposed.entityId(), false));
@@ -1321,16 +1536,13 @@ public final class GraphicalMatrixSpManagementTool {
     private void audit(final String event, final String name, final String entityId,
             final String result, final String detail) {
         try {
-            Files.createDirectories(config.auditLogPath().getParent());
             final String actor = System.getenv().getOrDefault("SUDO_USER",
                 System.getenv().getOrDefault("USER", "unknown"));
             final String line = "ts=" + Instant.now() + " event=" + token(event)
                 + " actor=" + token(actor) + " name=" + token(name)
                 + " entity_id=" + token(entityId) + " result=" + token(result)
                 + " detail=" + token(detail) + System.lineSeparator();
-            Files.writeString(config.auditLogPath(), line, StandardCharsets.UTF_8,
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
-            setPermissions(config.auditLogPath(), "rw-r-----");
+            GraphicalMatrixSpFiles.appendAudit(config.auditLogPath(), line);
         } catch (Exception ex) {
             System.err.println("WARN: unable to write SP management audit log: " + rootMessage(ex));
         }
@@ -1562,7 +1774,7 @@ public final class GraphicalMatrixSpManagementTool {
         System.err.println("Usage: GraphicalMatrixSpManagementTool IDP_HOME COMMAND [OPTIONS]");
         System.err.println("Commands: status, list, next, init, add, update, set-attributes, set-mfa,");
         System.err.println("          disable, enable, remove, verify, check-update, adopt, history,");
-        System.err.println("          rollback, restore-legacy, access, attributes");
+        System.err.println("          rollback, restore-legacy, access, attributes, mfa");
     }
 
     private record Options(Map<String, List<String>> values, Set<String> flags,
@@ -1571,7 +1783,8 @@ public final class GraphicalMatrixSpManagementTool {
             final Map<String, List<String>> values = new LinkedHashMap<>();
             final Set<String> flags = new LinkedHashSet<>();
             final List<String> positionals = new ArrayList<>();
-            final Set<String> booleanOptions = Set.of("apply", "all", "confirm-bypass");
+            final Set<String> booleanOptions = Set.of("apply", "all", "confirm-bypass",
+                "clear-bypass-ips", "clear-bypass-cidrs", "from-registry");
             for (int i = 0; i < args.length; i++) {
                 final String argument = args[i];
                 if (!argument.startsWith("--")) {

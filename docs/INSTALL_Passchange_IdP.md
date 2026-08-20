@@ -197,6 +197,12 @@ registration URLへ同一originで遷移できるため、別SP方式より安�
 今回追加したAdministrative Flowはcredential登録処理そのものを置き換えない。既存WebAuthnの
 RP ID、origin、管理用登録URLの認証・認可条件を事前に確認する。
 
+2FAS-KWはWebAuthn選択時に現在のMFA方式を即時変更せず、一回限りの登録要求をHTTP sessionに
+保存して公式登録flowへ遷移する。Shibboleth WebAuthn Plugin 1.3.0以上の
+`AddKeyAuditSuccessHook`がcredential保存成功を通知した後、認証済み利用者、登録期限、
+登録開始時のMFA方式が一致した場合だけ`WebAuthn`へ切り替える。登録中断・失敗時は
+元のMFA方式が残るため、credential未登録の`WebAuthn`だけが残る状態を作らない。
+
 ## 7. ソースコード変更設計
 
 ### 7.1 認証検査とhandoff
@@ -453,12 +459,14 @@ GraphicalMatrix sequence、選択画像列、TOTP seed、WebAuthn credential、L
 - TOTPを現在のMFA方式にした利用者の強制再認証。
 - WebAuthnを現在のMFA方式にした利用者の強制再認証。
 - DB保存とLDAP保存それぞれでのsequenceおよびMFA方式更新。
-- TOTP/WebAuthn登録開始後の完了、取消および自己管理画面への復帰。
+- TOTP/WebAuthn登録開始後の完了と取消。WebAuthnでは完了後のMFA方式切替えと、
+  中断時に元のMFA方式が維持されることを確認する。
 
 ### 別フェーズ
 
 - TOTP登録を自己管理画面内で完結させる専用遷移と取消処理。
 - WebAuthn registration完了後に自己管理メニューへ戻す専用遷移。
+  MFA方式の安全な切替えは実装済みであり、ここでは完了後の導線のみを対象とする。
 - MFA喪失時の管理者復旧機能。
 
 ## 12. トラブルシューティング

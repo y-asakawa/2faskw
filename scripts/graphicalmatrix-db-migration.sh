@@ -2,6 +2,7 @@
 set -euo pipefail
 
 IDP_HOME="/opt/shibboleth-idp"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 H2_JAR=""
 H2_PROPERTIES=""
 H2_URL=""
@@ -39,7 +40,6 @@ Options:
   --h2-properties FILE    Source H2 db.properties. Optional.
   --h2-url URL            Source H2 JDBC URL.
   --h2-user USER          Source H2 user. Default: sa
-  --h2-password VALUE     Source H2 password.
   --h2-password-file FILE Source H2 password file.
   --pg-properties FILE    Target PostgreSQL db.properties.
                            Default: $IDP_HOME/conf/graphicalmatrix/db.properties
@@ -117,6 +117,23 @@ require_h2() {
   [[ -n "$H2_URL" ]] || die "H2 URL is empty"
 }
 
+h2_tool_classpath() {
+  local candidate
+  if [[ -n "${H2_TOOL_CP:-}" ]]; then
+    printf '%s:%s' "$H2_TOOL_CP" "$H2_JAR"
+    return
+  fi
+  for candidate in \
+      "$SCRIPT_DIR"/../lib/2faskw-idp-plugin-*.jar \
+      "$IDP_HOME"/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar; do
+    if [[ -s "$candidate" ]]; then
+      printf '%s:%s' "$candidate" "$H2_JAR"
+      return
+    fi
+  done
+  die "2FAS-KW plugin jar containing GraphicalMatrixH2Command was not found"
+}
+
 require_postgresql() {
   command -v psql >/dev/null 2>&1 || die "psql not found"
   [[ "$PG_URL" == jdbc:postgresql:* ]] || die "PostgreSQL JDBC URL is invalid or missing in $PG_PROPERTIES"
@@ -124,11 +141,11 @@ require_postgresql() {
 }
 
 run_h2_sql_current_user() {
-  java -cp "$H2_JAR" org.h2.tools.Shell \
-    -url "$H2_URL" \
-    -user "$H2_USER" \
-    -password "$H2_PASSWORD" \
-    -sql "$1"
+  local cp
+  cp="$(h2_tool_classpath)"
+  printf '%s\n' "$H2_PASSWORD" | java -cp "$cp" \
+    io.github.yasakawa.faskw.GraphicalMatrixH2Command \
+    sql "$H2_URL" "$H2_USER" "$1"
 }
 
 run_h2_sql() {
@@ -136,8 +153,11 @@ run_h2_sql() {
   if [[ "$(id -un)" == "jetty" ]]; then
     run_h2_sql_current_user "$1"
   else
-    sudo -u jetty env H2_JAR="$H2_JAR" H2_URL="$H2_URL" H2_USER="$H2_USER" H2_PASSWORD="$H2_PASSWORD" \
-      bash -c 'java -cp "$H2_JAR" org.h2.tools.Shell -url "$H2_URL" -user "$H2_USER" -password "$H2_PASSWORD" -sql "$1"' _ "$1"
+    local cp
+    cp="$(h2_tool_classpath)"
+    printf '%s\n' "$H2_PASSWORD" | sudo -u jetty java -cp "$cp" \
+      io.github.yasakawa.faskw.GraphicalMatrixH2Command \
+      sql "$H2_URL" "$H2_USER" "$1"
   fi
 }
 
@@ -421,10 +441,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --h2-user)
       H2_USER="${2:-}"
-      shift 2
-      ;;
-    --h2-password)
-      H2_PASSWORD="${2:-}"
       shift 2
       ;;
     --h2-password-file)

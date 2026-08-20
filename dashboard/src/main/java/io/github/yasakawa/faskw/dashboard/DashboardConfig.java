@@ -42,6 +42,8 @@ public record DashboardConfig(
         String remoteUserHeader,
         String roleHeader,
         Path rolesFile,
+        String proxySecretHeader,
+        Path proxySecretFile,
         String localAllowedCidrs,
         String localRole,
         boolean exportEnabled,
@@ -74,7 +76,7 @@ public record DashboardConfig(
         return load(path, false);
     }
 
-    private static DashboardConfig load(final Path path, final boolean validateIngestTls)
+    private static DashboardConfig load(final Path path, final boolean validateRuntimeCredentials)
             throws IOException {
         final Properties properties = loadProperties(path);
         final DashboardConfig config = new DashboardConfig(
@@ -101,6 +103,10 @@ public record DashboardConfig(
                 value(properties, "dashboard.auth.roleHeader", "X-2FASKW-Role"),
                 Path.of(value(properties, "dashboard.auth.rolesFile",
                         "/etc/2faskw-dashboard/roles.properties")),
+                value(properties, "dashboard.auth.proxySecretHeader",
+                        "X-2FASKW-Proxy-Secret"),
+                Path.of(value(properties, "dashboard.auth.proxySecretFile",
+                        "/etc/2faskw-dashboard/credentials/proxy.secret")),
                 value(properties, "dashboard.auth.localAllowedCIDRs", ""),
                 value(properties, "dashboard.auth.localRole", "DASHBOARD_VIEWER")
                         .toUpperCase(Locale.ROOT),
@@ -118,7 +124,7 @@ public record DashboardConfig(
                 optionalPath(properties, "dashboard.ingest.trustStorePasswordFile"),
                 integer(properties, "dashboard.health.staleEventSeconds", 900, 30, 86400),
                 integer(properties, "dashboard.health.parseFailureWarningCount", 1, 1, 1000000));
-        config.validate(validateIngestTls);
+        config.validate(validateRuntimeCredentials);
         return config;
     }
 
@@ -126,7 +132,7 @@ public record DashboardConfig(
         validate(true);
     }
 
-    private void validate(final boolean validateIngestTls) throws IOException {
+    private void validate(final boolean validateRuntimeCredentials) throws IOException {
         final InetAddress bind = InetAddress.getByName(bindAddress);
         if (!List.of("none", "local", "proxy").contains(authMode)) {
             throw new IllegalArgumentException(
@@ -156,6 +162,29 @@ public record DashboardConfig(
                     trustedProxies,
                     "dashboard.auth.trustedProxies",
                     false);
+            validateHeaderName(remoteUserHeader, "dashboard.auth.remoteUserHeader");
+            validateHeaderName(roleHeader, "dashboard.auth.roleHeader");
+            validateHeaderName(proxySecretHeader, "dashboard.auth.proxySecretHeader");
+            if (proxySecretHeader.equalsIgnoreCase(remoteUserHeader)
+                    || proxySecretHeader.equalsIgnoreCase(roleHeader)) {
+                throw new IllegalArgumentException(
+                        "dashboard.auth.proxySecretHeader must be distinct from identity headers");
+            }
+            if (validateRuntimeCredentials) {
+                if (!Files.isRegularFile(proxySecretFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        || Files.isSymbolicLink(proxySecretFile)
+                        || !Files.isReadable(proxySecretFile)) {
+                    throw new IllegalArgumentException(
+                            "dashboard proxy secret file is missing, unreadable, or unsafe: "
+                                    + proxySecretFile);
+                }
+                final String secret = Files.readString(proxySecretFile).strip();
+                if (secret.length() < 32 || secret.length() > 512
+                        || secret.chars().anyMatch(Character::isISOControl)) {
+                    throw new IllegalArgumentException(
+                            "dashboard proxy secret must contain 32 to 512 non-control characters");
+                }
+            }
         }
         if (pageSize > maxPageSize) {
             throw new IllegalArgumentException(
@@ -173,7 +202,7 @@ public record DashboardConfig(
             if (!requireMtls) {
                 throw new IllegalArgumentException("dashboard ingest requires mTLS");
             }
-            if (validateIngestTls) {
+            if (validateRuntimeCredentials) {
                 for (Path required : new Path[] {
                         ingestKeyStore,
                         ingestKeyStorePasswordFile,
@@ -185,6 +214,12 @@ public record DashboardConfig(
                     }
                 }
             }
+        }
+    }
+
+    private static void validateHeaderName(final String value, final String property) {
+        if (!value.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) {
+            throw new IllegalArgumentException(property + " must be a valid HTTP header name");
         }
     }
 

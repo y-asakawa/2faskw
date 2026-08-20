@@ -83,7 +83,13 @@ final class GraphicalMatrixRepositoryStateTest {
 
         assertTrue(repository.updateMfaMethod("alice", "TOTP", 1250L));
         final GraphicalMatrixEnrollment methodChanged = repository.findEnrollment("alice");
+        assertEquals("TOTP", methodChanged.getMfaMethod());
         assertEquals(verified.getStateVersion() + 1, methodChanged.getStateVersion());
+        final GraphicalMatrixVerifyResult staleFactor = repository.verifyForSequenceChange(
+            "alice", List.of("g1"), List.of("g1", "g2"), 1300L,
+            new GraphicalMatrixLockoutPolicy(3, 120000L, 6, 3600000L), true, false);
+        assertEquals("ENROLL_REQUIRED", staleFactor.getAuditResult());
+        assertEquals("not_graphicalmatrix_method", staleFactor.getAuditDetail());
         assertFalse(repository.updateSequence("alice", List.of("g2"), 1400L,
             verified.getStateVersion(), true, false));
 
@@ -126,6 +132,25 @@ final class GraphicalMatrixRepositoryStateTest {
     }
 
     @Test
+    void webAuthnActivationRequiresTheMethodUsedToAuthorizeRegistration() throws Exception {
+        assertFalse(repository.activateWebAuthnIfMethodCurrent(
+            "alice", "TOTP", 1200L));
+        assertEquals("GraphicalMatrix", findMethod("alice"));
+
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE graphicalmatrix_enrollment "
+                 + "SET state_version = state_version + 1 WHERE user_id = ?")) {
+            statement.setString(1, "alice");
+            statement.executeUpdate();
+        }
+
+        assertTrue(repository.activateWebAuthnIfMethodCurrent(
+            "alice", "GraphicalMatrix", 1300L));
+        assertEquals("WebAuthn", findMethod("alice"));
+    }
+
+    @Test
     void totpRegistrationDoesNotStartOrActivateWhileLocked() throws Exception {
         configureTotpPending("alice", 5000L);
 
@@ -136,6 +161,18 @@ final class GraphicalMatrixRepositoryStateTest {
         assertFalse(result.isSuccess());
         assertEquals("LOCKED", result.getAuditResult());
         assertEquals("PENDING", findTotpStatus("alice"));
+    }
+
+    @Test
+    void totpRegistrationAdvancesEnrollmentStateVersion() throws Exception {
+        assertTrue(repository.updateMfaMethod("alice", "TOTP", 1100L));
+        final long beforePrepare = repository.findEnrollment("alice").getStateVersion();
+
+        final String seed = repository.prepareTotpRegistration("alice", 1200L);
+
+        assertTrue(seed != null && !seed.isEmpty());
+        assertEquals(beforePrepare + 1,
+            repository.findEnrollment("alice").getStateVersion());
     }
 
     @Test

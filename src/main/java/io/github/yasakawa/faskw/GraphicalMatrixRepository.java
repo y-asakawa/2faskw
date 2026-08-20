@@ -52,7 +52,8 @@ public final class GraphicalMatrixRepository {
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT sequence, status, failed_count, locked_until, force_sequence_change, state_version "
+                    "SELECT sequence, status, failed_count, locked_until, force_sequence_change, "
+                    + "state_version, mfa_method "
                     + "FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
                 ps.setString(1, user);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -63,7 +64,8 @@ public final class GraphicalMatrixRepository {
                             rs.getInt("failed_count"),
                             rs.getLong("locked_until"),
                             rs.getInt("force_sequence_change") != 0,
-                            rs.getLong("state_version")
+                            rs.getLong("state_version"),
+                            rs.getString("mfa_method")
                         );
                     }
                 }
@@ -154,7 +156,8 @@ public final class GraphicalMatrixRepository {
                 final String storedSeed = totpSeedStorage.encode(seed);
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
-                        + "SET totp_seed = ?, totp_status = 'PENDING', updated_at = ? "
+                        + "SET totp_seed = ?, totp_status = 'PENDING', updated_at = ?, "
+                        + "state_version = state_version + 1 "
                         + "WHERE user_id = ?")) {
                     up.setString(1, storedSeed);
                     up.setLong(2, now);
@@ -227,7 +230,8 @@ public final class GraphicalMatrixRepository {
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET totp_status = 'ACTIVE', totp_registered_at = ?, "
-                        + "last_success_at = ?, updated_at = ? "
+                        + "last_success_at = ?, updated_at = ?, "
+                        + "state_version = state_version + 1 "
                         + "WHERE user_id = ?")) {
                     up.setLong(1, now);
                     up.setLong(2, now);
@@ -336,6 +340,28 @@ public final class GraphicalMatrixRepository {
     public boolean updateMfaMethodIfCurrent(final String user, final String method, final long now,
             final long expectedStateVersion) throws Exception {
         return updateMfaMethod(user, method, now, Long.valueOf(expectedStateVersion));
+    }
+
+    public boolean activateWebAuthnIfMethodCurrent(final String user,
+            final String expectedMethod, final long now) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.activateWebAuthnIfMethodCurrent(user, expectedMethod, now);
+        }
+        try (Connection c = db()) {
+            initDbIfEnabled(c);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE graphicalmatrix_enrollment "
+                    + "SET mfa_method = 'WebAuthn', failed_count = 0, locked_until = 0, "
+                    + "state_version = state_version + 1, updated_at = ? "
+                    + "WHERE user_id = ? AND status = 'ACTIVE' "
+                    + "AND locked_until <= ? AND mfa_method = ?")) {
+                ps.setLong(1, now);
+                ps.setString(2, user);
+                ps.setLong(3, now);
+                ps.setString(4, expectedMethod);
+                return ps.executeUpdate() == 1;
+            }
+        }
     }
 
     private boolean updateMfaMethod(final String user, final String method, final long now,
@@ -468,7 +494,7 @@ public final class GraphicalMatrixRepository {
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
             throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT sequence, status, failed_count, locked_until "
+                "SELECT sequence, status, failed_count, locked_until, mfa_method "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
@@ -483,6 +509,10 @@ public final class GraphicalMatrixRepository {
 
                 if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
+                }
+                if (!"GRAPHICALMATRIX".equals(normalizeMethod(rs.getString("mfa_method")))) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "not_graphicalmatrix_method");
                 }
                 if (!sequenceStorage.acceptedForRuntime(sequence)) {
                     return GraphicalMatrixVerifyResult.enrollRequired(
@@ -549,7 +579,7 @@ public final class GraphicalMatrixRepository {
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
             throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT sequence, status, failed_count, locked_until "
+                "SELECT sequence, status, failed_count, locked_until, mfa_method "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
@@ -564,6 +594,10 @@ public final class GraphicalMatrixRepository {
 
                 if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
                     return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
+                }
+                if (!"GRAPHICALMATRIX".equals(normalizeMethod(rs.getString("mfa_method")))) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "not_graphicalmatrix_method");
                 }
                 if (!sequenceStorage.acceptedForRuntime(sequence)) {
                     return GraphicalMatrixVerifyResult.enrollRequired(

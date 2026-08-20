@@ -21,4 +21,8 @@
         </property>
     </bean>
 
+    <!-- The official WebAuthn Plugin invokes this only after credential persistence succeeds. -->
+    <bean id="shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook"
+        class="io.github.yasakawa.faskw.GraphicalMatrixWebAuthnRegistrationHook" />
+
 </beans>

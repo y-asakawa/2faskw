@@ -108,11 +108,6 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         }
 
         if ("WEBAUTHN".equals(normalized)) {
-            if (isWebAuthnRegistrationRequest()) {
-                LOG.info("MFA method decision: user={}, sp={}, ip={}, method={}, registration=true, flow={}",
-                    user, relyingPartyId, clientIp, normalized, EXTERNAL_FLOW);
-                return EXTERNAL_FLOW;
-            }
             LOG.info("MFA method decision: user={}, sp={}, ip={}, method={}, flow={}",
                 user, relyingPartyId, clientIp, normalized, WEBAUTHN_FLOW);
             return WEBAUTHN_FLOW;
@@ -199,12 +194,6 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
             return "";
         }
         return trim(header.split(",")[0]);
-    }
-
-    private static boolean isWebAuthnRegistrationRequest() {
-        final HttpServletRequest request = HttpServletRequestResponseContext.getRequest();
-        final String uri = request != null ? trim(request.getRequestURI()) : "";
-        return uri.contains("/profile/admin/webauthn-registration");
     }
 
     static boolean spCidrMatches(final String rules, final String relyingPartyId, final String ip) {

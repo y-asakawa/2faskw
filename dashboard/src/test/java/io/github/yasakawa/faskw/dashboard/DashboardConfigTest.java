@@ -29,6 +29,34 @@ class DashboardConfigTest {
     Path temporary;
 
     @Test
+    void proxyAuthenticationRequiresAStrongReadableSecret() throws Exception {
+        final Path missing = temporary.resolve("proxy-missing.properties");
+        Files.writeString(missing, """
+                dashboard.enabled=false
+                dashboard.http.bindAddress=127.0.0.1
+                dashboard.auth.mode=proxy
+                dashboard.auth.proxySecretFile=%s
+                dashboard.ingest.enabled=false
+                dashboard.storage.path=%s
+                """.formatted(temporary.resolve("missing.secret"),
+                    temporary.resolve("proxy-missing")));
+        assertThrows(IllegalArgumentException.class, () -> DashboardConfig.load(missing));
+
+        final Path weakSecret = Files.writeString(temporary.resolve("weak.secret"), "too-short");
+        final Path weak = temporary.resolve("proxy-weak.properties");
+        Files.writeString(weak, Files.readString(missing).replace(
+            temporary.resolve("missing.secret").toString(), weakSecret.toString()));
+        assertThrows(IllegalArgumentException.class, () -> DashboardConfig.load(weak));
+
+        final Path strongSecret = Files.writeString(temporary.resolve("strong.secret"),
+            "strong-proxy-secret-12345678901234567890\n");
+        final Path valid = temporary.resolve("proxy-valid.properties");
+        Files.writeString(valid, Files.readString(missing).replace(
+            temporary.resolve("missing.secret").toString(), strongSecret.toString()));
+        assertEquals(strongSecret, DashboardConfig.load(valid).proxySecretFile());
+    }
+
+    @Test
     void permitsNoneAuthenticationOnlyOnLoopback() throws Exception {
         final Path valid = temporary.resolve("valid.properties");
         Files.writeString(valid, """

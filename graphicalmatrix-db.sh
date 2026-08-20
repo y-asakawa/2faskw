@@ -187,7 +187,7 @@ Environment:
   GRAPHICALMATRIX_TIME_ZONE
                   optional IANA time zone used for displayed timestamps.
                   Defaults to the operating system time zone, then UTC.
-  SEQUENCE_TOOL_CP optional explicit classpath for Java sequence/export tools
+  SEQUENCE_TOOL_CP optional explicit classpath for Java sequence/export/H2 tools
 
 CSV format:
   action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
@@ -847,22 +847,34 @@ display_time_zone() {
   printf '%s\n' "$zone"
 }
 
-run_sql_h2_as_current_user() {
-  java -cp "$H2_JAR" org.h2.tools.Shell \
-    -url "$db_url" \
-    -user "$db_user" \
-    -password "$db_password" \
-    -sql "$1"
+h2_tool_classpath() {
+  local cp
+  cp="$(sequence_tool_classpath)"
+  if [[ ":$cp:" != *":$H2_JAR:"* ]]; then
+    cp="$cp:$H2_JAR"
+  fi
+  printf '%s' "$cp"
+}
+
+run_h2_tool() {
+  local mode="$1"
+  local payload="$2"
+  local cp
+  [[ -s "$H2_JAR" ]] || die "H2 jar not found: $H2_JAR"
+  cp="$(h2_tool_classpath)"
+  if [[ "$(id -un)" == "jetty" ]]; then
+    printf '%s\n' "$db_password" | java -cp "$cp" \
+      io.github.yasakawa.faskw.GraphicalMatrixH2Command \
+      "$mode" "$db_url" "$db_user" "$payload"
+  else
+    printf '%s\n' "$db_password" | sudo -u jetty java -cp "$cp" \
+      io.github.yasakawa.faskw.GraphicalMatrixH2Command \
+      "$mode" "$db_url" "$db_user" "$payload"
+  fi
 }
 
 run_sql_h2() {
-  [[ -s "$H2_JAR" ]] || die "H2 jar not found: $H2_JAR"
-  if [[ "$(id -un)" == "jetty" ]]; then
-    run_sql_h2_as_current_user "$1"
-  else
-    sudo -u jetty env H2_JAR="$H2_JAR" DB_URL="$db_url" DB_USER="$db_user" DB_PASSWORD="$db_password" \
-      bash -c 'java -cp "$H2_JAR" org.h2.tools.Shell -url "$DB_URL" -user "$DB_USER" -password "$DB_PASSWORD" -sql "$1"' _ "$1"
-  fi
+  run_h2_tool sql "$1"
 }
 
 run_sql_postgresql() {
@@ -884,23 +896,8 @@ run_sql() {
   fi
 }
 
-run_sql_file_h2_as_current_user() {
-  java -cp "$H2_JAR" org.h2.tools.RunScript \
-    -url "$db_url" \
-    -user "$db_user" \
-    -password "$db_password" \
-    -script "$1"
-}
-
 run_sql_file_h2() {
-  local sql_file="$1"
-  [[ -s "$H2_JAR" ]] || die "H2 jar not found: $H2_JAR"
-  if [[ "$(id -un)" == "jetty" ]]; then
-    run_sql_file_h2_as_current_user "$sql_file"
-  else
-    sudo -u jetty env H2_JAR="$H2_JAR" DB_URL="$db_url" DB_USER="$db_user" DB_PASSWORD="$db_password" SQL_FILE="$sql_file" \
-      bash -c 'java -cp "$H2_JAR" org.h2.tools.RunScript -url "$DB_URL" -user "$DB_USER" -password "$DB_PASSWORD" -script "$SQL_FILE"'
-  fi
+  run_h2_tool script "$1"
 }
 
 run_sql_file_postgresql() {
@@ -933,23 +930,9 @@ run_scalar_postgresql() {
     -c "$1"
 }
 
-run_scalar_h2_as_current_user() {
-  java -cp "$H2_JAR" org.h2.tools.Shell \
-    -url "$db_url" \
-    -user "$db_user" \
-    -password "$db_password" \
-    -sql "$1" \
-    | awk 'NF && $0 !~ /^initial_sequence[[:space:]]*$/ && $0 !~ /^\([0-9]+ row/ && $0 !~ /^\(Update count:/ { print; exit }'
-}
-
 run_scalar_h2() {
-  [[ -s "$H2_JAR" ]] || die "H2 jar not found: $H2_JAR"
-  if [[ "$(id -un)" == "jetty" ]]; then
-    run_scalar_h2_as_current_user "$1"
-  else
-    sudo -u jetty env H2_JAR="$H2_JAR" DB_URL="$db_url" DB_USER="$db_user" DB_PASSWORD="$db_password" \
-      bash -c 'java -cp "$H2_JAR" org.h2.tools.Shell -url "$DB_URL" -user "$DB_USER" -password "$DB_PASSWORD" -sql "$1" | awk '"'"'NF && $0 !~ /^initial_sequence[[:space:]]*$/ && $0 !~ /^\\([0-9]+ row/ && $0 !~ /^\\(Update count:/ { print; exit }'"'"'' _ "$1"
-  fi
+  run_h2_tool sql "$1" \
+    | awk 'NF && $0 !~ /^initial_sequence[[:space:]]*$/ && $0 !~ /^\([0-9]+ row/ && $0 !~ /^\(Update count:/ { print; exit }'
 }
 
 run_scalar() {
