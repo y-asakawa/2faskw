@@ -1,6 +1,11 @@
-# Audit Logrotate
+# 2FAS-KW Log Rotation
 
-この文書は GraphicalMatrix 監査ログの logrotate 設定例です。
+この文書は2FAS-KWが出力するファイルログのlogrotate設定例です。
+
+この設定例だけで2FAS-KW環境の全ログがローテーションされるわけではありません。
+SP管理、SP別属性アクセス制御、CSVプロビジョニング、Shibboleth IdP標準ログ、
+systemd journalも、それぞれの出力先と監査要件に応じて保持期間・圧縮・転送・削除を設定してください。
+ログ種別と出力元の一覧は[LOG-REFERENCE.md](./LOG-REFERENCE.md)を参照してください。
 
 GraphicalMatrix監査ログ:
 
@@ -11,12 +16,34 @@ GraphicalMatrix監査ログ:
 監査ログには、ユーザーID、接続元IP、認証結果、challenge ID、操作結果が含まれます。
 `sequence`、TOTP seed、API tokenは出力しない設計ですが、監査ログは認証ログとして保護してください。
 
+## 対象範囲と保持設定
+
+以下のログは出力元・実行ユーザー・保存先が異なるため、保持設定を個別に決める。
+2FAS-KW固有のファイルログ用サンプルはすべて`examples/logrotate/`に収録する。
+
+| ログ種別 | 既定パスまたは設定先 | サンプルまたは調整方法 |
+| --- | --- | --- |
+| GraphicalMatrix監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-audit.log` | `examples/logrotate/graphicalmatrix-audit` |
+| SP管理監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-sp-management-audit.log` | `examples/logrotate/graphicalmatrix-sp-management-audit`。SP管理CLIを使用する場合に適用する。 |
+| SP別アクセス制御監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-access-audit.log` | `examples/logrotate/graphicalmatrix-access-audit`。アクセス制御とdecision監査を有効化する場合に適用する。 |
+| CSVプロビジョニングログ | `graphicalmatrix.admin.csv.logFile`、既定 `/opt/graphicalmatrix-admin/logs/csv-import.log` | `examples/logrotate/graphicalmatrix-csv-import`。Admin Toolsを使用する場合に適用する。 |
+| Shibboleth IdP標準ログ | 通常は`/opt/shibboleth-idp/logs/idp-process.log`、`idp-warn.log`、`idp-audit.log` | IdPのlogback設定および既存OS設定を確認し、2FAS-KW用設定で無条件に上書きしない。 |
+| Jetty / Dashboardのjournal | `journalctl` / `journald` | logrotateではなく`journald.conf`、`journalctl --vacuum-*`、集中ログ転送の方針で保持期間を管理する。 |
+
+すべてのファイルログを単一のワイルドカード設定へまとめてはならない。`jetty`、`root`、
+Admin Tools実行ユーザーなどで所有者と書込み権限が異なるため、ログごとに対象パスと保存期間を
+確認する。サンプルはroot実行のlogrotateを前提にしている。
+
 ## 推奨設定
 
-配布物には以下のサンプルを含めます。
+配布物には以下のサンプルを含めます。必要なコンポーネントに対応するファイルだけを配置する。
 
 ```text
+examples/logrotate/README.md
 examples/logrotate/graphicalmatrix-audit
+examples/logrotate/graphicalmatrix-sp-management-audit
+examples/logrotate/graphicalmatrix-access-audit
+examples/logrotate/graphicalmatrix-csv-import
 ```
 
 内容:
@@ -32,8 +59,6 @@ examples/logrotate/graphicalmatrix-audit
     delaycompress
     dateext
     dateformat -%Y%m%d
-    create 0640 jetty jetty
-    su jetty jetty
 }
 ```
 
@@ -47,28 +72,38 @@ examples/logrotate/graphicalmatrix-audit
 - `compress`: 古いログをgzip圧縮する
 - `delaycompress`: 直近1世代は圧縮を遅らせる
 - `dateext`: rotated fileに日付を付ける
-- `create 0640 jetty jetty`: 新規ログファイルの権限と所有者
-- `su jetty jetty`: logrotate処理時の実行ユーザー/グループ
+- `copytruncate`使用時は`create`を指定しても効果がない。元ファイルのinode、所有者、権限を維持したままtruncateする
+- `su`を指定せず、OSのroot実行logrotateで処理する。親ログディレクトリの所有者を変更する必要はない
 
 ## 適用手順
 
-サンプルを `/etc/logrotate.d/` へ配置します。
+サンプルを `/etc/logrotate.d/` へ配置します。SP管理、アクセス制御、CSVを使用していない場合は、
+対応するファイルを配置しません。
 
 ```bash
 sudo install -m 0644 examples/logrotate/graphicalmatrix-audit \
   /etc/logrotate.d/graphicalmatrix-audit
+
+sudo install -m 0644 examples/logrotate/graphicalmatrix-sp-management-audit \
+  /etc/logrotate.d/graphicalmatrix-sp-management-audit
+
+sudo install -m 0644 examples/logrotate/graphicalmatrix-access-audit \
+  /etc/logrotate.d/graphicalmatrix-access-audit
+
+sudo install -m 0644 examples/logrotate/graphicalmatrix-csv-import \
+  /etc/logrotate.d/graphicalmatrix-csv-import
 ```
 
 設定確認:
 
 ```bash
-sudo logrotate -d /etc/logrotate.d/graphicalmatrix-audit
+sudo logrotate -d /etc/logrotate.d/graphicalmatrix-*
 ```
 
 強制ローテーションテスト:
 
 ```bash
-sudo logrotate -f /etc/logrotate.d/graphicalmatrix-audit
+sudo logrotate -f /etc/logrotate.d/graphicalmatrix-*
 ```
 
 確認:
@@ -76,6 +111,14 @@ sudo logrotate -f /etc/logrotate.d/graphicalmatrix-audit
 ```bash
 sudo ls -l /opt/shibboleth-idp/logs/graphicalmatrix-audit.log*
 sudo tail /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+```
+
+`daily`は日次ローテーションの判定であり、スケジューラを有効化する設定ではない。
+systemd timerを使用する環境では、少なくとも次を確認する。
+
+```bash
+sudo systemctl is-enabled logrotate.timer
+sudo systemctl list-timers logrotate.timer
 ```
 
 ## copytruncateを使う理由
@@ -91,21 +134,18 @@ GraphicalMatrix監査ログはアプリケーション側がファイルへ追�
 
 ## 権限
 
-推奨:
+アクティブなGraphicalMatrix監査ログはJetty実行ユーザーが追記できる必要がある。
+ファイルがまだ存在しない場合だけ、次のように作成する。
 
 ```bash
-sudo chown jetty:jetty /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
-sudo chmod 0640 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+sudo install -m 0640 -o jetty -g jetty /dev/null \
+  /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+sudo -u jetty test -w /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 ```
 
-ログディレクトリ:
-
-```bash
-sudo chown jetty:jetty /opt/shibboleth-idp/logs
-sudo chmod 0750 /opt/shibboleth-idp/logs
-```
-
-既存のIdPログ運用と競合しないようにしてください。
+`/opt/shibboleth-idp/logs` はIdP標準ログと共有するため、所有者・権限を2FAS-KWのためだけに
+変更してはならない。SP管理監査ログは通常rootで実行するCLIが、CSVログは
+`graphicalmatrix-admin`実行ユーザーが書き込む。各ログの書込み確認は、実際の実行ユーザーで行う。
 
 ## 保持期間
 
@@ -120,11 +160,11 @@ sudo chmod 0750 /opt/shibboleth-idp/logs
 ## 確認ポイント
 
 - `logrotate -d` がエラーなしで完了する
-- `logrotate -f` 後に新しい `graphicalmatrix-audit.log` が作成される
-- 新しいログの所有者が `jetty:jetty` である
-- 新しいログの権限が `0640` である
-- rotated fileが圧縮される
-- GraphicalMatrixログイン後、新しい `graphicalmatrix-audit.log` に追記される
+- `logrotate -f` 後もアクティブな `graphicalmatrix-audit.log` が存在し、既存の所有者・権限が維持される
+- 1回目のrotation後に日付付きファイルが作成される
+- `delaycompress`を使うため、圧縮済みの`.gz`は2回目以降のrotation後に確認する
+- GraphicalMatrixログイン後、truncateされた `graphicalmatrix-audit.log` に追記される
+- 有効なSP管理、アクセス制御、CSVの各ログでも同じ確認を行う
 
 ## トラブル時
 
@@ -132,7 +172,8 @@ sudo chmod 0750 /opt/shibboleth-idp/logs
 
 - `/opt/shibboleth-idp/logs` の所有者と権限を確認する
 - `graphicalmatrix-audit.log` の所有者と権限を確認する
-- `su jetty jetty` が環境のユーザー/グループと一致しているか確認する
+- `sudo -u jetty test -w /opt/shibboleth-idp/logs/graphicalmatrix-audit.log` を確認する
+- logrotateをrootで実行していることを確認する
 
 ログが追記されない場合:
 
@@ -149,8 +190,8 @@ sudo chmod 0750 /opt/shibboleth-idp/logs
 設定ファイル:
 logrotate -d 結果:
 logrotate -f 結果:
-新ログ所有者:
-新ログ権限:
+アクティブログ所有者:
+アクティブログ権限:
 ログ追記確認:
 備考:
 ```

@@ -370,7 +370,11 @@ check_package() {
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-security-upgrade.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-api-curl-test.sh"
   need_file "$PACKAGE_DIR/examples/webauthn-ldap-storage-config.xml"
+  need_file "$PACKAGE_DIR/examples/logrotate/README.md"
   need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-audit"
+  need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-sp-management-audit"
+  need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-access-audit"
+  need_file "$PACKAGE_DIR/examples/logrotate/graphicalmatrix-csv-import"
   if [[ -e "$PACKAGE_DIR/docs" ]]; then
     fail "package must not contain detailed docs directory: $PACKAGE_DIR/docs"
   else

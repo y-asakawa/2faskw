@@ -46,16 +46,19 @@ Firewall設定を環境に合わせて読み替えてください。
 
 ### IdP Plugin 配布物
 
-配布 ZIP を展開すると、以下の構成になります。
+配布ZIPを展開すると、以下の構成になります。将来の版では
+バージョン表記を実際の配布版へ読み替えてください。詳細文書はアーカイブに含めず、
+トップレベルの`README.md`からGitHub上の正本へ案内します。
 
 ```text
-2faskw-idp-plugin-1.0.1/
+2faskw-idp-plugin-1.x.x/
+  README.md
   LICENSE
   NOTICE
   THIRD-PARTY-NOTICES.md
 
   webapp/WEB-INF/lib/
-    2faskw-idp-plugin-1.0.1.jar
+    2faskw-idp-plugin-1.x.x.jar
     core-*.jar
     HikariCP-*.jar
     postgresql-*.jar
@@ -67,9 +70,18 @@ Firewall設定を環境に合わせて読み替えてください。
   conf/graphicalmatrix/
     graphicalmatrix.properties.idpnew
     db.properties.idpnew
+    ldap.properties.idpnew
+    webauthn-ldap.properties.idpnew
+    admin.properties.idpnew
     api.properties.idpnew
     mfa-policy.properties.idpnew
+    sp-management.properties.idpnew
     postgresql-schema.sql
+
+  conf/authn/
+    webauthn.properties.idpnew
+    webauthn-registration.properties.idpnew
+    webauthn-metadata.properties.idpnew
 
   conf/graphicalmatrix/assets/
     graphicalmatrix.css.idpnew
@@ -82,9 +94,11 @@ Firewall設定を環境に合わせて読み替えてください。
 
   bin/
     graphicalmatrix-db.sh
+    graphicalmatrix-sp.sh
     graphicalmatrix-db-migration.sh
     graphicalmatrix-api-token.sh
     graphicalmatrix-api-curl-test.sh
+    graphicalmatrix-security-upgrade.sh
     graphicalmatrix-plugin-check.sh
     graphicalmatrix-plugin-config.sh
     graphicalmatrix-plugin-uninstall.sh
@@ -100,46 +114,38 @@ Firewall設定を環境に合わせて読み替えてください。
     access-control.xml
     attribute-resolver.xml
     logrotate/
+      README.md
       graphicalmatrix-audit
+      graphicalmatrix-sp-management-audit
+      graphicalmatrix-access-audit
+      graphicalmatrix-csv-import
 
   plugin-metadata/
-    README.md
     graphicalmatrix-plugin.properties
     PACKAGE-CONTENTS.txt
     PACKAGE-MANIFEST.sha256
-
-  docs/
-    README.md
-    INSTALL.md
-    SECURITY.md
-    SECURITY-CHECKLIST.md
-    build.md
-    CONFIG-REFERENCE.md
-    API-TOKEN-ROTATION.md
-    API-CURL-TESTS.md
-    ADMIN-TOOLS.md
-    CSV-EXPORT.md
-    DB-MIGRATION.md
-    SEQUENCE-STORAGE-MIGRATION.md
-    LOGROTATE.md
-    INSTALL_LOADTEST.md
-    openapi.yaml
 ```
 
 ### Admin Tools 配布物
 
 管理CLIだけをDBサーバまたは管理端末へ導入する場合は、
-`2faskw-admin-tools-1.0.1.zip` を利用します。
+`2faskw-admin-tools-1.x.x.zip` を利用します。
 
 ```text
-2faskw-admin-tools-1.0.1/
+2faskw-admin-tools-1.x.x/
+  README.md
+  LICENSE
+  NOTICE
+  THIRD-PARTY-NOTICES.md
+
   bin/
     graphicalmatrix-db.sh
     graphicalmatrix-db-migration.sh
     graphicalmatrix-admin-install.sh
+    graphicalmatrix-csv-import-runner.sh
 
   lib/
-    2faskw-idp-plugin-1.0.1.jar
+    2faskw-idp-plugin-1.x.x.jar
     core-*.jar
     HikariCP-*.jar
     postgresql-*.jar
@@ -147,15 +153,21 @@ Firewall設定を環境に合わせて読み替えてください。
   conf/graphicalmatrix/
     db.properties.adminnew
     graphicalmatrix.properties.adminnew
+    ldap.properties.adminnew
+    admin.properties.adminnew
     postgresql-schema.sql
 
-  docs/
-    ADMIN-TOOLS.md
-    CSV-EXPORT.md
-    DB-MIGRATION.md
-    SEQUENCE-STORAGE-MIGRATION.md
-    SECURITY.md
-    SECURITY-CHECKLIST.md
+  examples/systemd/
+    graphicalmatrix-csv-import.path
+    graphicalmatrix-csv-import.service
+
+  examples/logrotate/
+    README.md
+    graphicalmatrix-csv-import
+
+  package-metadata/
+    PACKAGE-CONTENTS.txt
+    PACKAGE-MANIFEST.sha256
 ```
 
 Admin ToolsはJetty、`web.xml`、Shibboleth IdP設定を変更しません。
@@ -192,9 +204,9 @@ MFA連携:
 - API用Bearer token
 - 管理ネットワークまたはIP制限
 - FirewallまたはLBによるアクセス制限
-- `docs/openapi.yaml` に定義されたAPI仕様の確認
-- `docs/API-TOKEN-ROTATION.md` に定義されたtoken rotation手順の確認
-- `docs/API-CURL-TESTS.md` に定義されたcurlテスト手順の確認
+- [OpenAPI仕様](./openapi.yaml)の確認
+- [API token rotation手順](./API-TOKEN-ROTATION.md)の確認
+- [API curlテスト手順](./API-CURL-TESTS.md)の確認
 
 管理CLIだけを使う場合:
 
@@ -248,9 +260,8 @@ test -f /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml
 ## 2. 配布物展開
 
 ```bash
-cd /tmp
-unzip 2faskw-idp-plugin-1.0.1.zip
-cd 2faskw-idp-plugin-1.0.1
+unzip 2faskw-idp-plugin-1.x.x.zip
+cd 2faskw-idp-plugin-1.x.x
 ```
 
 ## 3. 配布物の完全性確認
@@ -274,8 +285,26 @@ macOSなど `sha256sum` がない環境では `shasum -a 256` を利用してく
 注意:
 
 - `PACKAGE-MANIFEST.sha256` は展開後のファイル確認用です
-- 外部配布時は別途、配布ZIP自体の署名と公開鍵検証を用意してください
-- `bootstrap/keys.txt` はPoC placeholderです
+- 配布ZIP自体の真正性は、次の署名検証で確認します
+
+### 配布ZIPの署名検証
+
+リリースページから、同じ版のZIPと`ZIP.asc`を取得します。`gpg`が必要です。
+`bootstrap/keys.txt`に含まれる公開鍵のfingerprintは、GitHub Release以外の
+信頼できる経路でも確認してから受け入れてください。
+
+```bash
+VERIFY_HOME="$(mktemp -d)"
+chmod 0700 "$VERIFY_HOME"
+
+gpg --homedir "$VERIFY_HOME" --batch --import bootstrap/keys.txt
+gpg --homedir "$VERIFY_HOME" --batch --verify "${ARCHIVE}.asc" "$ARCHIVE"
+
+rm -rf "$VERIFY_HOME"
+```
+
+`Good signature`が表示され、確認済みfingerprintの公開鍵で検証できれば成功です。
+署名エラーまたはfingerprint不一致の場合は導入を中止してください。
 
 ## 4. package check
 
@@ -285,8 +314,8 @@ macOSなど `sha256sum` がない環境では `shasum -a 256` を利用してく
 ```
 
 このコマンドは、展開済み配布物ディレクトリ
-`2faskw-idp-plugin-1.0.1` の中で実行してください。
-別ディレクトリから実行する場合だけ、`--package-dir /path/to/2faskw-idp-plugin-1.0.1`
+`2faskw-idp-plugin-1.x.x` の中で実行してください。
+別ディレクトリから実行する場合だけ、`--package-dir /path/to/2faskw-idp-plugin-1.x.x`
 を指定します。
 
 ビルドサーバや手元の端末で配布物だけ確認する場合:
@@ -381,13 +410,13 @@ dry-run後に行うこと:
    コピー予定のJAR、設定テンプレート、管理スクリプト、backup予定の既存ファイルを確認します。
    dry-runでは実ファイルは変更されません。
 
-2. 配布物内の `docs/INSTALL.md` を確認する
+2. 配布物内の `README.md` を確認する
 
-   作業中の配布物に同梱された手順を確認します。GitHub上の最新版ではなく、
-   実際に導入しているZIP内の手順を優先してください。
+   配布物には詳細文書を同梱しません。`README.md`に記載されたGitHub上の
+   正本へ進み、この`INSTALL.md`、設定一覧、更新手順を確認してください。
 
    ```bash
-   less docs/INSTALL.md
+   less README.md
    ```
 
 3. 問題がなければ、次の `plugin files apply` へ進む
@@ -419,7 +448,7 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
 配置される主なJAR:
 
 ```text
-/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.0.1.jar
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.x.x.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/core-*.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/HikariCP-*.jar
 /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/postgresql-*.jar
@@ -517,9 +546,8 @@ apply後に行うこと:
 
 全設定項目の詳細は以下を参照してください。
 
-```text
-docs/CONFIG-REFERENCE.md
-```
+[CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)を参照してください。配布ZIPでは、
+トップレベルの`README.md`からGitHub上の正本を開きます。
 
 確認対象:
 
@@ -556,7 +584,7 @@ WebAuthn credentialをLDAP StorageServiceへ保存する場合のみ、以下も
 
 | 保存先 | 推奨/用途 | 変更時の注意 |
 | --- | --- | --- |
-| `db` | 推奨。PostgreSQLを使う。 | H2からPostgreSQLへ移行する場合は `docs/DB-MIGRATION.md` を使う。 |
+| `db` | 推奨。PostgreSQLを使う。 | H2からPostgreSQLへ移行する場合は [DB-MIGRATION.md](./DB-MIGRATION.md) を使う。 |
 | `ldap` | LDAP属性運用に寄せたい場合の選択肢。LDAPS + 専用service accountを使う。 | LDAP属性スキーマ、ACL、既存データ移行を先に設計する。 |
 
 秘密情報の保護方式の選択肢:
@@ -790,7 +818,7 @@ openssl rand -base64 32 | tr -d '\n' | sudo tee \
 
 復号は、IdP runtimeや管理CLIが `graphicalmatrix.properties` とsecret fileを読んで自動的に行います。
 DB上の値を手作業で復号する運用は想定していません。
-既存データを別方式へ変換する場合は `docs/SEQUENCE-STORAGE-MIGRATION.md` を使います。
+既存データを別方式へ変換する場合は [SEQUENCE-STORAGE-MIGRATION.md](./SEQUENCE-STORAGE-MIGRATION.md) を使います。
 
 ---
 ---
@@ -878,7 +906,7 @@ graphicalmatrix.totp.seed.storage = auto
 ```
 
 既存ユーザー登録後に `graphicalmatrix.sequence.storage` を変更する場合は、
-`docs/SEQUENCE-STORAGE-MIGRATION.md` を確認してください。
+[SEQUENCE-STORAGE-MIGRATION.md](./SEQUENCE-STORAGE-MIGRATION.md) を確認してください。
 
 ### LDAPを選択した場合: LDAPユーザー属性へ保存する
 
@@ -942,7 +970,7 @@ LDAP保存でも、sequenceとTOTP seedの暗号化/ハッシュ化は `graphica
 
 - LDAP保存はGraphicalMatrix / TOTP / MFA方式選択の保存先を切り替える機能です。
 - WebAuthn credentialの保存先は `idp.authn.webauthn.StorageService` で別に制御します。
-- v1.2.0フェーズ1では、Admin users APIはLDAP保存ユーザーの作成・更新に未対応です。
+- Admin users APIはDB保存専用であり、LDAP保存を選択したユーザーの作成・更新には使用できません。
 
 ### 管理APIは初期状態で無効にしてください。
 
@@ -960,57 +988,11 @@ graphicalmatrix.api.enabled = false
 
 graphicalsフォルダにあるイメージファイルは公開用のものです。本番環境では絶対に利用しないでください。また、イメージファイルはどこにも公開しないでください。
 
-### MFAポリシーは `mfa-policy.properties` で設定します。
-
-編集ファイル:
-
-```text
-sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
-```
-
-```properties
-graphicalmatrix.mfa.default = require
-graphicalmatrix.mfa.forceSPs =
-graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
-graphicalmatrix.mfa.bypassSPs =
-graphicalmatrix.mfa.bypassSpCidrs =
-graphicalmatrix.mfa.requiredSPs =
-graphicalmatrix.mfa.bypassIPs =
-graphicalmatrix.mfa.bypassCIDRs =
-graphicalmatrix.mfa.useForwardedFor = false
-```
-
-`policyOrder`は左から評価し、最初にMFA必須またはMFA不要を決定したルールを採用する。
-学内・社内CIDRでは通常SPのMFAを省略し、機微なSPだけはMFAを強制する例:
-
-```properties
-graphicalmatrix.mfa.forceSPs = https://sp-sensitive.example.org/shibboleth
-graphicalmatrix.mfa.bypassCIDRs = 192.168.0.0/24
-graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
-graphicalmatrix.mfa.default = require
-```
-
-自己管理フローは`policyOrder`の対象外で、常にMFAを要求する。無効な順序やCIDRは
-`graphicalmatrix-plugin-check.sh --config-only`で検出する。
-
-特定のSPだけで送信元IPv4 CIDRによるMFA例外を設定する場合は、
-`graphicalmatrix.mfa.bypassSpCidrs` に `<SP entityID>|<CIDR>[,<CIDR>]` をセミコロン区切りで指定する。
-単一IPv4アドレスは`/32`で指定する。
-
-```properties
-graphicalmatrix.mfa.bypassSpCidrs = https://sp1.example.org/shibboleth|192.168.10.0/24;https://sp2.example.org/shibboleth|10.20.0.0/16
-```
-
-`useForwardedFor=true` は、信頼済みReverse Proxy/LBが送信元IPヘッダを
-安全に上書きし、IdPへの直接接続をFirewall/LBで遮断している構成でのみ
-利用してください。直接接続が残っている場合、クライアントが
-`X-Forwarded-For` / `X-Real-IP` を偽造してMFAバイパスIP/CIDR判定を
-すり抜ける可能性があるため、`false` のままにしてください。
 
 ## 8. DB設定
 [DBのインストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
 
-PostgreSQLを利用する場合は、先に `docs/INSTALL_DB.md` のDB構築、VIP、
+PostgreSQLを利用する場合は、先に [INSTALL_DB.md](./INSTALL_DB.md) のDB構築、VIP、
 HAProxy、Keepalived、IdP側DB接続設定を完了してください。
 この章では、2FAS-KW用スキーマだけを適用します。
 
@@ -1062,7 +1044,7 @@ sudo -u jetty test -r /opt/shibboleth-idp/credentials/graphicalmatrix-db.passwor
 ```
 
 `/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` は、以下の状態にしておきます。
-詳細なDB構築手順と接続先切替は `docs/INSTALL_DB.md` に従ってください。
+詳細なDB構築手順と接続先切替は [INSTALL_DB.md](./INSTALL_DB.md) に従ってください。
 
 ```properties
 graphicalmatrix.db.url = jdbc:postgresql://192.0.2.64:5432/graphicalmatrix
@@ -1074,15 +1056,11 @@ graphicalmatrix.db.pool.enabled = true
 
 H2からPostgreSQLへ移行する場合:
 
-```text
-docs/DB-MIGRATION.md
-```
+[DB-MIGRATION.md](./DB-MIGRATION.md) を参照してください。
 
 sequence保存方式を変更する場合:
 
-```text
-docs/SEQUENCE-STORAGE-MIGRATION.md
-```
+[SEQUENCE-STORAGE-MIGRATION.md](./SEQUENCE-STORAGE-MIGRATION.md) を参照してください。
 
 PoCでH2を利用する場合は、`db.properties` をH2向けにしてください。
 
@@ -1111,23 +1089,41 @@ sudo ./bin/graphicalmatrix-plugin-webxml.sh \
 /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml.bak.TIMESTAMP
 ```
 
-## 11. MFA / External flow設定
+## 11. MFA / External flow有効化
 
 2FAS-KWはShibboleth IdPの `authn/MFA` flow内で動作する。
 Password認証だけでSPへ戻る場合は、`authn/MFA` が選択されていない。
 
+この節は、IdPが2FAS-KWの認証flowを実行できるようにする初回導入設定であり、
+SP単位のMFA方針を設定するものではない。`set-mfa`はSPを追加した後に、
+`mfa global set`は全SP共通の既定方針または送信元IP例外を変更する場合だけ使用する。
+SP単位の手順は[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md#8-sp単位mfa方針を変更する)を参照する。
+
 ### mfa-authn-config.xml
 
-配布物のMFA設定例をIdPへ配置する。
+新規IdPで既存のMFA遷移を使用していない場合だけ、配布物の設定例をそのまま配置できる。
+
+```bash
+sudo install -o root -g jetty -m 0640 \
+  ./examples/mfa-authn-config.xml \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
+```
+
+既存IdPでは、`mfa-authn-config.xml`を丸ごと置換してはならない。既存のTransitionMap、
+custom bean、ほかの認証方式への遷移を保持したまま、配布物の設定例との差分を確認する。
 
 ```bash
 sudo cp -a /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
   /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml.bak.$(date +%Y%m%d-%H%M%S)
 
-sudo install -o root -g jetty -m 0640 \
-  ./examples/mfa-authn-config.xml \
-  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
+sudo diff -u \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
+  ./examples/mfa-authn-config.xml
 ```
+
+差分レビュー後、既存の`TransitionMap`へ`authn/Password`後に
+`GraphicalMatrixMfaDecisionStrategy`を呼び出す遷移とbean定義だけを統合する。
+既存のMFA設計と統合できない場合は、このファイルを変更せず、先にMFAフロー設計を確認する。
 
 確認:
 
@@ -1140,7 +1136,8 @@ sudo grep -nE 'TransitionMap|authn/Password|GraphicalMatrixMfaDecisionStrategy|a
 
 ### authn.properties
 
-IdPが `authn/MFA` を選択するように設定する。
+IdPが `authn/MFA` を選択するように設定する。既存の`idp.authn.flows`に含まれる値を
+削除してはならない。
 
 ```bash
 sudo cp -a /opt/shibboleth-idp/conf/authn/authn.properties \
@@ -1149,14 +1146,12 @@ sudo cp -a /opt/shibboleth-idp/conf/authn/authn.properties \
 sudo vi /opt/shibboleth-idp/conf/authn/authn.properties
 ```
 
-設定:
+既存値へ`MFA`が含まれていることを確認する。例えば既存値が`Password,RemoteUser`の場合は、
+`Password,RemoteUser,MFA`のように`MFA`を追加する。
 
-```properties
-idp.authn.flows = MFA
-```
-
-External認証の遷移先を、Shibbolethのデフォルト `/external.jsp` ではなく
-2FAS-KWのServletへ変更する。
+External認証を他方式で使用していない場合だけ、遷移先をShibbolethのデフォルト
+`/external.jsp`から2FAS-KWのServletへ変更する。すでに別のExternal認証handlerを使用している場合は、
+ここで`externalAuthnPath`を上書きせず、認証方式の統合設計を先に行う。
 
 ```properties
 idp.authn.External.externalAuthnPath = contextRelative:/graphicalmatrix/start
@@ -1281,11 +1276,7 @@ curl -s -o /tmp/im-api.out -w "api_http=%{http_code}\n" \
 api_http=404
 ```
 
-APIを有効化する環境では、以下も確認します。
-
-```text
-docs/API-CURL-TESTS.md
-```
+APIを有効化する環境では、[API-CURL-TESTS.md](./API-CURL-TESTS.md)も確認します。
 
 読み取りテスト:
 
@@ -1321,24 +1312,20 @@ sudo tail -n 300 /opt/shibboleth-idp/logs/idp-process.log | grep -iE \
 sudo tail /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 ```
 
-logrotate設定例:
-
-```text
-docs/LOGROTATE.md
-examples/logrotate/graphicalmatrix-audit
-```
+logrotate設定例は[LOGROTATE.md](./LOGROTATE.md)および
+`examples/logrotate/`を参照する。
 
 ## 17. Admin Tools単体インストール
 
 管理CLIだけをDBサーバまたは管理端末へ導入する場合は、
-`2faskw-admin-tools-1.0.1.zip` を利用する。
+`2faskw-admin-tools-1.x.x.zip` を利用する。
 
 この導入では、Shibboleth IdP、Jetty、`web.xml` は変更しない。
 
 ```bash
 cd /tmp
-unzip 2faskw-admin-tools-1.0.1.zip
-cd 2faskw-admin-tools-1.0.1
+unzip 2faskw-admin-tools-1.x.x.zip
+cd 2faskw-admin-tools-1.x.x
 ```
 
 dry-run:
@@ -1368,26 +1355,46 @@ DB接続設定:
 /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh list
 ```
 
-詳細:
-
-```text
-docs/ADMIN-TOOLS.md
-```
+詳細は、配布物の`README.md`に記載された
+[Admin Tools文書](https://github.com/y-asakawa/2faskw/blob/main/docs/ADMIN-TOOLS.md)を参照してください。
 
 ## 18. 主要設定例
 
 この章は設定ファイルの最終確認用です。
 導入作業中に作成したsecret fileやDB接続設定と矛盾がないことを確認してください。
 
-全設定項目の意味、型、既定値、注意点は `docs/CONFIG-REFERENCE.md` を参照してください。
+全設定項目の意味、型、既定値、注意点は [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md) を参照してください。
 Admin Toolsでは以下でも確認できます。
 
 ```bash
+# Admin Toolsのみ
 /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh config-help
 /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh config-help graphicalmatrix.challenge.seconds
 ```
 
+実際に編集する主なファイルは次のとおりです。`*.idpnew`は配布物内のテンプレート名であり、
+IdP上で使用する実ファイル名ではありません。
+
+| 用途 | 実行環境の実ファイル |
+| --- | --- |
+| GraphicalMatrix本体設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties` |
+| DB接続設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` |
+| LDAP接続設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties` |
+| API設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/api.properties` |
+| SP管理CLI設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/sp-management.properties` |
+| MFA全体方針 | `/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties` |
+| WebAuthn公式Pluginの認証設定 | `/opt/shibboleth-idp/conf/authn/webauthn.properties` |
+| WebAuthn公式Pluginの登録画面設定 | `/opt/shibboleth-idp/conf/authn/webauthn-registration.properties` |
+| WebAuthn metadata設定 | `/opt/shibboleth-idp/conf/authn/webauthn-metadata.properties` |
+| 2FAS-KW WebAuthn LDAP保存設定 | `/opt/shibboleth-idp/conf/graphicalmatrix/webauthn-ldap.properties` |
+
 ### graphicalmatrix.properties
+
+実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
 
 ```properties
 graphicalmatrix.columns = 5
@@ -1492,6 +1499,12 @@ graphicalmatrix.totp.seed.aesKeyFile = /opt/shibboleth-idp/credentials/graphical
 
 ### db.properties
 
+実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+```
+
 PostgreSQL例:
 
 ```properties
@@ -1514,6 +1527,12 @@ graphicalmatrix.db.pool.validationTimeoutMillis = 5000
 IdPを複数台構成にする場合は、`maximumPoolSize * IdP台数` がPostgreSQL / HAProxy側の許容接続数を超えないように設定してください。
 
 ### api.properties
+
+実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/api.properties
+```
 
 初期状態:
 
@@ -1545,22 +1564,27 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-api-token.sh rotate --apply --print
 
 ### mfa-policy.properties
 
-```properties
-graphicalmatrix.mfa.default = require
-graphicalmatrix.mfa.forceSPs =
-graphicalmatrix.mfa.policyOrder = forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default
-graphicalmatrix.mfa.bypassSPs =
-graphicalmatrix.mfa.bypassSpCidrs =
-graphicalmatrix.mfa.requiredSPs =
-graphicalmatrix.mfa.bypassIPs =
-graphicalmatrix.mfa.bypassCIDRs =
-graphicalmatrix.mfa.useForwardedFor = false
+実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties
 ```
 
-`useForwardedFor=true` は、LB/Reverse Proxyが `X-Forwarded-For` または
-`X-Real-IP` を正しく上書きし、利用者がIdPへ直接接続できない構成でのみ利用してください。
+初期導入時にSP単位の方針を設定・変更する必要はない。新規SPでは、SP追加時の`--mfa`で
+初期方針を指定し、追加後の変更は`set-mfa`で行う。全SP共通の既定方針または送信元IP例外を
+変更する場合だけ`mfa global set`を使用する。CLI管理SPのSP別方針を直接編集してはならない。
+具体的な手順は[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md#8-sp単位mfa方針を変更する)、
+コマンド仕様は[COMMAND-REFERENCE.md](./COMMAND-REFERENCE.md#44-mfa方針)を参照する。
+`graphicalmatrix.mfa.useForwardedFor`だけは信頼済みProxy/LB構成を表す手動設定であり、
+`true`にする場合は利用者がIdPへ直接接続できないことを確認する。
 
 ### admin.properties
+
+実ファイル:
+
+```text
+/opt/graphicalmatrix-admin/conf/graphicalmatrix/admin.properties
+```
 
 Admin Tools単体配布物で使う設定です。
 
@@ -1594,6 +1618,16 @@ WebAuthnプラグインを使う場合の代表項目です。FQDN/HTTPSが正�
 1.3.0以上を使用します。2FAS-KWは`AddKeyAuditSuccessHook`を自動登録するため、通常は
 `webauthn-registration-config.xml`へ2FAS-KW専用beanを手作業で追加する必要はありません。
 
+認証時の代表設定を編集する実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/authn/webauthn.properties
+```
+
+登録画面の設定は`/opt/shibboleth-idp/conf/authn/webauthn-registration.properties`、
+FIDO metadataを使用する場合の設定は`/opt/shibboleth-idp/conf/authn/webauthn-metadata.properties`である。
+これらはShibboleth WebAuthn Plugin側の設定であり、2FAS-KW本体設定とは別である。
+
 ```properties
 idp.authn.webauthn.relyingPartyId = idp.example.com
 idp.authn.webauthn.relyingPartyName = Example IdP
@@ -1620,7 +1654,7 @@ idp.authn.webauthn.2fa.allowedPreviousFactors = authn/Password
 WebAuthn credentialはDB/JDBC StorageService保存を推奨します。
 LDAPへ保存する場合は `examples/webauthn-ldap-storage-config.xml` をIdP側の読み込み対象に追加し、
 `/opt/shibboleth-idp/conf/graphicalmatrix/webauthn-ldap.properties` で保存レイアウトを設定したうえで、
-`webauthn.properties` のStorageServiceを切り替えます。
+`/opt/shibboleth-idp/conf/authn/webauthn.properties` のStorageServiceを切り替えます。
 
 ```properties
 idp.authn.webauthn.StorageService = GraphicalMatrixLDAPStorageService
@@ -1629,20 +1663,6 @@ idp.authn.webauthn.StorageService = GraphicalMatrixLDAPStorageService
 LDAP保存レイアウトは、専用subtreeへ `context + id` の1レコードを1エントリとして保存する `subtree` を推奨します。
 ユーザーエントリ属性へ保存する `user-entry` も選択できますが、1ユーザー1レコード前提となるため、
 複数context/複数recordが必要な運用では `subtree` を使います。
-
-### enrollments.properties
-
-`enrollments.properties` は初期PoCで使っていたファイルベース登録情報です。
-現在のDB運用では利用せず、互換確認用のレガシーファイルとして扱います。
-
-```properties
-user001.sequence=img03,img07,img11,img14
-user001.failedCount=0
-user001.lockedUntil=0
-```
-
-本番/DB構成では、ユーザー登録、失敗回数、ロック状態は
-`graphicalmatrix_enrollment` テーブルで管理します。
 
 ### 管理CLI例
 
@@ -1687,7 +1707,37 @@ CSVエクスポート:
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export /secure/path/graphicalmatrix-users.csv
 ```
 
-詳細は `docs/ADMIN-TOOLS.md` と `docs/CSV-EXPORT.md` を参照してください。
+詳細は [ADMIN-TOOLS.md](./ADMIN-TOOLS.md) と [CSV-EXPORT.md](./CSV-EXPORT.md) を参照してください。
+
+### 監査ログのlogrotate
+
+GraphicalMatrix監査ログ:
+
+```text
+/opt/shibboleth-idp/logs/graphicalmatrix-audit.log
+```
+
+設定例は[LOGROTATE.md](./LOGROTATE.md)および
+`examples/logrotate/`を参照する。
+
+適用例:
+
+```bash
+# 有効なコンポーネントに対応する設定例だけを配置する。
+sudo install -m 0644 examples/logrotate/graphicalmatrix-audit \
+  /etc/logrotate.d/graphicalmatrix-audit
+sudo install -m 0644 examples/logrotate/graphicalmatrix-sp-management-audit \
+  /etc/logrotate.d/graphicalmatrix-sp-management-audit
+sudo install -m 0644 examples/logrotate/graphicalmatrix-access-audit \
+  /etc/logrotate.d/graphicalmatrix-access-audit
+sudo install -m 0644 examples/logrotate/graphicalmatrix-csv-import \
+  /etc/logrotate.d/graphicalmatrix-csv-import
+
+sudo logrotate -d /etc/logrotate.d/graphicalmatrix-*
+```
+
+logrotateはOS側の設定です。
+プラグイン導入スクリプトでは `/etc/logrotate.d/` へ自動配置しません。
 
 ## 19. 運用補足
 
@@ -1742,40 +1792,17 @@ sudo ./bin/graphicalmatrix-plugin-webxml.sh \
 - 複数IdP構成では共通PostgreSQLと設定同期を行う
 - Plugin更新前にDBとIdP設定をバックアップする
 
-### 監査ログのlogrotate
 
-GraphicalMatrix監査ログ:
-
-```text
-/opt/shibboleth-idp/logs/graphicalmatrix-audit.log
-```
-
-設定例:
-
-```text
-docs/LOGROTATE.md
-examples/logrotate/graphicalmatrix-audit
-```
-
-適用例:
-
-```bash
-sudo install -m 0644 examples/logrotate/graphicalmatrix-audit \
-  /etc/logrotate.d/graphicalmatrix-audit
-sudo logrotate -d /etc/logrotate.d/graphicalmatrix-audit
-```
-
-logrotateはOS側の設定です。
-プラグイン導入スクリプトでは `/etc/logrotate.d/` へ自動配置しません。
 
 ### 現時点の制限
 
-- 内部配布用plugin packageであり、署名済み公式plugin packageではありません
-- `bootstrap/keys.txt` はplaceholderです
+- 署名付き公開物は、配布ZIP/TAR.GZと対応する`.asc`を取得し、`bootstrap/keys.txt`の
+  fingerprintを信頼できる経路で確認してから検証する
 - web.xml適用は専用スクリプトで行います
 - DB migration自動適用は行いません
 - Jetty restartは自動実行しません
-- sequence保存方式は設定で切替できますが、既存データの一括再保存は `docs/SEQUENCE-STORAGE-MIGRATION.md` の手順で行います
+- sequence保存方式は設定で切替できますが、既存データの一括再保存は
+  [SEQUENCE-STORAGE-MIGRATION.md](./SEQUENCE-STORAGE-MIGRATION.md) の手順で行います
 
 ## 20. rollback
 

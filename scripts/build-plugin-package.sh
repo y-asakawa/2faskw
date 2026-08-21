@@ -376,7 +376,10 @@ cp webauthn-registration-config.xml "$DIST_DIR/examples/webauthn-registration-co
 cp webauthn-ldap-storage-config.xml "$DIST_DIR/examples/webauthn-ldap-storage-config.xml"
 cp access-control.xml "$DIST_DIR/examples/access-control.xml"
 cp attribute-resolver.xml "$DIST_DIR/examples/attribute-resolver.xml"
-cp examples/logrotate/graphicalmatrix-audit "$DIST_DIR/examples/logrotate/graphicalmatrix-audit"
+for src in examples/logrotate/*; do
+  [[ -f "$src" ]] || continue
+  cp "$src" "$DIST_DIR/examples/logrotate/$(basename "$src")"
+done
 cp examples/systemd/graphicalmatrix-csv-import.path "$DIST_DIR/examples/systemd/graphicalmatrix-csv-import.path"
 cp examples/systemd/graphicalmatrix-csv-import.service "$DIST_DIR/examples/systemd/graphicalmatrix-csv-import.service"
 
@@ -436,6 +439,7 @@ mkdir -p \
   "$ADMIN_DIST_DIR/lib" \
   "$ADMIN_DIST_DIR/conf/graphicalmatrix" \
   "$ADMIN_DIST_DIR/examples/systemd" \
+  "$ADMIN_DIST_DIR/examples/logrotate" \
   "$ADMIN_DIST_DIR/package-metadata"
 
 cp LICENSE "$ADMIN_DIST_DIR/LICENSE"
@@ -462,6 +466,8 @@ cp admin.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/admin.properties.admin
 cp postgresql-schema.sql "$ADMIN_DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
 cp examples/systemd/graphicalmatrix-csv-import.path "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.path"
 cp examples/systemd/graphicalmatrix-csv-import.service "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.service"
+cp examples/logrotate/graphicalmatrix-csv-import "$ADMIN_DIST_DIR/examples/logrotate/graphicalmatrix-csv-import"
+cp examples/logrotate/README.md "$ADMIN_DIST_DIR/examples/logrotate/README.md"
 
 render_template plugin-metadata/ADMIN-PACKAGE-README.md.in "$ADMIN_DIST_DIR/README.md"
 

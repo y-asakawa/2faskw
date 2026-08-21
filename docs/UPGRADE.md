@@ -77,7 +77,7 @@ Attribute Resolverへ安全に追加する`attributes resolver init/add`、LDAP�
 - LDAP保存へ切り替える場合は、LDAP schema、ACL、service account、LDAPS接続を検証済み
 - WebAuthnを使う場合は、FQDN、HTTPS、RP ID、ブラウザの信頼済み証明書を確認済み
 
-現在のPlugin JARを確認する。
+現在のバージョン（Plugin JAR）を確認する。
 
 ```bash
 sudo ls -l /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar

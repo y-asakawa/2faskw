@@ -69,6 +69,11 @@ expected_root = sys.argv[2]
 required = {
     f"{expected_root}/bin/graphicalmatrix-sp.sh",
     f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew",
+    f"{expected_root}/examples/logrotate/README.md",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-audit",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-sp-management-audit",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-access-audit",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
 }
 with zipfile.ZipFile(archive) as zf:
     names = set(zf.namelist())
@@ -124,6 +129,8 @@ required = {
     f"{expected_root}/bin/graphicalmatrix-db.sh",
     f"{expected_root}/bin/graphicalmatrix-admin-install.sh",
     f"{expected_root}/bin/graphicalmatrix-csv-import-runner.sh",
+    f"{expected_root}/examples/logrotate/README.md",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
     f"{expected_root}/package-metadata/PACKAGE-CONTENTS.txt",
     f"{expected_root}/package-metadata/PACKAGE-MANIFEST.sha256",
 }
@@ -163,6 +170,12 @@ with zipfile.ZipFile(archive) as zf:
         raise SystemExit("required entries are missing: " + ", ".join(missing))
     if any(pathlib.PurePosixPath(name).name == "graphicalmatrix-sp.sh" for name in names):
         raise SystemExit("SP management CLI must not be bundled in Admin Tools")
+
+    installer = zf.read(
+        f"{expected_root}/bin/graphicalmatrix-admin-install.sh"
+    ).decode("utf-8")
+    if '"$PACKAGE_DIR"/docs/' in installer or '"$PREFIX/docs"' in installer:
+        raise SystemExit("Admin Tools installer must not require detailed documentation in the ZIP")
 
     readme = zf.read(f"{expected_root}/README.md").decode("utf-8")
     required_document_urls = {
