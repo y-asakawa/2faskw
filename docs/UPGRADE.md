@@ -12,6 +12,7 @@
 - v1.2.6 から v1.2.7 への更新
 - v1.2.7 から v1.3.0 への更新
 - v1.3.0 から v1.3.1 への更新
+- v1.3.1 から v1.3.2 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -27,6 +28,7 @@
 | v1.2.6 | v1.2.7 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboard導入、SP追加管理CLIの有効化 |
 | v1.2.7 | v1.3.0 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboardのv1.3.0配布物への更新、SP管理CLIの継続利用、SP別LDAP属性アクセス制御・属性カタログCLIの初期化 |
 | v1.3.0 | v1.3.1 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | SP・IdP全体MFA方針CLI、LDAP Resolver属性追加CLI、大規模共有NAT向けLDAP変更画面設定 |
+| v1.3.1 | v1.3.2 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | 2FAS-KW固有ログのlogrotate設定、Admin Toolsの更新 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -65,6 +67,11 @@ Attribute Resolverへ安全に追加する`attributes resolver init/add`、LDAP�
 保護設定を追加します。更新だけでは既存MFA方針、Attribute Resolver、rate limit設定を変更しません。
 必要な機能だけdry-runで内容を確認してから明示的にapplyします。
 
+v1.3.2では、配布物から詳細文書を除外してトップレベル`README.md`から正本へ案内する構成へ変更します。
+2FAS-KW固有ログ用のlogrotateサンプルを追加し、Admin Tools配布物にはCSVプロビジョニングログ用の
+サンプルを同梱します。更新だけで既存の認証設定、DB schema、SP管理台帳、MFA方針、LDAP Resolver、
+OSのlogrotate設定は変更しません。
+
 ## 事前確認
 
 更新前に以下を確認する。
@@ -77,7 +84,7 @@ Attribute Resolverへ安全に追加する`attributes resolver init/add`、LDAP�
 - LDAP保存へ切り替える場合は、LDAP schema、ACL、service account、LDAPS接続を検証済み
 - WebAuthnを使う場合は、FQDN、HTTPS、RP ID、ブラウザの信頼済み証明書を確認済み
 
-現在のPlugin JARを確認する。
+現在のバージョン（Plugin JAR）を確認する。
 
 ```bash
 sudo ls -l /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar
@@ -1305,6 +1312,79 @@ sudo cp -a \
 SP管理台帳は、v1.3.1で`set-mfa`をapplyして台帳自体を変更した場合だけ、対応するbackupを
 復元する。MFA方針だけを旧状態へ戻して台帳を新状態のまま残すとdriftになるため、両者のrevisionを
 合わせる。復元後は所有者、group、mode、SELinux contextを確認し、WARを再構築してJettyを起動する。
+
+## v1.3.1からv1.3.2への更新手順
+
+v1.3.2はv1.3.1の認証、DB、SP管理、属性カタログ、アクセス制御、MFA方針をそのまま引き継ぐ。
+DB schema migrationは不要であり、更新だけで既存の`mfa-policy.properties`、
+`attribute-resolver.xml`、`sp-management-registry.json`、OSのlogrotate設定を変更しない。
+
+### Plugin JARをv1.3.2へ更新する
+
+本書の共通手順「配布物の事前検査」「Pluginファイルの更新」「既存設定ファイルの更新」を実施する。
+`graphicalmatrix-plugin-config.sh --apply`は既存設定を直接上書きせず、新テンプレートを
+`*.idpnew.TIMESTAMP`として配置する。v1.3.1の設定ファイルを新テンプレートで置換してはならない。
+
+v1.3.2 JARを配置した後、旧v1.3.1 JARだけを削除する。
+
+```bash
+sudo rm -f \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.1.jar
+
+sudo find /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 -type f -name '2faskw-idp-plugin-*.jar' -print
+```
+
+期待値:
+
+```text
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.2.jar
+```
+
+新旧Plugin JARが同時に残っている状態でWARを再構築しない。
+
+### 任意: 2FAS-KW固有ログのlogrotate設定
+
+v1.3.2配布物の`examples/logrotate/`には、以下の2FAS-KW固有ログ用サンプルが含まれる。
+使用している機能に対応するファイルだけをOSの`/etc/logrotate.d/`へ配置する。
+
+```text
+graphicalmatrix-audit
+graphicalmatrix-sp-management-audit
+graphicalmatrix-access-audit
+graphicalmatrix-csv-import
+```
+
+```bash
+# GraphicalMatrix認証監査ログ。
+sudo install -m 0644 examples/logrotate/graphicalmatrix-audit \
+  /etc/logrotate.d/graphicalmatrix-audit
+
+# SP管理CLIを使用する場合。
+sudo install -m 0644 examples/logrotate/graphicalmatrix-sp-management-audit \
+  /etc/logrotate.d/graphicalmatrix-sp-management-audit
+
+# SP別アクセス制御のdecision監査を使用する場合。
+sudo install -m 0644 examples/logrotate/graphicalmatrix-access-audit \
+  /etc/logrotate.d/graphicalmatrix-access-audit
+
+# Admin ToolsのCSVプロビジョニングを使用する場合。
+sudo install -m 0644 examples/logrotate/graphicalmatrix-csv-import \
+  /etc/logrotate.d/graphicalmatrix-csv-import
+
+sudo logrotate -d /etc/logrotate.d/graphicalmatrix-*
+```
+
+`idp-process.log`、`idp-warn.log`、`idp-audit.log`などのShibboleth IdP標準ログは、
+`/opt/shibboleth-idp/conf/logback.xml`のLogback設定が日次ローテーションと既定180世代の保持を
+管理する。これらへ上記のlogrotateサンプルを追加適用してはならない。詳細は
+[LOGROTATE.md](./LOGROTATE.md)を参照する。
+
+### 任意: Admin Toolsをv1.3.2へ更新する
+
+Admin Toolsを導入済みでCSVプロビジョニングを使用する場合だけ、v1.3.2の
+`2faskw-admin-tools-1.3.2.zip`を展開し、配布物の`README.md`に記載された手順で更新する。
+Admin Tools更新はIdP Plugin JAR、Jetty、IdP設定を変更しない。
 
 ***
 ***

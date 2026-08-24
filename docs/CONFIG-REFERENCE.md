@@ -301,25 +301,6 @@ FIDO Metadata Service / AAGUID補足メタデータの設定。
 | `idp.authn.webauthn.metadata.aaguid.enabled` | boolean | `false` | 補足AAGUID metadata利用。 | 独自表示名/アイコン用。 |
 | `idp.authn.webauthn.metadata.aaguid.passkeyAaguidFile` | path | `aaguid.json` | 補足AAGUID JSON。 | 未掲載authenticator表示補完。 |
 
-## enrollments.properties
-
-初期PoCで使っていたファイルベース登録情報。
-現在のDB運用では利用しない。
-
-レガシー例:
-
-```properties
-user001.sequence=img03,img07,img11,img14
-user001.failedCount=0
-user001.lockedUntil=0
-```
-
-| Property | Type | Default / Example | Description | Notes |
-| --- | --- | --- | --- | --- |
-| `<user>.sequence` | sequence | `img03,img07,img11,img14` | ファイルベースsequence。 | DB運用では `graphicalmatrix_enrollment.sequence` を使う。 |
-| `<user>.failedCount` | integer | `0` | 失敗回数。 | DB運用では `failed_count`。 |
-| `<user>.lockedUntil` | epoch millis | `0` | ロック解除時刻。 | DB運用では `locked_until`。 |
-
 ## Bundled / Related Software Reference
 
 この章は、GraphicalMatrix配布物に同梱されるソフトウェアと、

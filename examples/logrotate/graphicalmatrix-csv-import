@@ -1,4 +1,4 @@
-/opt/shibboleth-idp/logs/graphicalmatrix-audit.log {
+/opt/graphicalmatrix-admin/logs/csv-import.log {
     daily
     rotate 180
     missingok

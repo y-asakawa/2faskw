@@ -18,7 +18,6 @@ Installed layout:
   PREFIX/bin/graphicalmatrix-csv-import-runner.sh
   PREFIX/lib/*.jar
   PREFIX/conf/graphicalmatrix/*.properties
-  PREFIX/docs/*
   PREFIX/examples/systemd/*
   PREFIX/incoming, processing, processed, failed, logs
 
@@ -73,7 +72,6 @@ echo "Files/directories:"
 echo "  $PREFIX/bin"
 echo "  $PREFIX/lib"
 echo "  $PREFIX/conf/graphicalmatrix"
-echo "  $PREFIX/docs"
 echo "  $PREFIX/examples/systemd"
 echo "  $PREFIX/incoming"
 echo "  $PREFIX/processing"
@@ -99,7 +97,7 @@ if [[ -d "$PREFIX" ]]; then
   cp -a "$PREFIX" "$backup"
 fi
 
-install -d -m 0755 "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/conf/graphicalmatrix" "$PREFIX/docs" "$PREFIX/examples/systemd"
+install -d -m 0755 "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/conf/graphicalmatrix" "$PREFIX/examples/systemd"
 install -d -m 0750 "$PREFIX/incoming" "$PREFIX/processing" "$PREFIX/processed" "$PREFIX/failed" "$PREFIX/logs"
 
 install -m 0755 "$PACKAGE_DIR/bin/graphicalmatrix-db.sh" "$PREFIX/bin/graphicalmatrix-db.sh"
@@ -152,7 +150,6 @@ if [[ -f "$PACKAGE_DIR/conf/graphicalmatrix/admin.properties.adminnew" ]]; then
   fi
 fi
 
-cp -a "$PACKAGE_DIR"/docs/. "$PREFIX/docs/"
 if [[ -d "$PACKAGE_DIR/examples/systemd" ]]; then
   cp -a "$PACKAGE_DIR"/examples/systemd/. "$PREFIX/examples/systemd/"
 fi
