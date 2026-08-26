@@ -36,6 +36,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final long serialVersionUID = 1L;
     private static final int DEFAULT_COLUMNS = 5;
     private static final int DEFAULT_ROWS = 5;
+    private static final int DEFAULT_MOBILE_BREAKPOINT_PX = 430;
     private static final int DEFAULT_CHOICE_COUNT = 4;
     private static final int DEFAULT_ORDER_MODE = 1;
     private static final int DEFAULT_CHALLENGE_SECONDS = 180;
@@ -87,6 +88,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     private final int columns;
     private final int rows;
+    private final int mobileBreakpointPx;
+    private final int mobileColumns;
     private final int choiceCount;
     private final int orderMode;
     private final int challengeSeconds;
@@ -127,7 +130,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final Path changeMethodTemplatePath;
     private final Path changeCompleteTemplatePath;
 
-    private GraphicalMatrixConfig(final int columns, final int rows, final int choiceCount,
+    private GraphicalMatrixConfig(final int columns, final int rows,
+            final int mobileBreakpointPx, final int mobileColumns, final int choiceCount,
             final int orderMode, final int challengeSeconds,
             final int lockoutFailureLimit, final int lockoutLockSeconds,
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
@@ -153,6 +157,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final Path changeCompleteTemplatePath) {
         this.columns = columns;
         this.rows = rows;
+        this.mobileBreakpointPx = mobileBreakpointPx;
+        this.mobileColumns = mobileColumns;
         this.choiceCount = choiceCount;
         this.orderMode = orderMode;
         this.challengeSeconds = challengeSeconds;
@@ -210,6 +216,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
         final int columns = intProperty(properties, "graphicalmatrix.columns", DEFAULT_COLUMNS);
         final int rows = intProperty(properties, "graphicalmatrix.rows", DEFAULT_ROWS);
+        final int mobileBreakpointPx = intProperty(properties,
+            "graphicalmatrix.mobile.breakpointPx", DEFAULT_MOBILE_BREAKPOINT_PX);
+        final int mobileColumns = intProperty(properties,
+            "graphicalmatrix.mobile.columns", columns);
         final int choiceCount = intProperty(properties, "graphicalmatrix.choice", DEFAULT_CHOICE_COUNT);
         final int orderMode = intProperty(properties, "graphicalmatrix.order", DEFAULT_ORDER_MODE);
         final int challengeSeconds =
@@ -294,7 +304,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final Path changeCompleteTemplatePath = Path.of(properties.getProperty(
             "graphicalmatrix.view.changeCompleteTemplate", DEFAULT_CHANGE_COMPLETE_TEMPLATE_PATH)).normalize();
 
-        validate(columns, rows, choiceCount, orderMode, challengeSeconds,
+        validate(columns, rows, mobileBreakpointPx, mobileColumns,
+            choiceCount, orderMode, challengeSeconds,
             lockoutFailureLimit, lockoutLockSeconds,
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
@@ -306,7 +317,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         if (cssCacheSeconds < 0) {
             throw new IllegalArgumentException("GraphicalMatrix CSS cache seconds must be zero or positive.");
         }
-        return new GraphicalMatrixConfig(columns, rows, choiceCount, orderMode, challengeSeconds,
+        if (!cssEnabled && mobileColumns != columns) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix responsive columns require external CSS to be enabled.");
+        }
+        return new GraphicalMatrixConfig(columns, rows, mobileBreakpointPx, mobileColumns,
+            choiceCount, orderMode, challengeSeconds,
             lockoutFailureLimit, lockoutLockSeconds,
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
@@ -329,6 +345,18 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     public int getRows() {
         return rows;
+    }
+
+    public int getMobileBreakpointPx() {
+        return mobileBreakpointPx;
+    }
+
+    public int getMobileColumns() {
+        return mobileColumns;
+    }
+
+    public boolean hasResponsiveColumnOverride() {
+        return mobileColumns != columns;
     }
 
     public int getChoiceCount() {
@@ -674,7 +702,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         }
     }
 
-    private static void validate(final int columns, final int rows, final int choiceCount,
+    private static void validate(final int columns, final int rows,
+            final int mobileBreakpointPx, final int mobileColumns, final int choiceCount,
             final int orderMode, final int challengeSeconds,
             final int lockoutFailureLimit, final int lockoutLockSeconds,
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
@@ -689,6 +718,14 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final boolean duplicateSelectionsAllowed, final List<String> graphicalIds) {
         if (columns < 1 || rows < 1) {
             throw new IllegalArgumentException("GraphicalMatrix columns and rows must be positive.");
+        }
+        if (mobileBreakpointPx < 240 || mobileBreakpointPx > 1024) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix mobile breakpoint must be between 240 and 1024 pixels.");
+        }
+        if (mobileColumns < 1 || mobileColumns > columns) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix mobile columns must be between 1 and the normal column count.");
         }
         if (choiceCount < 1) {
             throw new IllegalArgumentException("GraphicalMatrix choice must be positive.");

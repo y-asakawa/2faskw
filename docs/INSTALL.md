@@ -1399,6 +1399,9 @@ IdP上で使用する実ファイル名ではありません。
 ```properties
 graphicalmatrix.columns = 5
 graphicalmatrix.rows = 5
+# 既定は通常列数と同じため、従来の5列表示を維持する。
+graphicalmatrix.mobile.breakpointPx = 430
+graphicalmatrix.mobile.columns = 5
 graphicalmatrix.place = /opt/shibboleth-idp/edit-webapp/graphicalmatrix/graphicals
 graphicalmatrix.graphicals = img01-25
 graphicalmatrix.not_graphicals =
@@ -1461,6 +1464,16 @@ graphicalmatrix.view.css.cacheSeconds = 0
 
 `graphicalmatrix.challenge.seconds` はGraphicalMatrix、TOTP登録、強制sequence変更、
 ユーザー自身の変更画面で利用するチャレンジ有効期限です。設定可能範囲は30〜900秒です。
+
+スマートフォンで画像を大きく表示する場合は、`graphicalmatrix.mobile.columns = 4`へ変更する。
+CSS viewport幅が`graphicalmatrix.mobile.breakpointPx`以下の場合だけ4列となり、25画像は4列7行で
+表示される。画像数、4画像の選択、照合、ロックアウトは変更されない。既定の5列を維持する場合は
+変更不要である。`breakpointPx`は240〜1024、`mobile.columns`は1〜通常列数の範囲で設定する。
+
+標準CSSは連続タップ時の文字選択と画像ドラッグをタイル内だけで抑止し、通常スクロール、
+ピンチズーム、キーボード操作を維持する。独自CSSを指定している環境では列数切替は自動付加されるが、
+文字選択抑止も必要な場合は標準CSSの`.tile`, `.tile img`, `.badge`ルールを独自CSSへ統合する。
+外部CSSを無効化した状態で通常列数と異なるモバイル列数を指定すると、設定検査は失敗する。
 
 `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs`は、指定したIPv4/IPv6 CIDRで
 独立したIP全体制限だけを除外する。利用者ごとのキー別制限は継続するため、大規模な共有NATでは

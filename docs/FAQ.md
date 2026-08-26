@@ -14,6 +14,8 @@
 - `graphicalmatrix.choice` が `0` 以下
 - `graphicalmatrix.order` が `1` または `2` 以外
 - `graphicalmatrix.challenge.seconds` が `30` から `900` の範囲外
+- `graphicalmatrix.mobile.breakpointPx` が `240` から `1024` の範囲外
+- `graphicalmatrix.mobile.columns` が `1` 未満または通常列数を超える
 - `graphicalmatrix.view.css.cacheSeconds` が負数
 - 数値項目に数値以外の文字列を指定
 
@@ -822,6 +824,127 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
 sudo /opt/shibboleth-idp/bin/build.sh
 sudo systemctl restart jetty-idp.service
 ```
+
+## モバイル端末に画面を合わせるにはどうすればよいか
+
+v1.3.3以降では、GraphicalMatrixの画像マトリクスだけを、指定したCSS viewport幅以下で少ない列数へ
+切り替えられる。通常の画像数、選択数、選択順、認証照合、ロックアウトは変更しない。
+
+既定ではモバイル列数が通常列数と同じであり、従来の5列表示を維持する。スマートフォンで画像を
+大きく表示したい場合は、実設定ファイルを編集して430px以下を4列にする。
+
+```bash
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+```properties
+graphicalmatrix.columns = 5
+graphicalmatrix.mobile.breakpointPx = 430
+graphicalmatrix.mobile.columns = 4
+```
+
+この設定ではCSS viewport幅が430px以下のときだけ4列となる。25枚の画像は4列7行で表示され、
+必要に応じて縦スクロールする。431px以上では通常どおり5列で表示する。
+
+`breakpointPx`は240から1024、`mobile.columns`は1から通常列数の範囲で指定する。列数切替を
+停止する場合は、`mobile.columns`を通常列数と同じ値へ戻すか、新規2設定を削除する。
+
+```properties
+graphicalmatrix.mobile.columns = 5
+```
+
+### サーバー側で設定を確認する
+
+実際に読み込まれる設定を確認する。`*.idpnew`ではなく、次の実ファイルを確認・編集する。
+
+```bash
+sudo grep -nE \
+  '^graphicalmatrix\.(columns|mobile\.breakpointPx|mobile\.columns)[[:space:]]*=' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+v1.3.3のPlugin JARを更新した直後は、WARを再構築してJettyを再起動する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+設定変更だけの場合、GraphicalMatrixは設定とCSSを次回リクエストで読み込むため、通常はJetty再起動を
+必要としない。ただし、動作確認中にJAR更新も行った場合は上記の再構築・再起動を実施する。
+
+設定検査では、次の出力を確認する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+```text
+OK: [config] mobile grid valid: breakpoint_px=430 columns=4 override=true
+```
+
+さらに、IdPが実際に返しているCSSの末尾を確認する。
+
+```bash
+curl --noproxy '*' -fsS \
+  http://127.0.0.1:8080/idp/graphicalmatrix/assets/graphicalmatrix.css |
+  tail -n 14
+```
+
+4列設定が反映されている場合、次が表示される。
+
+```css
+/* 2FAS-KW managed responsive grid */
+@media (max-width: 430px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+```
+
+### ブラウザで確認する
+
+この切替は端末名ではなくCSS viewport幅で判定する。PC、タブレット、スマートフォン横向きでは430pxを
+超えることがあり、その場合は正常に5列のままとなる。PCで確認する場合は、ブラウザ開発者ツールの
+デバイス表示を有効にし、幅を430px以下、例えば390pxに設定する。
+
+画像選択画面でブラウザ開発者ツールのConsoleを開き、次を実行すると現在の判定を確認できる。
+
+```javascript
+window.innerWidth
+matchMedia('(max-width: 430px)').matches
+getComputedStyle(document.querySelector('.grid')).gridTemplateColumns
+```
+
+430px以下では、2行目が`true`となり、3行目は4列相当の値になる。確認では430pxと431pxの両方で、
+25画像の表示、4画像選択、選択順バッジ、送信・リセットを確認する。
+
+### 独自HTMLテンプレートを使用する場合
+
+独自の`graphicalmatrix.html`、`change-current.html`、`change-new.html`を使用している場合、各HTMLの
+`head`内に次があることを確認する。指定がないと、スマートフォンでも大きな仮想viewportとして扱われ、
+430px以下のCSS条件が成立しない場合がある。
+
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1">
+```
+
+```bash
+sudo grep -nE \
+  'name=.*viewport|width=device-width' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html
+```
+
+標準CSSでは、タイル、画像、選択順バッジだけに`user-select: none`と画像ドラッグ抑止を設定している。
+通常スクロール、ピンチズーム、キーボード操作は維持する。独自CSSを使用している場合、同じ操作改善が
+必要なら標準CSSの`.tile`、`.tile img`、`.badge`向けルールを独自CSSへ統合する。
+
+`graphicalmatrix.view.css.cacheSeconds`へ正の値を設定している場合、CSS変更後はcache期限を待つか、
+検証用ブラウザのcacheを削除して確認する。
 
 ### TOTPとWebAuthnの画面を編集する場合
 

@@ -90,6 +90,19 @@ with zipfile.ZipFile(archive) as zf:
         raise SystemExit("SP management CLI must be disabled by default")
     if "graphicalmatrix.sp.reload.baseUrl =" not in config:
         raise SystemExit("SP management reload base URL setting is missing")
+    graphical_config = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/graphicalmatrix.properties.idpnew"
+    ).decode("utf-8")
+    if "graphicalmatrix.mobile.breakpointPx = 430" not in graphical_config:
+        raise SystemExit("responsive breakpoint setting is missing")
+    if "graphicalmatrix.mobile.columns = 5" not in graphical_config:
+        raise SystemExit("responsive column setting is missing")
+    graphical_css = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
+    ).decode("utf-8")
+    for rule in ("touch-action: manipulation", "user-select: none", "-webkit-user-drag: none"):
+        if rule not in graphical_css:
+            raise SystemExit(f"responsive interaction CSS is missing: {rule}")
     cli = zf.read(f"{expected_root}/bin/graphicalmatrix-sp.sh").decode("utf-8")
     if "IDP_BASE_URL" not in cli or "graphicalmatrix.sp.reload.baseUrl" not in cli:
         raise SystemExit("SP management CLI does not configure the reload base URL")

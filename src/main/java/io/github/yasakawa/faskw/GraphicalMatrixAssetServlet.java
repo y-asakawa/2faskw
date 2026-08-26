@@ -17,6 +17,7 @@
 package io.github.yasakawa.faskw;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -49,10 +50,11 @@ public final class GraphicalMatrixAssetServlet extends HttpServlet {
             return;
         }
 
+        final byte[] stylesheet = stylesheet(css, config);
         applyCacheHeaders(response, config.getCssCacheSeconds());
         response.setContentType("text/css;charset=UTF-8");
-        response.setContentLengthLong(Files.size(css));
-        Files.copy(css, response.getOutputStream());
+        response.setContentLengthLong(stylesheet.length);
+        response.getOutputStream().write(stylesheet);
     }
 
     @Override
@@ -70,5 +72,29 @@ public final class GraphicalMatrixAssetServlet extends HttpServlet {
         }
         response.setHeader("Cache-Control", "private, max-age=" + cacheSeconds);
         response.setDateHeader("Expires", System.currentTimeMillis() + (cacheSeconds * 1000L));
+    }
+
+    static byte[] stylesheet(final Path css, final GraphicalMatrixConfig config) throws IOException {
+        final String source = Files.readString(css, StandardCharsets.UTF_8);
+        if (!config.hasResponsiveColumnOverride()) {
+            return source.getBytes(StandardCharsets.UTF_8);
+        }
+
+        final StringBuilder generated = new StringBuilder(source.length() + 192);
+        generated.append(source);
+        if (!source.endsWith("\n")) {
+            generated.append('\n');
+        }
+        generated.append("\n/* 2FAS-KW managed responsive grid */\n")
+            .append("@media (max-width: ")
+            .append(config.getMobileBreakpointPx())
+            .append("px) {\n")
+            .append("  .grid {\n")
+            .append("    grid-template-columns: repeat(")
+            .append(config.getMobileColumns())
+            .append(", minmax(0, 1fr));\n")
+            .append("  }\n")
+            .append("}\n");
+        return generated.toString().getBytes(StandardCharsets.UTF_8);
     }
 }

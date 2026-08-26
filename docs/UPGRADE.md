@@ -13,6 +13,7 @@
 - v1.2.7 から v1.3.0 への更新
 - v1.3.0 から v1.3.1 への更新
 - v1.3.1 から v1.3.2 への更新
+- v1.3.2 から v1.3.3 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -29,6 +30,7 @@
 | v1.2.7 | v1.3.0 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | Dashboardのv1.3.0配布物への更新、SP管理CLIの継続利用、SP別LDAP属性アクセス制御・属性カタログCLIの初期化 |
 | v1.3.0 | v1.3.1 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | SP・IdP全体MFA方針CLI、LDAP Resolver属性追加CLI、大規模共有NAT向けLDAP変更画面設定 |
 | v1.3.1 | v1.3.2 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | 2FAS-KW固有ログのlogrotate設定、Admin Toolsの更新 |
+| v1.3.2 | v1.3.3 | 旧JAR削除、WAR再構築、設定検査、GraphicalMatrix認証の回帰試験 | 狭いviewportでのモバイル列数切替 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -71,6 +73,10 @@ v1.3.2では、配布物から詳細文書を除外してトップレベル`READ
 2FAS-KW固有ログ用のlogrotateサンプルを追加し、Admin Tools配布物にはCSVプロビジョニングログ用の
 サンプルを同梱します。更新だけで既存の認証設定、DB schema、SP管理台帳、MFA方針、LDAP Resolver、
 OSのlogrotate設定は変更しません。
+
+v1.3.3では、GraphicalMatrixのモバイル表示列数を設定可能にし、標準CSSでタイル内の意図しない
+文字選択と画像ドラッグを抑止します。新規設定を省略した場合は通常列数をそのまま使用するため、
+更新だけで既存の5列表示は変わりません。DB、LDAP、SP metadata、MFA方針のmigrationは不要です。
 
 ## 事前確認
 
@@ -1385,6 +1391,106 @@ sudo logrotate -d /etc/logrotate.d/graphicalmatrix-*
 Admin Toolsを導入済みでCSVプロビジョニングを使用する場合だけ、v1.3.2の
 `2faskw-admin-tools-1.3.2.zip`を展開し、配布物の`README.md`に記載された手順で更新する。
 Admin Tools更新はIdP Plugin JAR、Jetty、IdP設定を変更しない。
+
+## v1.3.2からv1.3.3への更新手順
+
+v1.3.3はGraphicalMatrix画面のレスポンシブ列数設定と標準CSSのタッチ操作改善を追加する。
+認証sequence、DB schema、LDAP属性、SP管理台帳、MFA方針は変更しない。
+
+### Plugin JARをv1.3.3へ更新する
+
+本書の共通手順「配布物の事前検査」「Pluginファイルの更新」「既存設定ファイルの更新」を実施する。
+`graphicalmatrix-plugin-config.sh --apply`は既存の`graphicalmatrix.properties`とCSSを上書きせず、
+新テンプレートを`*.idpnew.TIMESTAMP`として配置する。既存の運用設定を新テンプレートで置換せず、
+必要な差分だけを統合する。
+
+v1.3.3 JARを配置した後、旧v1.3.2 JARだけを削除する。
+
+```bash
+sudo rm -f \
+  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.2.jar
+
+sudo find /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  -maxdepth 1 -type f -name '2faskw-idp-plugin-*.jar' -print
+```
+
+期待値:
+
+```text
+/opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-1.3.3.jar
+```
+
+### 新規設定の扱い
+
+従来の列数を維持する場合、新規propertyの追加は必須ではない。未指定時は
+`graphicalmatrix.mobile.breakpointPx = 430`、`graphicalmatrix.mobile.columns`は
+`graphicalmatrix.columns`と同じ値として動作する。
+
+430px以下を4列にする場合だけ、実ファイルへ次を追加する。
+
+```properties
+graphicalmatrix.mobile.breakpointPx = 430
+graphicalmatrix.mobile.columns = 4
+```
+
+実ファイル:
+
+```text
+/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+設定可能範囲は`breakpointPx`が240〜1024、`mobile.columns`が1〜通常列数である。
+外部CSSを無効化している環境ではモバイル列数切替を利用できない。
+
+### 標準CSS差分の統合
+
+標準CSSをそのまま使用する環境では、配布物の
+`conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew`と現在のCSSを比較し、次のタイル限定ルールを
+統合する。独自CSSを使用する環境では任意である。
+
+```css
+.tile,
+.tile img,
+.badge {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+```
+
+既存の`.tile { touch-action: manipulation; }`は削除しない。`user-select: none`を`body`全体へ
+適用せず、説明、エラー、TOTP情報を選択可能な状態に保つ。
+
+### v1.3.3更新後の確認
+
+WAR再構築とJetty再起動後、設定検査を実行する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+設定検査には次が表示される。4列を設定した場合は`columns=4 override=true`となる。
+
+```text
+OK: [config] mobile grid valid: breakpoint_px=430 columns=5 override=false
+```
+
+モバイル列数を変更した場合は、430pxと431pxの両方で通常challengeとsequence変更画面を確認する。
+430pxでは4列、431pxでは通常列数となり、25画像の欠落・重複、横スクロール、選択順、送信結果に
+問題がないことを確認する。正の`graphicalmatrix.view.css.cacheSeconds`を使用している場合は、
+cache期限を待つか検証用ブラウザのcacheを消去する。
+
+### v1.3.3固有変更のロールバック
+
+モバイル列数切替だけを停止する場合は、`graphicalmatrix.mobile.columns`を通常列数と同じ値へ戻すか、
+新規2propertyを削除する。CSSの文字選択抑止だけを戻す場合は、上記3 selectorのルールを削除する。
+propertyとCSSはrequest時に読み込まれるため、この設定差分だけの反映にJetty再起動は不要である。
+
+Plugin全体をv1.3.2へ戻す場合は共通ロールバック手順に従う。旧版は新規propertyを参照しないが、
+運用上の混乱を避けるためv1.3.2へ戻す前に新規2propertyをコメントアウトする。DBおよびLDAPの
+ロールバックは不要である。
 
 ***
 ***

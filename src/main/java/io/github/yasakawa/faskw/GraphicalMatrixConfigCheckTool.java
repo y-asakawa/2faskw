@@ -101,6 +101,9 @@ public final class GraphicalMatrixConfigCheckTool {
         ok("grid valid: columns=" + config.getColumns()
             + " rows=" + config.getRows()
             + " cells=" + (config.getColumns() * config.getRows()));
+        ok("mobile grid valid: breakpoint_px=" + config.getMobileBreakpointPx()
+            + " columns=" + config.getMobileColumns()
+            + " override=" + config.hasResponsiveColumnOverride());
         ok("graphicals valid: enabled=" + config.getGraphicalIds().size());
         ok("choice valid: choice=" + config.getChoiceCount()
             + " allow_duplicates=" + config.isDuplicateSelectionsAllowed());

@@ -21,6 +21,8 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | --- | --- | --- | --- | --- |
 | `graphicalmatrix.columns` | integer | `5` | 画像マトリクスの列数。 | `rows * columns` と利用画像数の整合を取る。 |
 | `graphicalmatrix.rows` | integer | `5` | 画像マトリクスの行数。 | スマホ表示ではCSS側のレスポンシブ対応も確認する。 |
+| `graphicalmatrix.mobile.breakpointPx` | integer pixels | `430` | モバイル列数へ切り替えるCSS viewport幅。 | `240`から`1024`。指定値以下で切り替える。 |
+| `graphicalmatrix.mobile.columns` | integer | `graphicalmatrix.columns`と同じ | breakpoint以下で使用する表示列数。 | `1`から通常列数。通常列数と同じ場合は従来表示を維持する。 |
 | `graphicalmatrix.place` | path | `/opt/shibboleth-idp/edit-webapp/graphicalmatrix/graphicals` | 画像ファイルの配置場所。 | 将来のtoken配信/WEB-INF配下移動時は見直す。 |
 | `graphicalmatrix.graphicals` | list/range | `img01-25` | 利用対象画像ID。範囲指定可。 | `img01-25` / `img01,img02` の形式。 |
 | `graphicalmatrix.not_graphicals` | list/range | empty | 利用対象から除外する画像ID。 | 紛らわしい画像を除外する用途。 |
@@ -69,6 +71,23 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.view.css.enabled` | boolean | `true` | 外部CSSの有効/無効。 | false時は組み込みCSSを使う。 |
 | `graphicalmatrix.view.css` | path | `/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css` | 外部CSSファイル。 | レスポンシブ対応はここで調整する。 |
 | `graphicalmatrix.view.css.cacheSeconds` | integer seconds | `0` | CSSキャッシュ秒数。 | 本番は`3600`など、検証中は`0`が扱いやすい。 |
+
+`graphicalmatrix.mobile.columns`は表示だけを変更し、画像数、選択数、選択順、POST値、照合、
+ロックアウトには影響しない。例えば通常5列、モバイル4列の場合、25画像は430px以下で4列7行に
+なり、縦スクロールで操作する。設定例は次のとおりである。
+
+```properties
+graphicalmatrix.columns = 5
+graphicalmatrix.mobile.breakpointPx = 430
+graphicalmatrix.mobile.columns = 4
+```
+
+新規設定を省略するか、`mobile.columns`を通常列数と同じ値にすると、v1.3.2以前と同じ固定列数に
+なる。列数切替は外部CSS endpointへ安全なmedia queryを追加して適用するため、
+`graphicalmatrix.view.css.enabled = false`の状態では通常列数と異なる値を設定できない。
+独自CSSを使用しても列数切替は付加されるが、標準CSSに追加された文字選択・画像ドラッグ抑止を
+使用する場合は、独自CSSにも対応するルールを統合する。正の`css.cacheSeconds`を設定している場合、
+変更確認時はcache期限を待つか検証用ブラウザのcacheを消去する。
 
 ## db.properties
 
