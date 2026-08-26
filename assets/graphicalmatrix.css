@@ -188,6 +188,14 @@ h2 {
   -webkit-tap-highlight-color: transparent;
 }
 
+.tile,
+.tile img,
+.badge {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
 .tile img {
   width: 100%;
   height: 100%;
