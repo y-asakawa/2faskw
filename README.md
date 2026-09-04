@@ -1,4 +1,4 @@
-<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="50%">
+<img src="2FAS-KW_logo.png" alt="2FAS-KW logo" width="60%">
 
 # 2FAS-KW GraphicalMatrix MFA for Shibboleth IdP plugin
 
@@ -96,9 +96,17 @@ Do not open public GitHub issues for suspected vulnerabilities. Follow
   <img src="MFA02.png" alt="2FAS-KW screenshot 2" width="50%">
   <P>
   <img src="MFA03.png" alt="2FAS-KW screenshot 3" width="50%">
+  <P>
+  <img src="MFA05.png" alt="2FAS-KW screenshot 3" width="70%">
+  <P>
+  <img src="MFA06.png" alt="2FAS-KW screenshot 3" width="70%">
+  <P>
+  <img src="MFA07.png" alt="2FAS-KW screenshot 3" width="70%">
+  <P>
+  <img src="MFA08.png" alt="2FAS-KW screenshot 3" width="70%">
+  <P>
+  <img src="MFA10.png" alt="2FAS-KW screenshot 3" width="60%">
 </p>
-<P><img src="MFA07.png" alt="2FAS-KW screenshot 1" width="50%"></P>
-<P><img src="MFA10.png" alt="2FAS-KW screenshot 1" width="50%"></P>
 
 ## Releases
 

@@ -46,6 +46,20 @@ API連携を行う場合は、[openapi.yaml](./openapi.yaml)、
 plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョンを反映します。
 詳細は [build.md](./build.md) を参照してください。
 
+## 開発者向け内部設計
+
+実装の責務境界、主要関数、認証フロー、SP管理、保存モデルを確認する場合は、
+以下の公開開発文書を参照してください。これらは特定バージョンへ固定せず、関連する
+コード変更と同じpull requestで更新します。
+
+| File | Description |
+| --- | --- |
+| [development/ARCHITECTURE.md](./development/ARCHITECTURE.md) | システム構成、コンポーネント境界、設定ownership。 |
+| [development/CODE-REFERENCE.md](./development/CODE-REFERENCE.md) | 主要クラス・関数の責務、変更影響、テスト対応。 |
+| [development/AUTHENTICATION-FLOW.md](./development/AUTHENTICATION-FLOW.md) | 認証、MFA選択、自己管理、TOTP、WebAuthnの呼出関係。 |
+| [development/SP-MANAGEMENT-INTERNALS.md](./development/SP-MANAGEMENT-INTERNALS.md) | SP registry、metadata、属性、access、MFA管理CLIの内部設計。 |
+| [development/DATA-STORAGE.md](./development/DATA-STORAGE.md) | DB/LDAP schema、状態遷移、sequence/TOTP保護、backup境界。 |
+
 ## 導入・設定
 
 | File | Description |
