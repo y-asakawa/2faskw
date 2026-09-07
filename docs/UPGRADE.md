@@ -1527,7 +1527,76 @@ sudo ./bin/graphicalmatrix-plugin-webxml.sh \
 ```
 
 `graphicalmatrix-plugin-config.sh`は既存設定を無条件に上書きせず、新しいtemplateを`.idpnew.TIMESTAMP`として
-残す場合がある。表示された差分を確認し、次を稼働中設定へ統合する。
+残す場合がある。特にv1.3.3の画像選択templateを残したままv1.3.4のJARへ更新すると、旧
+`{{scriptBlock}}`は展開されず、外部JavaScriptが必要とする`data-choice-count`と
+`data-allow-duplicates`も存在しないため、画像をクリックしても選択されない。設定検査だけでなく、
+次のtemplate統合を必ず完了してから認証を再開する。
+
+標準templateを独自編集していない場合は、現在のファイルを退避して、展開したv1.3.4配布物の標準templateと
+JavaScriptを稼働パスへ配置する。次のコマンドは、v1.3.4配布ディレクトリの最上位で実行する。
+
+```bash
+# 稼働中の画像選択templateを同じtimestampでバックアップする。
+UPGRADE_BACKUP_TS="$(date +%Y%m%d%H%M%S)"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html.bak."$UPGRADE_BACKUP_TS"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html.bak."$UPGRADE_BACKUP_TS"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html.bak."$UPGRADE_BACKUP_TS"
+
+# v1.3.4標準templateを稼働パスへ配置する。
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/graphicalmatrix.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html
+
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/change-current.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html
+
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/change-new.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html
+
+# 画像選択用の外部JavaScriptを稼働パスへ配置する。
+sudo install -m 0644 \
+  conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js
+```
+
+独自templateを使用している場合は標準templateで上書きせず、`.idpnew.TIMESTAMP`との差分を確認して、
+画像選択を行う`form`へ`data-choice-count="{{choice}}"`と
+`data-allow-duplicates="{{allowDuplicates}}"`を追加する。変更確認画面では必要に応じて
+`data-confirm-message`も追加する。`style=`と`{{scriptBlock}}`を削除し、`</body>`の直前に
+`{{scriptLink}}`を配置する。inline script/styleを残したtemplateはv1.3.4の厳格CSPと互換性がない。
+
+稼働中templateとJavaScriptを確認する。
+
+```bash
+# 3つの画像選択templateがv1.3.4の外部JavaScript方式になっていることを確認する。
+sudo grep -nE \
+  'scriptBlock|scriptLink|data-choice-count|data-allow-duplicates' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html
+
+# Jetty実行ユーザーが外部JavaScriptを読み取れることを確認する。
+sudo -u jetty test -r \
+  /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js && \
+  echo 'OK: Jetty can read graphicalmatrix.js'
+```
+
+各templateには`{{scriptLink}}`、`data-choice-count`、`data-allow-duplicates`が必要であり、
+`{{scriptBlock}}`が表示されてはならない。Jettyの実行ユーザーが`jetty`以外の場合は、上の
+`sudo -u jetty`を実際の実行ユーザーへ置き換える。
+
+続けて、表示された設定差分を確認し、次を稼働中設定へ統合する。
 
 ```properties
 graphicalmatrix.securityHeaders.enabled = true
