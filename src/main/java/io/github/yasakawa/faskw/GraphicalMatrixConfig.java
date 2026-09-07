@@ -58,12 +58,16 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final boolean DEFAULT_CHANGE_LDAP_RATE_LIMIT_ENABLED = true;
     private static final boolean DEFAULT_SELF_SERVICE_ENABLED = false;
     private static final boolean DEFAULT_LEGACY_LDAP_LOGIN_ENABLED = true;
+    private static final boolean DEFAULT_SECURITY_HEADERS_ENABLED = true;
+    private static final String DEFAULT_SECURITY_HEADERS_CSP_MODE = "enforce";
     private static final String DEFAULT_CHANGE_LDAP_RATE_LIMIT_KEY = "ip-user";
     private static final String DEFAULT_GRAPHICALS = "img01-25";
     private static final String DEFAULT_GRAPHICAL_DIRECTORY =
         "/opt/shibboleth-idp/edit-webapp/graphicalmatrix/graphicals";
     private static final String DEFAULT_CSS_PATH =
         "/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css";
+    private static final String DEFAULT_JAVASCRIPT_PATH =
+        "/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js";
     private static final String DEFAULT_TEMPLATE_PATH =
         "/opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html";
     private static final String DEFAULT_LOCKED_TEMPLATE_PATH =
@@ -109,6 +113,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final boolean selfServiceEnabled;
     private final int selfServiceTransactionSeconds;
     private final boolean legacyLdapLoginEnabled;
+    private final boolean securityHeadersEnabled;
+    private final String securityHeadersCspMode;
     private final boolean duplicateSelectionsAllowed;
     private final boolean forceSequenceChangeEnabled;
     private final List<String> graphicalIds;
@@ -118,6 +124,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final boolean cssEnabled;
     private final Path cssPath;
     private final int cssCacheSeconds;
+    private final Path javascriptPath;
+    private final int javascriptCacheSeconds;
     private final boolean templateEnabled;
     private final Path templatePath;
     private final Path lockedTemplatePath;
@@ -145,10 +153,12 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final String changeLdapRateLimitKey,
             final boolean selfServiceEnabled, final int selfServiceTransactionSeconds,
             final boolean legacyLdapLoginEnabled,
+            final boolean securityHeadersEnabled, final String securityHeadersCspMode,
             final boolean duplicateSelectionsAllowed, final boolean forceSequenceChangeEnabled,
             final List<String> graphicalIds, final Map<String, String> aliases,
             final Path graphicalDirectory,
             final boolean cssEnabled, final Path cssPath, final int cssCacheSeconds,
+            final Path javascriptPath, final int javascriptCacheSeconds,
             final boolean templateEnabled, final Path templatePath,
             final Path lockedTemplatePath, final Path unavailableTemplatePath,
             final Path totpRegisterTemplatePath, final Path changeStartTemplatePath,
@@ -178,6 +188,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.selfServiceEnabled = selfServiceEnabled;
         this.selfServiceTransactionSeconds = selfServiceTransactionSeconds;
         this.legacyLdapLoginEnabled = legacyLdapLoginEnabled;
+        this.securityHeadersEnabled = securityHeadersEnabled;
+        this.securityHeadersCspMode = securityHeadersCspMode;
         this.duplicateSelectionsAllowed = duplicateSelectionsAllowed;
         this.forceSequenceChangeEnabled = forceSequenceChangeEnabled;
         this.graphicalIds = Collections.unmodifiableList(new ArrayList<>(graphicalIds));
@@ -187,6 +199,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.cssEnabled = cssEnabled;
         this.cssPath = cssPath;
         this.cssCacheSeconds = cssCacheSeconds;
+        this.javascriptPath = javascriptPath;
+        this.javascriptCacheSeconds = javascriptCacheSeconds;
         this.templateEnabled = templateEnabled;
         this.templatePath = templatePath;
         this.lockedTemplatePath = lockedTemplatePath;
@@ -266,6 +280,11 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             DEFAULT_SELF_SERVICE_TRANSACTION_SECONDS);
         final boolean legacyLdapLoginEnabled = booleanProperty(properties,
             "graphicalmatrix.change.legacyLdapLoginEnabled", DEFAULT_LEGACY_LDAP_LOGIN_ENABLED);
+        final boolean securityHeadersEnabled = strictBooleanProperty(properties,
+            "graphicalmatrix.securityHeaders.enabled", DEFAULT_SECURITY_HEADERS_ENABLED);
+        final String securityHeadersCspMode = properties.getProperty(
+            "graphicalmatrix.securityHeaders.cspMode", DEFAULT_SECURITY_HEADERS_CSP_MODE)
+            .trim().toLowerCase(Locale.ROOT);
         final boolean duplicateSelectionsAllowed = booleanProperty(properties,
             "graphicalmatrix.allow_duplicates", DEFAULT_ALLOW_DUPLICATE_SELECTIONS);
         final boolean forceSequenceChangeEnabled = booleanProperty(properties,
@@ -281,6 +300,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final Path cssPath = Path.of(properties.getProperty("graphicalmatrix.view.css",
             DEFAULT_CSS_PATH)).normalize();
         final int cssCacheSeconds = intProperty(properties, "graphicalmatrix.view.css.cacheSeconds", 0);
+        final Path javascriptPath = Path.of(properties.getProperty(
+            "graphicalmatrix.view.javascript", DEFAULT_JAVASCRIPT_PATH)).normalize();
+        final int javascriptCacheSeconds = intProperty(properties,
+            "graphicalmatrix.view.javascript.cacheSeconds", 0);
         final boolean templateEnabled =
             booleanProperty(properties, "graphicalmatrix.view.template.enabled", true);
         final Path templatePath = Path.of(properties.getProperty("graphicalmatrix.view.template",
@@ -317,6 +340,15 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         if (cssCacheSeconds < 0) {
             throw new IllegalArgumentException("GraphicalMatrix CSS cache seconds must be zero or positive.");
         }
+        if (javascriptCacheSeconds < 0) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix JavaScript cache seconds must be zero or positive.");
+        }
+        if (!"enforce".equals(securityHeadersCspMode)
+                && !"report-only".equals(securityHeadersCspMode)) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix security header CSP mode must be enforce or report-only.");
+        }
         if (!cssEnabled && mobileColumns != columns) {
             throw new IllegalArgumentException(
                 "GraphicalMatrix responsive columns require external CSS to be enabled.");
@@ -331,9 +363,11 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             changeLdapRateLimitIpLockSeconds,
             changeLdapRateLimitIpLimitBypassCidrs,
             changeLdapRateLimitKey, selfServiceEnabled, selfServiceTransactionSeconds,
-            legacyLdapLoginEnabled, duplicateSelectionsAllowed, forceSequenceChangeEnabled,
+            legacyLdapLoginEnabled, securityHeadersEnabled, securityHeadersCspMode,
+            duplicateSelectionsAllowed, forceSequenceChangeEnabled,
             graphicalIds, aliases, graphicalDirectory,
-            cssEnabled, cssPath, cssCacheSeconds, templateEnabled, templatePath,
+            cssEnabled, cssPath, cssCacheSeconds, javascriptPath, javascriptCacheSeconds,
+            templateEnabled, templatePath,
             lockedTemplatePath, unavailableTemplatePath, totpRegisterTemplatePath,
             changeStartTemplatePath, changeCurrentTemplatePath, changeMenuTemplatePath,
             changeNewTemplatePath, changeMethodTemplatePath, changeCompleteTemplatePath);
@@ -475,6 +509,18 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         return legacyLdapLoginEnabled;
     }
 
+    public boolean isSecurityHeadersEnabled() {
+        return securityHeadersEnabled;
+    }
+
+    public String getSecurityHeadersCspMode() {
+        return securityHeadersCspMode;
+    }
+
+    public boolean isSecurityHeadersCspEnforced() {
+        return "enforce".equals(securityHeadersCspMode);
+    }
+
     public boolean isDuplicateSelectionsAllowed() {
         return duplicateSelectionsAllowed;
     }
@@ -554,6 +600,14 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         return cssCacheSeconds;
     }
 
+    public Path getJavascriptPath() {
+        return javascriptPath;
+    }
+
+    public int getJavascriptCacheSeconds() {
+        return javascriptCacheSeconds;
+    }
+
     public boolean isTemplateEnabled() {
         return templateEnabled;
     }
@@ -624,6 +678,22 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
         return "true".equals(normalized) || "1".equals(normalized)
             || "yes".equals(normalized) || "on".equals(normalized);
+    }
+
+    private static boolean strictBooleanProperty(final Properties properties, final String key,
+            final boolean defaultValue) {
+        final String value = properties.getProperty(key);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        final String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (List.of("true", "1", "yes", "on").contains(normalized)) {
+            return true;
+        }
+        if (List.of("false", "0", "no", "off").contains(normalized)) {
+            return false;
+        }
+        throw new IllegalArgumentException("GraphicalMatrix property must be a boolean: " + key);
     }
 
     private static List<String> parseGraphicals(final String value) {

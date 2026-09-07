@@ -100,6 +100,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
 | [release-notes/v1.3.2-RELEASE-NOTES.md](./release-notes/v1.3.2-RELEASE-NOTES.md) | 配布物の文書構成、Admin Tools installer、2FAS-KW固有ログのlogrotateサンプルを整理した運用改善リリース。 |
 | [release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md](./release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md) | GraphicalMatrixのモバイル列数切替とタッチ操作改善の詳細設計。 |
+| [release-notes/v1.3.4-SECURITY-HEADER-HARDENING-DESIGN.md](./release-notes/v1.3.4-SECURITY-HEADER-HARDENING-DESIGN.md) | 2FAS-KW Servletの共通security header、厳格CSP、外部JavaScript、ローカルtest SP防御の詳細設計と実装仕様。 |
 | [release-notes/v1.3.1-SP-MFA-POLICY-CLI.md](./release-notes/v1.3.1-SP-MFA-POLICY-CLI.md) | SP単位の`set-mfa`とIdP全体の`mfa`によるMFA方針管理、実効判定、手作業差分修復の仕様と手順。 |
 | [release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md) | LDAP属性をAttribute Resolverへ安全に追加するSP管理CLI拡張の仕様と手順。 |
 | [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
@@ -158,9 +159,14 @@ sudo tail -n 50 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 | --- | --- | --- |
 | IdP状態確認 | `https://idp.example.org/idp/status` | IdPのstatus endpointを公開している場合。 |
 | 通常ログイン | SPが開始するSAML認証URL | 利用者へIdPログインURLを直接案内しない。 |
-| 従来の変更画面 | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`かつ現在選択中のMFA方式がGraphicalMatrixの場合。LDAP ID・パスワードと現在のGraphicalMatrixを使用し、保存されている未選択factorでは変更できない。 |
+| 従来の変更画面（互換用） | `https://idp.example.org/idp/graphicalmatrix/change` | `graphicalmatrix.change.legacyLdapLoginEnabled=true`かつ現在選択中のMFA方式がGraphicalMatrixの場合。2FAS-KW ServletがLDAP ID・パスワードを受け取って独自にLDAP bindするため、新規運用には推奨しない。 |
 | 推奨の自己管理画面 | `https://idp.example.org/idp/profile/2faskw/self-service` | `graphicalmatrix.selfservice.enabled=true`の場合。Shibboleth Password認証と現在のMFA方式で再認証する。 |
 | 管理API | `https://idp.example.org/idp/graphicalmatrix-admin/api/v1/` | APIを明示的に有効化した管理クライアントだけが使用する。 |
+
+自己管理を利用する環境では、IdP自己管理フローの受入試験後に
+`graphicalmatrix.change.legacyLdapLoginEnabled=false`とすることを推奨する。この設定は2FAS-KWの
+従来変更画面だけを停止し、Shibboleth IdPの通常のLDAP Password認証や、
+`graphicalmatrix.savedata=ldap`による登録情報のLDAP保存を停止するものではない。
 
 TOTP登録とWebAuthn登録は、自己管理画面または変更メニューでMFA方式を選択して開始する。
 登録用URLを利用者へ直接案内せず、既存の認証・認可条件を通して開始する。

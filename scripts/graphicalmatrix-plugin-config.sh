@@ -363,6 +363,8 @@ done
 
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/assets/graphicalmatrix.css"
+install_template "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew" \
+  "$IDP_HOME/conf/graphicalmatrix/assets/graphicalmatrix.js"
 
 run_sudo mkdir -p "$IDP_HOME/edit-webapp/graphicalmatrix/graphicals"
 for src in "$PACKAGE_DIR"/conf/graphicalmatrix/graphicals/*; do

@@ -69,6 +69,8 @@ expected_root = sys.argv[2]
 required = {
     f"{expected_root}/bin/graphicalmatrix-sp.sh",
     f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew",
+    f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew",
+    f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew",
     f"{expected_root}/examples/logrotate/README.md",
     f"{expected_root}/examples/logrotate/graphicalmatrix-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-sp-management-audit",
@@ -97,12 +99,30 @@ with zipfile.ZipFile(archive) as zf:
         raise SystemExit("responsive breakpoint setting is missing")
     if "graphicalmatrix.mobile.columns = 5" not in graphical_config:
         raise SystemExit("responsive column setting is missing")
+    if "graphicalmatrix.securityHeaders.enabled = true" not in graphical_config:
+        raise SystemExit("security headers must be enabled by default")
+    if "graphicalmatrix.securityHeaders.cspMode = enforce" not in graphical_config:
+        raise SystemExit("CSP must be enforced by default")
+    if "graphicalmatrix.view.javascript = /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js" not in graphical_config:
+        raise SystemExit("external GraphicalMatrix JavaScript setting is missing")
     graphical_css = zf.read(
         f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
     ).decode("utf-8")
     for rule in ("touch-action: manipulation", "user-select: none", "-webkit-user-drag: none"):
         if rule not in graphical_css:
             raise SystemExit(f"responsive interaction CSS is missing: {rule}")
+    graphical_javascript = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew"
+    ).decode("utf-8")
+    for forbidden in ("innerHTML", "document.write", "eval("):
+        if forbidden in graphical_javascript:
+            raise SystemExit(f"unsafe GraphicalMatrix JavaScript sink is present: {forbidden}")
+    webxml = zf.read(f"{expected_root}/bin/graphicalmatrix-plugin-webxml.sh").decode("utf-8")
+    if "io.github.yasakawa.faskw.GraphicalMatrixSecurityHeadersFilter" not in webxml:
+        raise SystemExit("security header Filter is missing from web.xml installer")
+    for mapping in ("/graphicalmatrix/*", "/graphicalmatrix-admin/api/v1/*"):
+        if mapping not in webxml:
+            raise SystemExit(f"security header Filter mapping is missing: {mapping}")
     cli = zf.read(f"{expected_root}/bin/graphicalmatrix-sp.sh").decode("utf-8")
     if "IDP_BASE_URL" not in cli or "graphicalmatrix.sp.reload.baseUrl" not in cli:
         raise SystemExit("SP management CLI does not configure the reload base URL")

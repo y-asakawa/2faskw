@@ -33,28 +33,42 @@ public final class GraphicalMatrixAssetServlet extends HttpServlet {
     protected void doGet(final HttpServletRequest request, final HttpServletResponse response)
             throws ServletException, IOException {
         final String pathInfo = request.getPathInfo();
-        if (pathInfo == null || !"/graphicalmatrix.css".equals(pathInfo)) {
-            response.sendError(404);
-            return;
-        }
-
         final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
-        if (!config.isCssEnabled()) {
+        final Path source;
+        final byte[] body;
+        final String contentType;
+        final int cacheSeconds;
+        if ("/graphicalmatrix.css".equals(pathInfo)) {
+            if (!config.isCssEnabled()) {
+                response.sendError(404);
+                return;
+            }
+            source = config.getCssPath().toAbsolutePath().normalize();
+            contentType = "text/css;charset=UTF-8";
+            cacheSeconds = config.getCssCacheSeconds();
+            if (!Files.isRegularFile(source) || !Files.isReadable(source)) {
+                response.sendError(404);
+                return;
+            }
+            body = stylesheet(source, config);
+        } else if ("/graphicalmatrix.js".equals(pathInfo)) {
+            source = config.getJavascriptPath().toAbsolutePath().normalize();
+            contentType = "text/javascript;charset=UTF-8";
+            cacheSeconds = config.getJavascriptCacheSeconds();
+            if (!Files.isRegularFile(source) || !Files.isReadable(source)) {
+                response.sendError(404);
+                return;
+            }
+            body = Files.readAllBytes(source);
+        } else {
             response.sendError(404);
             return;
         }
 
-        final Path css = config.getCssPath().toAbsolutePath().normalize();
-        if (!Files.isRegularFile(css) || !Files.isReadable(css)) {
-            response.sendError(404);
-            return;
-        }
-
-        final byte[] stylesheet = stylesheet(css, config);
-        applyCacheHeaders(response, config.getCssCacheSeconds());
-        response.setContentType("text/css;charset=UTF-8");
-        response.setContentLengthLong(stylesheet.length);
-        response.getOutputStream().write(stylesheet);
+        applyCacheHeaders(response, cacheSeconds);
+        response.setContentType(contentType);
+        response.setContentLengthLong(body.length);
+        response.getOutputStream().write(body);
     }
 
     @Override
@@ -76,25 +90,29 @@ public final class GraphicalMatrixAssetServlet extends HttpServlet {
 
     static byte[] stylesheet(final Path css, final GraphicalMatrixConfig config) throws IOException {
         final String source = Files.readString(css, StandardCharsets.UTF_8);
-        if (!config.hasResponsiveColumnOverride()) {
-            return source.getBytes(StandardCharsets.UTF_8);
-        }
-
-        final StringBuilder generated = new StringBuilder(source.length() + 192);
+        final StringBuilder generated = new StringBuilder(source.length() + 256);
         generated.append(source);
         if (!source.endsWith("\n")) {
             generated.append('\n');
         }
-        generated.append("\n/* 2FAS-KW managed responsive grid */\n")
-            .append("@media (max-width: ")
-            .append(config.getMobileBreakpointPx())
-            .append("px) {\n")
-            .append("  .grid {\n")
-            .append("    grid-template-columns: repeat(")
-            .append(config.getMobileColumns())
-            .append(", minmax(0, 1fr));\n")
-            .append("  }\n")
+        generated.append("\n/* 2FAS-KW managed grid */\n")
+            .append(":root {\n")
+            .append("  --graphicalmatrix-columns: ")
+            .append(config.getColumns())
+            .append(";\n")
             .append("}\n");
+        if (config.hasResponsiveColumnOverride()) {
+            generated.append("\n/* 2FAS-KW managed responsive grid */\n")
+                .append("@media (max-width: ")
+                .append(config.getMobileBreakpointPx())
+                .append("px) {\n")
+                .append("  .grid {\n")
+                .append("    grid-template-columns: repeat(")
+                .append(config.getMobileColumns())
+                .append(", minmax(0, 1fr));\n")
+                .append("  }\n")
+                .append("}\n");
+        }
         return generated.toString().getBytes(StandardCharsets.UTF_8);
     }
 }

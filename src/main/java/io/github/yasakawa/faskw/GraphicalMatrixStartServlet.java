@@ -155,7 +155,6 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             final String errorMessage) throws IOException {
         response.setContentType("text/html;charset=UTF-8");
         final String context = Encode.forHtml(request.getContextPath());
-        final int columns = config.getColumns();
         final int choiceCount = config.getChoiceCount();
         String selectionInstruction = config.isOrderedSelectionRequired()
             ? "登録済みの画像を順番に" + choiceCount + "つ選択してください。"
@@ -184,16 +183,21 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
                 out.println("  <div class=\"error\" role=\"alert\">" + Encode.forHtml(errorMessage) + "</div>");
             }
             out.println("  <section class=\"panel\" aria-label=\"GraphicalMatrix\">");
-            out.println("    <form id=\"graphicalmatrix-form\" method=\"post\" action=\"" + context + "/graphicalmatrix/verify\" autocomplete=\"off\">");
+            out.println("    <form id=\"graphicalmatrix-form\" method=\"post\" action=\"" + context
+                + "/graphicalmatrix/verify\" autocomplete=\"off\" data-choice-count=\""
+                + choiceCount + "\" data-allow-duplicates=\""
+                + config.isDuplicateSelectionsAllowed() + "\">");
             out.println("      <input type=\"hidden\" name=\"key\" value=\"" + Encode.forHtml(key) + "\">");
             out.println("      <input type=\"hidden\" name=\"challengeId\" value=\"" + Encode.forHtml(challengeId) + "\">");
             out.println("      <input type=\"hidden\" name=\"csrfToken\" value=\"" + Encode.forHtml(csrfToken) + "\">");
             out.println("      <input type=\"hidden\" id=\"selected\" name=\"selected\" value=\"\">");
-            out.println("      <div class=\"grid\" style=\"--graphicalmatrix-columns: " + columns + ";\">");
+            out.println("      <div class=\"grid\">");
             for (final String id : displayOrder) {
                 final String safeId = Encode.forHtml(id);
                 out.println("        <button class=\"tile\" type=\"button\" data-id=\"" + safeId + "\" aria-label=\"" + safeId + "\">");
-                out.println("          <img src=\"" + context + "/graphicalmatrix/graphical?id=" + safeId + "\" alt=\"" + safeId + "\">");
+                out.println("          <img src=\"" + context + "/graphicalmatrix/graphical?id="
+                    + java.net.URLEncoder.encode(id, java.nio.charset.StandardCharsets.UTF_8)
+                    + "\" alt=\"" + safeId + "\">");
                 out.println("          <span class=\"badge\"></span>");
                 out.println("        </button>");
             }
@@ -206,40 +210,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("    </form>");
             out.println("  </section>");
             out.println("</main>");
-            out.println("<script>");
-            out.println("(function () {");
-            out.println("  const max = " + choiceCount + ";");
-            out.println("  const allowDuplicates = " + config.isDuplicateSelectionsAllowed() + ";");
-            out.println("  const selected = [];");
-            out.println("  const selectedInput = document.getElementById('selected');");
-            out.println("  const status = document.getElementById('status');");
-            out.println("  const submitButton = document.getElementById('submit-button');");
-            out.println("  const tiles = Array.from(document.querySelectorAll('.tile'));");
-            out.println("  function render() {");
-            out.println("    tiles.forEach(function (tile) {");
-            out.println("      const indexes = selected.map(function (id, index) { return id === tile.dataset.id ? index + 1 : null; }).filter(Boolean);");
-            out.println("      const badge = tile.querySelector('.badge');");
-            out.println("      if (indexes.length > 0) { tile.classList.add('selected'); badge.textContent = allowDuplicates ? String(indexes.length) : String(indexes[0]); }");
-            out.println("      else { tile.classList.remove('selected'); badge.textContent = ''; }");
-            out.println("    });");
-            out.println("    selectedInput.value = selected.join(',');");
-            out.println("    status.textContent = selected.length + ' / ' + max + ' 選択済み';");
-            out.println("    submitButton.disabled = selected.length !== max;");
-            out.println("  }");
-            out.println("  tiles.forEach(function (tile) {");
-            out.println("    tile.addEventListener('click', function () {");
-            out.println("      const id = tile.dataset.id;");
-            out.println("      const idx = selected.indexOf(id);");
-            out.println("      if (allowDuplicates) { if (selected.length < max) { selected.push(id); } }");
-            out.println("      else if (idx >= 0) { selected.splice(idx, 1); }");
-            out.println("      else if (selected.length < max) { selected.push(id); }");
-            out.println("      render();");
-            out.println("    });");
-            out.println("  });");
-            out.println("  document.getElementById('reset-button').addEventListener('click', function () { selected.length = 0; render(); });");
-            out.println("  render();");
-            out.println("}());");
-            out.println("</script>");
+            out.println(GraphicalMatrixViewRenderer.scriptLink(request.getContextPath()));
             out.println("</body>");
             out.println("</html>");
         }
@@ -261,15 +232,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("  <meta charset=\"UTF-8\">");
             out.println("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             out.println("  <title>追加認証</title>");
-            out.println("  <style>");
-            out.println("    :root { color-scheme: light; }");
-            out.println("    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; background: #f6f7f9; color: #172033; }");
-            out.println("    main { max-width: 680px; margin: 0 auto; padding: 32px 18px; }");
-            out.println("    h1 { margin: 0 0 10px; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: 0; }");
-            out.println("    .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }");
-            out.println("    .error { margin: 0 0 14px; border: 1px solid #f4b4b4; background: #fff1f1; color: #9f1d1d; border-radius: 7px; padding: 10px 12px; font-weight: 700; line-height: 1.5; }");
-            out.println("    p { margin: 0 0 10px; color: #4b5563; line-height: 1.6; }");
-            out.println("  </style>");
+            out.println("  " + GraphicalMatrixViewRenderer.cssLink(request.getContextPath(), config));
             out.println("</head>");
             out.println("<body>");
             out.println("<main>");
@@ -299,15 +262,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("  <meta charset=\"UTF-8\">");
             out.println("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             out.println("  <title>追加認証</title>");
-            out.println("  <style>");
-            out.println("    :root { color-scheme: light; }");
-            out.println("    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; background: #f6f7f9; color: #172033; }");
-            out.println("    main { max-width: 680px; margin: 0 auto; padding: 32px 18px; }");
-            out.println("    h1 { margin: 0 0 10px; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: 0; }");
-            out.println("    .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }");
-            out.println("    .error { margin: 0 0 14px; border: 1px solid #f4b4b4; background: #fff1f1; color: #9f1d1d; border-radius: 7px; padding: 10px 12px; font-weight: 700; line-height: 1.5; }");
-            out.println("    p { margin: 0 0 10px; color: #4b5563; line-height: 1.6; }");
-            out.println("  </style>");
+            out.println("  " + GraphicalMatrixViewRenderer.cssLink(request.getContextPath(), config));
             out.println("</head>");
             out.println("<body>");
             out.println("<main>");
@@ -350,24 +305,7 @@ public final class GraphicalMatrixStartServlet extends HttpServlet {
             out.println("  <meta charset=\"UTF-8\">");
             out.println("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             out.println("  <title>TOTP登録</title>");
-            out.println("  <style>");
-            out.println("    :root { color-scheme: light; }");
-            out.println("    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; background: #f6f7f9; color: #172033; }");
-            out.println("    main { max-width: 720px; margin: 0 auto; padding: 28px 18px 36px; }");
-            out.println("    h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: 0; }");
-            out.println("    .lead { margin: 0 0 18px; color: #4b5563; line-height: 1.6; }");
-            out.println("    .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }");
-            out.println("    .layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }");
-            out.println("    .qr { width: 220px; height: 220px; border: 1px solid #d9dee7; border-radius: 8px; }");
-            out.println("    .error { margin: 0 0 14px; border: 1px solid #f4b4b4; background: #fff1f1; color: #9f1d1d; border-radius: 7px; padding: 10px 12px; font-weight: 700; line-height: 1.5; }");
-            out.println("    label { display: block; margin: 14px 0 6px; font-weight: 700; }");
-            out.println("    input[type=text] { width: 100%; max-width: 220px; min-height: 42px; box-sizing: border-box; border: 1px solid #b8c0cc; border-radius: 7px; padding: 0 12px; font-size: 18px; letter-spacing: 0; }");
-            out.println("    code { overflow-wrap: anywhere; background: #f1f5f9; border: 1px solid #d9dee7; border-radius: 6px; padding: 2px 5px; }");
-            out.println("    .actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }");
-            out.println("    button { min-height: 42px; border-radius: 7px; border: 1px solid #0f766e; background: #0f766e; color: #fff; font-weight: 700; padding: 0 16px; cursor: pointer; }");
-            out.println("    p { margin: 0 0 10px; color: #4b5563; line-height: 1.6; }");
-            out.println("    @media (max-width: 640px) { .layout { grid-template-columns: 1fr; } .qr { width: 200px; height: 200px; } h1 { font-size: 22px; } }");
-            out.println("  </style>");
+            out.println("  " + GraphicalMatrixViewRenderer.cssLink(request.getContextPath(), config));
             out.println("</head>");
             out.println("<body>");
             out.println("<main>");

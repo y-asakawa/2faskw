@@ -48,7 +48,9 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs` | CIDR list | empty | 信頼済み共有NATで独立IP全体制限だけを除外する。 | IPv4/IPv6 CIDRをカンマ区切りで最大256件。ホスト名不可。キー別制限は継続する。単一IPはIPv4 `/32`、IPv6 `/128`。 |
 | `graphicalmatrix.selfservice.enabled` | boolean | `false` | IdP内のShibboleth再認証済み自己管理flowを有効にする。 | `true`にする前に`authn/MFA`と各第二要素のForceAuthn対応を確認する。 |
 | `graphicalmatrix.selfservice.transactionTtlSeconds` | integer seconds | `600` | 認証済みprofileから変更画面へ渡す一回限りの状態の有効期限。 | `60`から`900`。変更画面自体は`challenge.seconds`で別に期限管理する。 |
-| `graphicalmatrix.change.legacyLdapLoginEnabled` | boolean | `true` | `/graphicalmatrix/change`の従来LDAPログイン経路を許可する。 | 現在のMFA方式がGraphicalMatrixの場合だけ利用できる。TOTP/WebAuthn選択中はIdP自己管理flowを使う。自己管理flowの検証後は`false`を推奨。 |
+| `graphicalmatrix.change.legacyLdapLoginEnabled` | boolean | `true`（互換既定値） | `/graphicalmatrix/change`で2FAS-KW ServletがID・パスワードを受け取り、独自にLDAP bindする従来経路を許可する。 | 運用推奨値は`false`。`graphicalmatrix.selfservice.enabled=true`とIdP自己管理flowの受入試験を完了してから切り替える。通常のIdP LDAP認証および`graphicalmatrix.savedata=ldap`とは別機能。`true`を継続する場合、`/opt/shibboleth-idp/conf/ldap.properties`の接続が証明書・ホスト名検証付きTLSで保護されていることを必ず確認する。 |
+| `graphicalmatrix.securityHeaders.enabled` | boolean | `true` | 2FAS-KW Servletと管理APIへ共通security headerを適用する。 | 通常は`true`を維持する。`false`はCSP以外の防御も停止する緊急rollback用。 |
+| `graphicalmatrix.securityHeaders.cspMode` | enum | `enforce` | 2FAS-KW HTMLのContent Security Policyを制御する。 | `enforce`または`report-only`。`report-only`は独自template移行時の一時診断専用。 |
 | `graphicalmatrix.productionMode` | boolean | `false` | Runtime側の本番保護。 | true時はplaintext TOTP seed保存を拒否する。 |
 | `graphicalmatrix.sequence.storage` | enum | `auto` | sequence保存方式。 | `auto`, `plaintext`, `keyword`, `aes-gcm`, `hash`。`auto`は`hash`として扱う。本番は`hash`推奨。 |
 | `graphicalmatrix.sequence.keywordFile` | path | `/opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword` | keyword暗号化用secret。 | 復号可能。権限は`0640`以下。 |
@@ -71,6 +73,8 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.view.css.enabled` | boolean | `true` | 外部CSSの有効/無効。 | false時は組み込みCSSを使う。 |
 | `graphicalmatrix.view.css` | path | `/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css` | 外部CSSファイル。 | レスポンシブ対応はここで調整する。 |
 | `graphicalmatrix.view.css.cacheSeconds` | integer seconds | `0` | CSSキャッシュ秒数。 | 本番は`3600`など、検証中は`0`が扱いやすい。 |
+| `graphicalmatrix.view.javascript` | path | `/opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js` | 画像選択画面が同一originから読み込む外部JavaScript。 | Jetty実行ユーザーが読める通常ファイルでなければならない。inline scriptへ戻さない。 |
+| `graphicalmatrix.view.javascript.cacheSeconds` | integer seconds | `0` | JavaScript assetのbrowser cache時間。 | `0`はno-store。0以上。 |
 
 `graphicalmatrix.mobile.columns`は表示だけを変更し、画像数、選択数、選択順、POST値、照合、
 ロックアウトには影響しない。例えば通常5列、モバイル4列の場合、25画像は430px以下で4列7行に

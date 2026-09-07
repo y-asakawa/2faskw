@@ -359,6 +359,8 @@ check_package() {
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/sp-management.properties.idpnew"
+  need_file "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
+  need_file "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/postgresql-schema.sql"
   need_file "$PACKAGE_DIR/conf/authn/webauthn.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/authn/webauthn-registration.properties.idpnew"
