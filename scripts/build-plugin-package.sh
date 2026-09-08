@@ -340,6 +340,7 @@ cp webauthn.properties "$DIST_DIR/conf/authn/webauthn.properties.idpnew"
 cp webauthn-registration.properties "$DIST_DIR/conf/authn/webauthn-registration.properties.idpnew"
 cp webauthn-metadata.properties "$DIST_DIR/conf/authn/webauthn-metadata.properties.idpnew"
 cp assets/graphicalmatrix.css "$DIST_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
+cp assets/graphicalmatrix.js "$DIST_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew"
 cp views/*.html "$DIST_DIR/conf/graphicalmatrix/views/"
 for file in "$DIST_DIR"/conf/graphicalmatrix/views/*.html; do
   mv "$file" "$file.idpnew"

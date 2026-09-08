@@ -12,9 +12,10 @@
   <p class="lead">{{lead}}</p>
   {{errorBlock}}
   <section class="panel" aria-label="GraphicalMatrix">
-    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off">
+    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off"
+          data-choice-count="{{choice}}" data-allow-duplicates="{{allowDuplicates}}">
       {{hiddenInputs}}
-      <div class="grid" style="--graphicalmatrix-columns: {{columns}};">
+      <div class="grid">
         {{tiles}}
       </div>
       <div id="status" class="status">{{statusText}}</div>
@@ -25,6 +26,6 @@
     </form>
   </section>
 </main>
-{{scriptBlock}}
+{{scriptLink}}
 </body>
 </html>

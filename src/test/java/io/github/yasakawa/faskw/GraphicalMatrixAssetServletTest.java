@@ -41,13 +41,16 @@ final class GraphicalMatrixAssetServletTest {
     Path idpHome;
 
     @Test
-    void preservesStylesheetWhenResponsiveOverrideIsDisabled() throws Exception {
+    void appendsManagedDesktopColumnsWhenResponsiveOverrideIsDisabled() throws Exception {
         final Path css = writeConfigAndCss("", ".grid { display: grid; }\n");
         final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(idpHome.toString());
 
         final byte[] rendered = GraphicalMatrixAssetServlet.stylesheet(css, config);
 
-        assertEquals(".grid { display: grid; }\n", new String(rendered, StandardCharsets.UTF_8));
+        final String text = new String(rendered, StandardCharsets.UTF_8);
+        assertTrue(text.startsWith(".grid { display: grid; }\n"));
+        assertTrue(text.contains("--graphicalmatrix-columns: 5;"));
+        assertFalse(text.contains("@media (max-width:"));
     }
 
     @Test
@@ -111,6 +114,39 @@ final class GraphicalMatrixAssetServletTest {
         assertEquals(0L, capture.dateHeaders.get("Expires"));
         assertEquals(new String(expected, StandardCharsets.UTF_8),
             capture.body.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void javascriptEndpointUsesConfiguredFileAndNoCacheHeaders() throws Exception {
+        final Path directory = idpHome.resolve("conf/graphicalmatrix");
+        Files.createDirectories(directory);
+        final Path cssPath = directory.resolve("test.css");
+        final Path javascriptPath = directory.resolve("test.js");
+        Files.writeString(cssPath, ".grid {}\n");
+        Files.writeString(javascriptPath, "\"use strict\";\n");
+        Files.writeString(directory.resolve("graphicalmatrix.properties"), """
+            graphicalmatrix.view.css = %s
+            graphicalmatrix.view.javascript = %s
+            graphicalmatrix.view.javascript.cacheSeconds = 0
+            """.formatted(cssPath, javascriptPath));
+
+        final ResponseCapture capture = new ResponseCapture();
+        final String previousIdpHome = System.getProperty("idp.home");
+        System.setProperty("idp.home", idpHome.toString());
+        try {
+            new GraphicalMatrixAssetServlet().doGet(request("/graphicalmatrix.js"), capture.response());
+        } finally {
+            if (previousIdpHome == null) {
+                System.clearProperty("idp.home");
+            } else {
+                System.setProperty("idp.home", previousIdpHome);
+            }
+        }
+
+        assertEquals("text/javascript;charset=UTF-8", capture.contentType);
+        assertEquals("no-store, no-cache, must-revalidate, max-age=0",
+            capture.headers.get("Cache-Control"));
+        assertEquals("\"use strict\";\n", capture.body.toString(StandardCharsets.UTF_8));
     }
 
     private Path writeConfigAndCss(final String properties, final String css) throws Exception {

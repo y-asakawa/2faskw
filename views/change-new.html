@@ -12,7 +12,9 @@
   <p class="lead">{{lead}}</p>
   {{errorBlock}}
   <section class="panel" aria-label="New GraphicalMatrix">
-    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off" data-confirm="本当に変更しますか。">
+    <form id="graphicalmatrix-form" method="post" action="{{formAction}}" autocomplete="off"
+          data-choice-count="{{choice}}" data-allow-duplicates="{{allowDuplicates}}"
+          data-confirm-message="本当に変更しますか。">
       {{hiddenInputs}}
       <div class="sequence-layout">
         <section class="selected-sequence" aria-label="Selected GraphicalMatrix sequence">
@@ -22,7 +24,7 @@
         </section>
         <section class="graphical-picker" aria-label="GraphicalMatrix graphical list">
           <h2>画像一覧</h2>
-          <div class="grid sequence-grid" style="--graphicalmatrix-columns: {{columns}};">
+          <div class="grid sequence-grid">
             {{tiles}}
           </div>
         </section>
@@ -37,6 +39,6 @@
     {{backMenuForm}}
   </section>
 </main>
-{{scriptBlock}}
+{{scriptLink}}
 </body>
 </html>

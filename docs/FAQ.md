@@ -1564,6 +1564,100 @@ foreach ($expected as $label => $aliases) {
 属性値そのものを表示する試験は、テスト利用者とアクセス制限された一時endpointだけで実施する。試験後は
 endpointを削除し、Webサーバーのaccess log・error logへ値が残っていないことを確認する。
 
+## v1.3.4のsecurity headerが有効か確認するにはどうすればよいか
+
+設定と配備の両方を確認する。設定値だけが正しくても、`web.xml`へFilter mappingが入っていない場合は
+実応答へheaderが付かない。
+
+```bash
+# 設定、外部JavaScript、templateのCSP互換性、Filter mappingを一括検査する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+```
+
+正常時は少なくとも次が表示される。
+
+```text
+OK: [config] 2FAS-KW security headers enabled: csp_mode=enforce
+OK: [config] JavaScript readable: /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js
+OK: [config] 2FAS-KW security header Filter mapping configured
+```
+
+SPからログインを開始し、2FAS-KW画面の実URLを`LOGIN_URL`へ指定して応答を確認する。
+
+```bash
+# HTML応答に必要なheaderが付くことを確認する。
+curl --noproxy '*' -kfsSI "$LOGIN_URL" | \
+  grep -iE '^(content-security-policy|x-frame-options|x-content-type-options|referrer-policy|permissions-policy|cache-control):'
+
+# 外部JavaScriptが同一originから取得できることを確認する。
+curl --noproxy '*' -kfsSI \
+  https://idp.example.org/idp/graphicalmatrix/assets/graphicalmatrix.js
+```
+
+標準値は`securityHeaders.enabled=true`、`cspMode=enforce`である。独自templateにinline script、inline
+style、event属性が残る場合は、同一originの外部assetへ移す。調査中だけ`report-only`へ変更できるが、
+`enabled=false`はclickjacking対策、`nosniff`、no-storeも停止するため通常運用に使用しない。
+
+Filterは`/idp/graphicalmatrix/*`と`/idp/graphicalmatrix-admin/api/v1/*`だけへ適用する。Shibboleth標準の
+SAML POST画面やSimpleSAMLphp標準画面に同じCSPを適用するとSSOを壊すため、proxy側で範囲を広げない。
+HSTSはこのFilterではなく、公開HTTPSを終端するproxyまたはJettyで設定する。
+
+## `graphicalmatrix.change.legacyLdapLoginEnabled`は`false`にした方がよいか
+
+IdP自己管理flowを使用する環境では、`false`を推奨する。
+
+この設定が制御するのは、`/idp/graphicalmatrix/change`で2FAS-KW Servletが利用者のID・パスワードを
+受け取り、独自にLDAP bindする従来の自己管理経路である。次の機能を無効化する設定ではない。
+
+- 通常のSPログインでShibboleth `authn/Password`が行うLDAP第一認証
+- `graphicalmatrix.savedata=ldap`によるGraphicalMatrix/TOTP/MFA方式のLDAP保存
+- LDAP Attribute Resolverによる属性取得
+
+推奨構成は次である。
+
+```properties
+# /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+graphicalmatrix.selfservice.enabled = true
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = false
+```
+
+現行v1.3.4コードでは、`selfservice.enabled`と`legacyLdapLoginEnabled`の両方を`false`にすると設定検査で
+失敗する。従って、IdP自己管理flowを未導入の環境では`legacyLdapLoginEnabled`だけを先に変更せず、
+[INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md)の設定と受入試験を先に完了する。
+
+現在値は次で確認する。
+
+```bash
+# IdP自己管理flowと従来LDAP自己管理の有効状態を確認する。
+sudo grep -nE \
+  '^graphicalmatrix\.(selfservice\.enabled|change\.legacyLdapLoginEnabled)[[:space:]]*=' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+変更後は設定検査、WAR再構築、Jetty再起動を行う。
+
+```bash
+# 設定の組合せとIdP authentication flowを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+
+# 検査成功後にWARへ反映してJettyを再起動する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+新しいbrowser sessionで`/idp/profile/2faskw/self-service`へアクセスし、Passwordと現在のMFA方式が毎回
+要求されることを確認する。`/idp/graphicalmatrix/change`を直接開いた場合も自己管理profileへ移動し、
+2FAS-KW ServletがLDAP passwordを直接受け取らないことを確認する。
+
+既存環境の移行試験で従来経路を一時的に残す場合は、`/opt/shibboleth-idp/conf/ldap.properties`の接続が
+証明書・ホスト名検証付きTLSで保護されていることを確認する。受入試験後は`false`へ変更し、
+平文`ldap://`を使用する従来経路へrollbackしない。
+
 ## 関連文書
 
 - [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)

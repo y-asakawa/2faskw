@@ -86,6 +86,23 @@ make_servlet_block() {
   cat <<'EOF'
     <!-- BEGIN 2FAS-KW Plugin servlet mappings -->
     <!-- GraphicalMatrix External authentication and management API endpoints. -->
+    <filter>
+        <filter-name>GraphicalMatrixSecurityHeaders</filter-name>
+        <filter-class>io.github.yasakawa.faskw.GraphicalMatrixSecurityHeadersFilter</filter-class>
+    </filter>
+    <filter-mapping>
+        <filter-name>GraphicalMatrixSecurityHeaders</filter-name>
+        <url-pattern>/graphicalmatrix/*</url-pattern>
+        <dispatcher>REQUEST</dispatcher>
+        <dispatcher>ERROR</dispatcher>
+    </filter-mapping>
+    <filter-mapping>
+        <filter-name>GraphicalMatrixSecurityHeaders</filter-name>
+        <url-pattern>/graphicalmatrix-admin/api/v1/*</url-pattern>
+        <dispatcher>REQUEST</dispatcher>
+        <dispatcher>ERROR</dispatcher>
+    </filter-mapping>
+
     <listener>
         <listener-class>io.github.yasakawa.faskw.GraphicalMatrixDataSourceListener</listener-class>
     </listener>
@@ -268,8 +285,22 @@ if begin not in text and end not in text and (
         else "status=existing_manual_entries_detected")
     raise SystemExit(0)
 
-if begin not in text and end not in text:
-    block = pathlib.Path(servlet_block_file).read_text(encoding="utf-8")
+if (begin in text) != (end in text):
+    raise SystemExit("ERROR: incomplete GraphicalMatrix servlet marker block")
+
+block = pathlib.Path(servlet_block_file).read_text(encoding="utf-8")
+if begin in text and end in text:
+    pattern = re.compile(
+        r"[ \t]*" + re.escape(begin) + r".*?" + re.escape(end) + r"[ \t]*\n?",
+        re.DOTALL,
+    )
+    updated, count = pattern.subn(block, text, count=1)
+    if count != 1:
+        raise SystemExit("ERROR: unable to update existing GraphicalMatrix servlet block")
+    if updated != text:
+        text = updated
+        changed = True
+else:
     anchor = re.search(r"(?m)^([ \t]*)<session-config>", text)
     if anchor:
         pos = anchor.start()

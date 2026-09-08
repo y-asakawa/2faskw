@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class GraphicalMatrixConfigCheckTool {
     private static final List<String> GRAPHICAL_EXTENSIONS =
@@ -38,10 +39,16 @@ public final class GraphicalMatrixConfigCheckTool {
         "graphicalmatrix.change.ldapRateLimit.enabled",
         "graphicalmatrix.selfservice.enabled",
         "graphicalmatrix.change.legacyLdapLoginEnabled",
+        "graphicalmatrix.securityHeaders.enabled",
         "graphicalmatrix.productionMode",
         "graphicalmatrix.view.template.enabled",
         "graphicalmatrix.view.css.enabled"
     );
+    private static final Pattern INLINE_SCRIPT = Pattern.compile(
+        "<script\\b(?![^>]*\\bsrc\\s*=)[^>]*>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern INLINE_STYLE = Pattern.compile(
+        "<style\\b|\\sstyle\\s*=|\\son[a-z]+\\s*=|javascript\\s*:",
+        Pattern.CASE_INSENSITIVE);
 
     private int failures;
     private int warnings;
@@ -114,9 +121,11 @@ public final class GraphicalMatrixConfigCheckTool {
         ok("self-service valid: enabled=" + config.isSelfServiceEnabled()
             + " transaction_seconds=" + config.getSelfServiceTransactionSeconds()
             + " legacy_ldap_login=" + config.isLegacyLdapLoginEnabled());
+        checkSecurityHeaders(config);
 
         checkGraphicalFiles(config);
         checkViewFiles(config);
+        checkSecurityFilter(idpHome);
         checkSaveData(idpHome, properties);
         checkStorage(idpHome, config, properties);
         checkMfaPolicy(idpHome);
@@ -214,6 +223,7 @@ public final class GraphicalMatrixConfigCheckTool {
         } else {
             ok("external CSS disabled");
         }
+        checkReadableFile("JavaScript", config.getJavascriptPath());
 
         if (!config.isTemplateEnabled()) {
             ok("external templates disabled");
@@ -230,6 +240,76 @@ public final class GraphicalMatrixConfigCheckTool {
         checkReadableFile("change new template", config.getChangeNewTemplatePath());
         checkReadableFile("change method template", config.getChangeMethodTemplatePath());
         checkReadableFile("change complete template", config.getChangeCompleteTemplatePath());
+        checkTemplateCspCompatibility(config);
+    }
+
+    private void checkSecurityHeaders(final GraphicalMatrixConfig config) {
+        if (!config.isSecurityHeadersEnabled()) {
+            warn("2FAS-KW security headers are disabled");
+            return;
+        }
+        if (config.isSecurityHeadersCspEnforced()) {
+            ok("2FAS-KW security headers enabled: csp_mode=enforce");
+        } else {
+            warn("2FAS-KW security headers use temporary CSP report-only mode");
+        }
+    }
+
+    private void checkTemplateCspCompatibility(final GraphicalMatrixConfig config) {
+        final List<Path> templates = List.of(
+            config.getTemplatePath(),
+            config.getLockedTemplatePath(),
+            config.getUnavailableTemplatePath(),
+            config.getTotpRegisterTemplatePath(),
+            config.getChangeStartTemplatePath(),
+            config.getChangeCurrentTemplatePath(),
+            config.getChangeMenuTemplatePath(),
+            config.getChangeNewTemplatePath(),
+            config.getChangeMethodTemplatePath(),
+            config.getChangeCompleteTemplatePath());
+        for (final Path template : templates) {
+            if (!Files.isRegularFile(template) || !Files.isReadable(template)) {
+                continue;
+            }
+            try {
+                final String html = Files.readString(template);
+                if (html.contains("{{scriptBlock}}")
+                        || INLINE_SCRIPT.matcher(html).find() || INLINE_STYLE.matcher(html).find()) {
+                    final String message = "template contains inline content incompatible with strict CSP: "
+                        + template;
+                    if (config.isSecurityHeadersEnabled() && config.isSecurityHeadersCspEnforced()) {
+                        fail(message);
+                    } else {
+                        warn(message);
+                    }
+                }
+            } catch (IOException ex) {
+                fail("template CSP inspection failed: " + template + ": " + rootMessage(ex));
+            }
+        }
+    }
+
+    private void checkSecurityFilter(final String idpHome) {
+        final Path webXml = Path.of(idpHome, "edit-webapp", "WEB-INF", "web.xml");
+        if (!Files.isRegularFile(webXml) || !Files.isReadable(webXml)) {
+            fail("2FAS-KW security header Filter cannot be verified; web.xml missing or unreadable: "
+                + webXml);
+            return;
+        }
+        try {
+            final String xml = Files.readString(webXml);
+            final String filterClass =
+                "io.github.yasakawa.faskw.GraphicalMatrixSecurityHeadersFilter";
+            if (!xml.contains(filterClass)
+                    || !xml.contains("<url-pattern>/graphicalmatrix/*</url-pattern>")
+                    || !xml.contains("<url-pattern>/graphicalmatrix-admin/api/v1/*</url-pattern>")) {
+                fail("2FAS-KW security header Filter mapping is missing from " + webXml);
+            } else {
+                ok("2FAS-KW security header Filter mapping configured");
+            }
+        } catch (IOException ex) {
+            fail("2FAS-KW security header Filter inspection failed: " + rootMessage(ex));
+        }
     }
 
     private void checkStorage(final String idpHome, final GraphicalMatrixConfig config,

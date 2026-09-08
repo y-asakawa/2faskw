@@ -237,8 +237,15 @@ Plugin更新、設定変更、DB変更を行う前に確認してください。
 - [ ] 自己管理flowを使う場合、`/idp/profile/2faskw/self-service` がPasswordと現在のMFA方式を毎回要求する
 - [ ] 自己管理flowでは、SP/IPのMFAバイパスポリシーを設定していても第二要素が省略されない
 - [ ] 認証済みhandoffの再読込、期限切れ、別セッションからの利用が拒否される
-- [ ] 移行完了後は `graphicalmatrix.change.legacyLdapLoginEnabled=false` とし、直接LDAPログインを停止する
+- [ ] 推奨値の`graphicalmatrix.change.legacyLdapLoginEnabled=false`とし、2FAS-KW Servletによる直接LDAPログインを停止する
+- [ ] `/idp/graphicalmatrix/change`へのアクセスがIdP自己管理profileへ移動し、`mode=ldap-login`をPOSTしてもLDAP bindを実行しない
+- [ ] 通常のShibboleth LDAP Password認証と、構成している場合はLDAP保存が継続して動作する
 - [ ] GraphicalMatrix認証が成功する
+- [ ] `graphicalmatrix.securityHeaders.enabled=true`かつ`cspMode=enforce`である
+- [ ] 2FAS-KW HTML応答にCSP、`X-Frame-Options: DENY`、`nosniff`、`no-referrer`、`no-store`が1値ずつ付く
+- [ ] 管理API応答に`nosniff`と`no-store`が付き、CSS・JavaScript・画像の個別cache方針は維持される
+- [ ] 独自templateにinline script、inline style、event属性、`javascript:` URLがない
+- [ ] Shibboleth標準SAML POSTとSimpleSAMLphp標準画面に2FAS-KW固有CSPを誤適用していない
 - [ ] 誤ったGraphicalMatrix選択でリトライできる
 - [ ] 5回失敗時にロック画面が出る
 - [ ] `graphicalmatrix-db.sh unlock USER` で解除できる

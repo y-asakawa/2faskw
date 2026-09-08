@@ -1198,8 +1198,8 @@ GraphicalMatrix sequenceおよびMFA方式の変更画面には、次の二つ�
 | 従来経路 | `/idp/graphicalmatrix/change` | LDAP ID・パスワード、現在のGraphicalMatrix |
 | IdP自己管理経路 | `/idp/profile/2faskw/self-service` | Shibboleth Password認証、現在のMFA方式 |
 
-配布時の既定値は、前提設定が未完了の環境でパスワード変更を利用不能にしないため、
-従来経路を維持する。
+現行配布物は既存環境との互換性のため従来経路を既定で維持する。ただし、これは推奨運用値ではない。
+従来経路では2FAS-KW Servletが利用者のLDAP ID・パスワードを受け取り、IdP本体とは別にLDAP bindする。
 
 ```properties
 # /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
@@ -1208,22 +1208,30 @@ graphicalmatrix.change.legacyLdapLoginEnabled = true
 ```
 
 新規本番導入、または自己管理フローの試験が完了した既存環境では、Shibboleth再認証を必須にする
-次の設定を推奨する。
+次の設定を推奨する。`legacyLdapLoginEnabled=false`を標準運用値とする。
 
 ```properties
 # /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 graphicalmatrix.selfservice.enabled = true
 graphicalmatrix.selfservice.transactionTtlSeconds = 600
 graphicalmatrix.change.legacyLdapLoginEnabled = false
+
+# 2FAS-KW Servletへ厳格なsecurity headerを適用する。通常は変更しない。
+graphicalmatrix.securityHeaders.enabled = true
+graphicalmatrix.securityHeaders.cspMode = enforce
 ```
 
 この状態では`/idp/graphicalmatrix/change`へ直接アクセスしても、
 `/idp/profile/2faskw/self-service`へ移動する。利用者はShibbolethのPassword認証と現在のMFA方式を
 毎回完了してから変更メニューへ進む。
 
-段階導入では、まず`graphicalmatrix.selfservice.enabled = true`と
-`graphicalmatrix.change.legacyLdapLoginEnabled = true`を設定し、自己管理URLの動作を確認する。
-試験完了後に`legacyLdapLoginEnabled`だけを`false`へ変更する。両方を`false`には設定できない。
+段階導入で従来経路を一時的に残す場合も、検証期間だけに限定する。その期間は
+`/opt/shibboleth-idp/conf/ldap.properties`のLDAP接続が証明書・ホスト名検証付きTLSで保護されていることを
+確認し、試験完了後は`legacyLdapLoginEnabled`を`false`へ変更する。現行v1.3.4コードでは
+`selfservice.enabled`と`legacyLdapLoginEnabled`の両方を`false`には設定できない。
+
+この設定が停止するのは2FAS-KWの旧自己管理用LDAP再認証だけである。通常のSPログインで使用する
+Shibboleth `authn/Password`のLDAP認証と、`graphicalmatrix.savedata=ldap`による登録情報保存には影響しない。
 
 自己管理フローを有効にする場合は、11章の
 `idp.authn.External.forcedAuthenticationSupported = true`も必要である。設定後は
@@ -1430,11 +1438,11 @@ graphicalmatrix.change.ldapRateLimit.ipLockSeconds = 300
 # 大規模な共有NATでは、信頼済みCIDRに限り独立IP全体制限だけを除外できる。
 graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs =
 
-# IdP内のShibboleth再認証済み自己管理flow。導入確認後にtrueへ変更する。
-graphicalmatrix.selfservice.enabled = false
+# 推奨運用例。IdP内のShibboleth再認証済み自己管理flowを有効にする。
+graphicalmatrix.selfservice.enabled = true
 graphicalmatrix.selfservice.transactionTtlSeconds = 600
-# 自己管理flowへ移行後、従来のLDAPログイン画面を停止する場合はfalseにする。
-graphicalmatrix.change.legacyLdapLoginEnabled = true
+# 推奨値。IdP自己管理flowへ移行し、2FAS-KW ServletによるLDAP再認証を停止する。
+graphicalmatrix.change.legacyLdapLoginEnabled = false
 
 graphicalmatrix.sequence.storage = auto
 # graphicalmatrix.sequence.keywordFile = /opt/shibboleth-idp/credentials/graphicalmatrix-sequence.keyword
@@ -1460,6 +1468,8 @@ graphicalmatrix.view.changeCompleteTemplate = /opt/shibboleth-idp/conf/graphical
 graphicalmatrix.view.css.enabled = true
 graphicalmatrix.view.css = /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.css
 graphicalmatrix.view.css.cacheSeconds = 0
+graphicalmatrix.view.javascript = /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js
+graphicalmatrix.view.javascript.cacheSeconds = 0
 ```
 
 `graphicalmatrix.challenge.seconds` はGraphicalMatrix、TOTP登録、強制sequence変更、
@@ -1474,6 +1484,10 @@ CSS viewport幅が`graphicalmatrix.mobile.breakpointPx`以下の場合だけ4列
 ピンチズーム、キーボード操作を維持する。独自CSSを指定している環境では列数切替は自動付加されるが、
 文字選択抑止も必要な場合は標準CSSの`.tile`, `.tile img`, `.badge`ルールを独自CSSへ統合する。
 外部CSSを無効化した状態で通常列数と異なるモバイル列数を指定すると、設定検査は失敗する。
+
+標準templateとJavaScriptは厳格なCSPに対応している。独自templateを使用する場合は、inlineの`script`、
+`style`、`style=`、`onclick`などのevent属性、`javascript:` URLを残してはならない。設定検査が
+これらを検出した場合は、同一originの外部assetへ移してからJettyを起動する。
 
 `graphicalmatrix.change.ldapRateLimit.ipLimitBypassCIDRs`は、指定したIPv4/IPv6 CIDRで
 独立したIP全体制限だけを除外する。利用者ごとのキー別制限は継続するため、大規模な共有NATでは

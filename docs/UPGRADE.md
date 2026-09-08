@@ -14,6 +14,7 @@
 - v1.3.0 から v1.3.1 への更新
 - v1.3.1 から v1.3.2 への更新
 - v1.3.2 から v1.3.3 への更新
+- v1.3.3 から v1.3.4 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -31,6 +32,7 @@
 | v1.3.0 | v1.3.1 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | SP・IdP全体MFA方針CLI、LDAP Resolver属性追加CLI、大規模共有NAT向けLDAP変更画面設定 |
 | v1.3.1 | v1.3.2 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | 2FAS-KW固有ログのlogrotate設定、Admin Toolsの更新 |
 | v1.3.2 | v1.3.3 | 旧JAR削除、WAR再構築、設定検査、GraphicalMatrix認証の回帰試験 | 狭いviewportでのモバイル列数切替 |
+| v1.3.3 | v1.3.4 | `web.xml`へsecurity header Filterを反映し、外部JavaScriptと標準templateを統合する。IdP自己管理flow利用時は従来LDAP自己管理も停止する | 独自templateのCSP互換性、SAML POST、MFA、自己管理を回帰試験する |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -50,6 +52,11 @@ v1.2.0の推奨構成:
 v1.2.4では、Password + 現在のMFA方式による強制再認証後に変更画面を開始するIdP自己管理フローを
 追加します。既定では自己管理フローは無効、従来LDAP変更経路は有効であるため、JAR更新だけで
 従来の変更画面が自動的に無効になることはありません。
+
+以下のv1.2.4手順は当時の互換既定値を記録したものである。現在の運用推奨は
+`graphicalmatrix.selfservice.enabled=true`と
+`graphicalmatrix.change.legacyLdapLoginEnabled=false`の組合せであり、移行時は本書の
+「v1.3.3からv1.3.4への更新手順」も適用する。
 
 v1.2.5では、GraphicalMatrix画像列照合のロック条件を設定化し、通常ロックと最大ロックの
 二段階制御を追加します。既定では5回目から15分、10回目以降は30日ロックされます。
@@ -665,6 +672,9 @@ graphicalmatrix.change.legacyLdapLoginEnabled = false
 自己管理フローに問題があっても、直ちにv1.2.3へJARを戻す必要はありません。まず
 `/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`を次へ戻すことで、
 v1.2.3と同じ従来LDAP変更経路を使用できます。
+
+これはv1.2.4当時の互換rollbackである。現在この方法を使用する場合は、LDAP接続が証明書・ホスト名
+検証付きTLSで保護されていることを先に確認する。平文`ldap://`接続へ戻してはならない。
 
 ```properties
 graphicalmatrix.selfservice.enabled = false
@@ -1491,6 +1501,186 @@ propertyとCSSはrequest時に読み込まれるため、この設定差分だ�
 Plugin全体をv1.3.2へ戻す場合は共通ロールバック手順に従う。旧版は新規propertyを参照しないが、
 運用上の混乱を避けるためv1.3.2へ戻す前に新規2propertyをコメントアウトする。DBおよびLDAPの
 ロールバックは不要である。
+
+## v1.3.3からv1.3.4への更新手順
+
+v1.3.4では、2FAS-KW Servletへ共通security header Filterを追加し、厳格なCSPへ対応するため画像選択用
+JavaScriptを外部asset化する。また、2FAS-KW ServletがID・パスワードを受け取って独自にLDAP bindする
+従来自己管理経路を互換機能として扱い、IdP自己管理flowへ移行済みの環境では停止することを推奨する。
+
+更新前に、稼働中の`web.xml`、設定、template、CSSを退避する。独自templateにinline script/styleがある
+場合は、更新前に外部assetへ移す。厳格CSPで暗黙に`unsafe-inline`を許可して互換性を維持する機能はない。
+
+配布物を展開し、通常のPlugin更新後に設定と`web.xml`の管理差分を適用する。
+
+```bash
+# v1.3.4の設定template、外部JavaScript、標準templateを導入する。
+sudo ./bin/graphicalmatrix-plugin-config.sh \
+  --idp-home /opt/shibboleth-idp \
+  --apply
+
+# 既存の管理marker blockを更新し、security header Filterと対象URL mappingを追加する。
+sudo ./bin/graphicalmatrix-plugin-webxml.sh \
+  --idp-home /opt/shibboleth-idp \
+  --install \
+  --apply
+```
+
+`graphicalmatrix-plugin-config.sh`は既存設定を無条件に上書きせず、新しいtemplateを`.idpnew.TIMESTAMP`として
+残す場合がある。特にv1.3.3の画像選択templateを残したままv1.3.4のJARへ更新すると、旧
+`{{scriptBlock}}`は展開されず、外部JavaScriptが必要とする`data-choice-count`と
+`data-allow-duplicates`も存在しないため、画像をクリックしても選択されない。設定検査だけでなく、
+次のtemplate統合を必ず完了してから認証を再開する。
+
+標準templateを独自編集していない場合は、現在のファイルを退避して、展開したv1.3.4配布物の標準templateと
+JavaScriptを稼働パスへ配置する。次のコマンドは、v1.3.4配布ディレクトリの最上位で実行する。
+
+```bash
+# 稼働中の画像選択templateを同じtimestampでバックアップする。
+UPGRADE_BACKUP_TS="$(date +%Y%m%d%H%M%S)"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html.bak."$UPGRADE_BACKUP_TS"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html.bak."$UPGRADE_BACKUP_TS"
+
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html.bak."$UPGRADE_BACKUP_TS"
+
+# v1.3.4標準templateを稼働パスへ配置する。
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/graphicalmatrix.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html
+
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/change-current.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html
+
+sudo install -m 0644 \
+  conf/graphicalmatrix/views/change-new.html.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html
+
+# 画像選択用の外部JavaScriptを稼働パスへ配置する。
+sudo install -m 0644 \
+  conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew \
+  /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js
+```
+
+独自templateを使用している場合は標準templateで上書きせず、`.idpnew.TIMESTAMP`との差分を確認して、
+画像選択を行う`form`へ`data-choice-count="{{choice}}"`と
+`data-allow-duplicates="{{allowDuplicates}}"`を追加する。変更確認画面では必要に応じて
+`data-confirm-message`も追加する。`style=`と`{{scriptBlock}}`を削除し、`</body>`の直前に
+`{{scriptLink}}`を配置する。inline script/styleを残したtemplateはv1.3.4の厳格CSPと互換性がない。
+
+稼働中templateとJavaScriptを確認する。
+
+```bash
+# 3つの画像選択templateがv1.3.4の外部JavaScript方式になっていることを確認する。
+sudo grep -nE \
+  'scriptBlock|scriptLink|data-choice-count|data-allow-duplicates' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/graphicalmatrix.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-current.html \
+  /opt/shibboleth-idp/conf/graphicalmatrix/views/change-new.html
+
+# Jetty実行ユーザーが外部JavaScriptを読み取れることを確認する。
+sudo -u jetty test -r \
+  /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js && \
+  echo 'OK: Jetty can read graphicalmatrix.js'
+```
+
+各templateには`{{scriptLink}}`、`data-choice-count`、`data-allow-duplicates`が必要であり、
+`{{scriptBlock}}`が表示されてはならない。Jettyの実行ユーザーが`jetty`以外の場合は、上の
+`sudo -u jetty`を実際の実行ユーザーへ置き換える。
+
+続けて、表示された設定差分を確認し、次を稼働中設定へ統合する。
+
+```properties
+graphicalmatrix.securityHeaders.enabled = true
+graphicalmatrix.securityHeaders.cspMode = enforce
+graphicalmatrix.view.javascript = /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js
+graphicalmatrix.view.javascript.cacheSeconds = 0
+```
+
+この設定変更は、通常のSPログインで使用するShibboleth `authn/Password`のLDAP認証を停止しない。
+また、`graphicalmatrix.savedata=ldap`によるGraphicalMatrix/TOTP/MFA方式のLDAP保存とも別機能である。
+
+最初に現在値を確認する。
+
+```bash
+# 旧LDAP自己管理とIdP自己管理flowの現在値を確認する。
+sudo grep -nE \
+  '^graphicalmatrix\.(change\.legacyLdapLoginEnabled|selfservice\.enabled)[[:space:]]*=' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+IdP自己管理flowを導入済みの場合は、設定をバックアップして推奨値へ変更する。
+
+```bash
+# 設定変更前のバックアップを作成する。
+sudo cp -a \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties \
+  /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties.bak.$(date +%Y%m%d-%H%M%S)
+
+# 稼働中の設定ファイルを編集する。
+sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
+```
+
+```properties
+graphicalmatrix.selfservice.enabled = true
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = false
+```
+
+IdP自己管理flowをまだ導入していない環境では、`legacyLdapLoginEnabled`だけを先に`false`へ変更しない。
+現行コードは両自己管理経路が無効な設定を拒否する。先に
+[INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md)の導入・受入試験を完了する。
+
+設定検査、WAR再構築、Jetty再起動を行う。Filter mappingまたはJavaScriptが欠けている場合、設定検査は
+失敗するため、その状態で認証を再開しない。
+
+```bash
+# 配布物の検査toolで設定を確認する。
+sudo ./bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+
+# 設定をIdP WARへ反映する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+新しいbrowser sessionから`/idp/profile/2faskw/self-service`へアクセスし、Passwordと現在のMFA方式が
+毎回要求されることを確認する。続けて`/idp/graphicalmatrix/change`を直接開き、同じ自己管理profileへ
+移動することを確認する。
+
+実応答headerも確認する。`LOGIN_URL`にはSPから開始して表示された2FAS-KW画面のURLを指定する。
+
+```bash
+# HTML応答のCSP、frame拒否、型推測拒否、Referer抑止、cache禁止を確認する。
+curl --noproxy '*' -kfsSI "$LOGIN_URL" | \
+  grep -iE '^(content-security-policy|x-frame-options|x-content-type-options|referrer-policy|permissions-policy|cache-control):'
+
+# 外部JavaScriptが同一originから配信されることを確認する。
+curl --noproxy '*' -kfsSI \
+  https://idp.example.org/idp/graphicalmatrix/assets/graphicalmatrix.js
+```
+
+GraphicalMatrixの選択、reset、送信、失敗後の再試行、TOTP、WebAuthn、自己管理を確認する。SPへ返す
+SAML POSTがCSPで拒否されないこともbrowser consoleとSPログで確認する。
+
+CSP違反がある場合は、原因調査中だけ`graphicalmatrix.securityHeaders.cspMode=report-only`へ変更する。
+`securityHeaders.enabled=false`はCSP以外の防御も停止するため、通常の移行手段として使用しない。
+
+監査ログでは`SELF_SERVICE_AUTH`と`SELF_SERVICE_HANDOFF`の成功を確認する。通常のSP SSO、LDAP Password
+認証、GraphicalMatrix/TOTP/WebAuthn、DBまたはLDAP保存の回帰試験も行う。
+
+自己管理flowに障害が発生した場合は、まず自己管理を一時停止して管理者復旧手順を使用する。
+保護されていない`ldap://`接続を使用する従来経路へ戻してはならない。従来経路を一時復旧する必要が
+ある場合は、LDAP接続が証明書・ホスト名検証付きTLSで保護されていることを先に確認する。
 
 ***
 ***

@@ -238,12 +238,13 @@ flow定義はplugin JAR内の
 
 ### 7.3 既存Servletとの互換性
 
-既定では`/idp/graphicalmatrix/change`のLDAPログイン経路を残す。
+現行配布物は互換性のため`/idp/graphicalmatrix/change`のLDAPログイン経路を既定で残すが、
+運用推奨値は`graphicalmatrix.change.legacyLdapLoginEnabled=false`である。
 `graphicalmatrix.change.legacyLdapLoginEnabled=false`にすると、GETおよびLDAPログインPOSTは
 自己管理profileへリダイレクトされ、ServletからLDAP bindを実行しない。
 
-将来、既存URLを廃止するかどうかは、自己管理profileの導入試験、利用者導線、管理者向け復旧手順を
-確認してから別途決定する。
+この設定はShibboleth IdPの通常のLDAP Password認証を停止しない。また、GraphicalMatrix/TOTP/MFA方式の
+保存先をLDAPにする`graphicalmatrix.savedata=ldap`とも無関係である。
 
 ### 7.4 設定
 
@@ -264,12 +265,20 @@ graphicalmatrix.selfservice.enabled = false
 # 認証profileから変更画面へ渡す一回限りの状態の有効期限。60から900秒。
 graphicalmatrix.selfservice.transactionTtlSeconds = 600
 
-# 既存LDAPログイン型change画面を残すかどうか。
+# 互換既定値。新規運用ではIdP自己管理flowの確認後にfalseとする。
 graphicalmatrix.change.legacyLdapLoginEnabled = true
 ```
 
 `graphicalmatrix.selfservice.enabled=true` にする前に、MFA設定、WebAuthn/TOTP認証、監査ログ、
 DB/LDAP保存を構成検査で確認する。
+
+推奨する運用設定は次である。
+
+```properties
+graphicalmatrix.selfservice.enabled = true
+graphicalmatrix.selfservice.transactionTtlSeconds = 600
+graphicalmatrix.change.legacyLdapLoginEnabled = false
+```
 
 ## 8. 導入手順
 
@@ -305,13 +314,18 @@ sudo cp -a \
 sudo vi /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties
 ```
 
-最初は従来のLDAP経路を残して検証するため、同ファイルを以下の値にする。
+IdP自己管理flowの設定を検証したうえで、同ファイルを推奨値へ変更する。
 
 ```properties
 graphicalmatrix.selfservice.enabled = true
 graphicalmatrix.selfservice.transactionTtlSeconds = 600
-graphicalmatrix.change.legacyLdapLoginEnabled = true
+graphicalmatrix.change.legacyLdapLoginEnabled = false
 ```
+
+既存環境で新旧経路を比較する必要がある場合だけ、検証期間中は
+`legacyLdapLoginEnabled=true`を一時的に使用できる。その場合はShibboleth IdP本体の
+`/opt/shibboleth-idp/conf/ldap.properties`が証明書・ホスト名検証付きTLSを使用していることを確認し、
+受入試験後は`false`へ戻す。平文`ldap://`接続を使用した状態で従来経路を有効にしない。
 
 設定検査を実行する。
 
@@ -324,7 +338,7 @@ sudo /path/to/extracted-plugin/bin/graphicalmatrix-plugin-check.sh \
 少なくとも次が`OK`になることを確認する。
 
 ```text
-OK: [config] self-service valid: enabled=true transaction_seconds=600 legacy_ldap_login=true
+OK: [config] self-service valid: enabled=true transaction_seconds=600 legacy_ldap_login=false
 OK: [config] self-service authentication flow enabled: idp.authn.flows=MFA
 OK: [config] GraphicalMatrix External flow supports forced authentication
 result: OK
@@ -385,7 +399,8 @@ event=SELF_SERVICE_HANDOFF ... result=OK ... detail=one_time_handoff_consumed
 
 ### 8.3 従来LDAP経路を停止
 
-DB保存とLDAP保存の両方で一連の変更試験が完了した後、必要に応じて以下へ変更する。
+8.2で推奨値を設定済みであることを確認する。既存環境の段階移行で従来経路を一時的に残した場合も、
+DB保存またはLDAP保存で一連の変更試験が完了した後は以下へ変更する。
 
 設定先は`/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties`である。
 

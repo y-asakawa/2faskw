@@ -53,16 +53,15 @@ public final class GraphicalMatrixViewRenderer {
         values.put("lead", Encode.forHtml(selectionInstruction));
         values.put("contextPath", Encode.forHtml(context));
         values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/verify"));
-        values.put("columns", String.valueOf(config.getColumns()));
-        values.put("rows", String.valueOf(config.getRows()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
+        values.put("allowDuplicates", String.valueOf(config.isDuplicateSelectionsAllowed()));
         values.put("orderMode", config.isOrderedSelectionRequired() ? "ordered" : "unordered");
         values.put("cssLink", cssLink(context, config));
+        values.put("scriptLink", scriptLink(context));
         values.put("errorBlock", errorBlock(errorMessage));
         values.put("hiddenInputs", hiddenInputs(key, challengeId, csrfToken));
         values.put("tiles", tiles(context, displayOrder));
         values.put("statusText", "0 / " + config.getChoiceCount() + " 選択済み");
-        values.put("scriptBlock", scriptBlock(config));
 
         return renderTemplate(response, templatePath, values);
     }
@@ -152,13 +151,13 @@ public final class GraphicalMatrixViewRenderer {
         values.put("heading", "現在のGraphicalMatrix確認");
         values.put("lead", changeCurrentLead(config));
         values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
-        values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
+        values.put("allowDuplicates", String.valueOf(config.isDuplicateSelectionsAllowed()));
+        values.put("scriptLink", scriptLink(context));
         values.put("errorBlock", errorBlock(errorMessage));
         values.put("hiddenInputs", changeCurrentHiddenInputs(user, challengeId, csrfToken));
         values.put("tiles", tiles(context, displayOrder));
         values.put("statusText", "0 / " + config.getChoiceCount() + " 選択済み");
-        values.put("scriptBlock", scriptBlock(config));
         return renderTemplate(response, config.getChangeCurrentTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -176,15 +175,15 @@ public final class GraphicalMatrixViewRenderer {
         values.put("heading", "新しいGraphicalMatrix登録");
         values.put("lead", changeNewLead(config));
         values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/change"));
-        values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
+        values.put("allowDuplicates", String.valueOf(config.isDuplicateSelectionsAllowed()));
+        values.put("scriptLink", scriptLink(context));
         values.put("errorBlock", errorBlock(errorMessage));
         values.put("hiddenInputs", changeNewHiddenInputs(user, csrfToken));
         values.put("backButton", "<button type=\"submit\" form=\"back-menu-form\">戻る</button>");
         values.put("backMenuForm", backMenuForm(context, user, csrfToken));
         values.put("tiles", tiles(context, displayOrder));
         values.put("statusText", "0 / " + config.getChoiceCount() + " 選択済み");
-        values.put("scriptBlock", scriptBlock(config));
         return renderTemplate(response, config.getChangeNewTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -202,15 +201,15 @@ public final class GraphicalMatrixViewRenderer {
         values.put("heading", "GraphicalMatrix変更");
         values.put("lead", forceChangeLead(config));
         values.put("formAction", Encode.forHtml(context + "/graphicalmatrix/verify"));
-        values.put("columns", String.valueOf(config.getColumns()));
         values.put("choice", String.valueOf(config.getChoiceCount()));
+        values.put("allowDuplicates", String.valueOf(config.isDuplicateSelectionsAllowed()));
+        values.put("scriptLink", scriptLink(context));
         values.put("errorBlock", errorBlock(errorMessage));
         values.put("hiddenInputs", forcedSequenceHiddenInputs(key, csrfToken));
         values.put("backButton", "");
         values.put("backMenuForm", "");
         values.put("tiles", tiles(context, displayOrder));
         values.put("statusText", "0 / " + config.getChoiceCount() + " 選択済み");
-        values.put("scriptBlock", scriptBlock(config));
         return renderTemplate(response, config.getChangeNewTemplatePath().toAbsolutePath().normalize(), values);
     }
 
@@ -282,6 +281,12 @@ public final class GraphicalMatrixViewRenderer {
         return "<link rel=\"stylesheet\" href=\""
             + Encode.forHtml(contextPath)
             + "/graphicalmatrix/assets/graphicalmatrix.css\">";
+    }
+
+    public static String scriptLink(final String contextPath) {
+        return "<script src=\""
+            + Encode.forHtml(contextPath)
+            + "/graphicalmatrix/assets/graphicalmatrix.js\" defer></script>";
     }
 
     private static String errorBlock(final String errorMessage) {
@@ -432,74 +437,6 @@ public final class GraphicalMatrixViewRenderer {
             out.append("</button>\n");
         }
         return out.toString();
-    }
-
-    private static String scriptBlock(final GraphicalMatrixConfig config) {
-        return "<script>\n"
-            + "(function () {\n"
-            + "  const max = " + config.getChoiceCount() + ";\n"
-            + "  const allowDuplicates = " + config.isDuplicateSelectionsAllowed() + ";\n"
-            + "  const selected = [];\n"
-            + "  const selectedInput = document.getElementById('selected');\n"
-            + "  const status = document.getElementById('status');\n"
-            + "  const submitButton = document.getElementById('submit-button');\n"
-            + "  const form = document.getElementById('graphicalmatrix-form');\n"
-            + "  const selectedList = document.getElementById('selected-list');\n"
-            + "  const selectedEmpty = document.getElementById('selected-empty');\n"
-            + "  const tiles = Array.from(document.querySelectorAll('.tile'));\n"
-            + "  function tileFor(id) { return tiles.find(function (tile) { return tile.dataset.id === id; }); }\n"
-            + "  function render() {\n"
-            + "    tiles.forEach(function (tile) {\n"
-            + "      const indexes = selected.map(function (id, index) { return id === tile.dataset.id ? index + 1 : null; }).filter(Boolean);\n"
-            + "      const badge = tile.querySelector('.badge');\n"
-            + "      if (indexes.length > 0) { tile.classList.add('selected'); badge.textContent = allowDuplicates ? String(indexes.length) : String(indexes[0]); }\n"
-            + "      else { tile.classList.remove('selected'); badge.textContent = ''; }\n"
-            + "    });\n"
-            + "    selectedInput.value = selected.join(',');\n"
-            + "    status.textContent = selected.length + ' / ' + max + ' 選択済み';\n"
-            + "    submitButton.disabled = selected.length !== max;\n"
-            + "    if (selectedList) {\n"
-            + "      selectedList.replaceChildren();\n"
-            + "      selected.forEach(function (id, index) {\n"
-            + "        const tile = tileFor(id);\n"
-            + "        const item = document.createElement('li');\n"
-            + "        item.className = 'selected-item';\n"
-            + "        const order = document.createElement('span');\n"
-            + "        order.className = 'selected-order';\n"
-            + "        order.textContent = String(index + 1);\n"
-            + "        item.appendChild(order);\n"
-            + "        if (tile) {\n"
-            + "          const source = tile.querySelector('img');\n"
-            + "          const graphical = document.createElement('img');\n"
-            + "          graphical.src = source.src;\n"
-            + "          graphical.alt = '選択した画像';\n"
-            + "          item.appendChild(graphical);\n"
-            + "        }\n"
-            + "        item.addEventListener('click', function () { selected.splice(index, 1); render(); });\n"
-            + "        selectedList.appendChild(item);\n"
-            + "      });\n"
-            + "    }\n"
-            + "    if (selectedEmpty) { selectedEmpty.hidden = selected.length > 0; }\n"
-            + "  }\n"
-            + "  tiles.forEach(function (tile) {\n"
-            + "    tile.addEventListener('click', function () {\n"
-            + "      const id = tile.dataset.id;\n"
-            + "      const idx = selected.indexOf(id);\n"
-            + "      if (allowDuplicates) { if (selected.length < max) { selected.push(id); } }\n"
-            + "      else if (idx >= 0) { selected.splice(idx, 1); }\n"
-            + "      else if (selected.length < max) { selected.push(id); }\n"
-            + "      render();\n"
-            + "    });\n"
-            + "  });\n"
-            + "  document.getElementById('reset-button').addEventListener('click', function () { selected.length = 0; render(); });\n"
-            + "  if (form && form.dataset.confirm) {\n"
-            + "    form.addEventListener('submit', function (event) {\n"
-            + "      if (selected.length !== max || !window.confirm(form.dataset.confirm)) { event.preventDefault(); }\n"
-            + "    });\n"
-            + "  }\n"
-            + "  render();\n"
-            + "}());\n"
-            + "</script>";
     }
 
     private static String url(final String value) {
