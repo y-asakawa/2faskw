@@ -23,8 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import javax.security.auth.Subject;
 
 import net.shibboleth.idp.authn.AuthenticationResult;
+import net.shibboleth.idp.authn.context.AuthenticationContext;
+import net.shibboleth.idp.authn.context.MultiFactorAuthenticationContext;
 import net.shibboleth.idp.authn.principal.UsernamePrincipal;
 import org.junit.jupiter.api.Test;
+import org.opensaml.profile.context.ProfileRequestContext;
 
 final class GraphicalMatrixMfaCompletionStrategyTest {
     private static final GraphicalMatrixMfaGuardContext GRAPHICAL_GUARD =
@@ -70,6 +73,49 @@ final class GraphicalMatrixMfaCompletionStrategyTest {
         assertEquals("alice", GraphicalMatrixMfaSubjectSupport.exactUsername(result("alice")));
         assertTrue(GraphicalMatrixMfaSubjectSupport.exactUsername(result()).isEmpty());
         assertTrue(GraphicalMatrixMfaSubjectSupport.exactUsername(result("alice", "bob")).isEmpty());
+    }
+
+    @Test
+    void advancesGuardOnlyForTheExpectedForcedGraphicalMatrixChange() {
+        final ProfileRequestContext context = context(
+            new GraphicalMatrixMfaGuardContext("alice", "authn/External", "GRAPHICALMATRIX", 7L));
+
+        assertTrue(GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+            context, "alice", 7L));
+        final GraphicalMatrixMfaGuardContext advanced = GraphicalMatrixMfaSubjectSupport
+            .mfaContext(context).getSubcontext(GraphicalMatrixMfaGuardContext.class);
+        assertEquals(8L, advanced.stateVersion());
+        assertTrue(GraphicalMatrixMfaCompletionStrategy.validCompletion(
+            settings("ACTIVE", "GraphicalMatrix", "UNREGISTERED", false, true, 8L), advanced));
+
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+            context, "alice", 7L));
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+            context, "bob", 8L));
+    }
+
+    @Test
+    void doesNotAdvanceOtherMfaMethodsOrOverflowedVersions() {
+        final ProfileRequestContext totp = context(
+            new GraphicalMatrixMfaGuardContext("alice", "authn/TOTP", "TOTP", 4L));
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+            totp, "alice", 4L));
+
+        final ProfileRequestContext overflow = context(
+            new GraphicalMatrixMfaGuardContext(
+                "alice", "authn/External", "GRAPHICALMATRIX", Long.MAX_VALUE));
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+            overflow, "alice", Long.MAX_VALUE));
+    }
+
+    private static ProfileRequestContext context(final GraphicalMatrixMfaGuardContext guard) {
+        final ProfileRequestContext context = new ProfileRequestContext();
+        final AuthenticationContext authentication = new AuthenticationContext();
+        final MultiFactorAuthenticationContext mfa = new MultiFactorAuthenticationContext();
+        mfa.addSubcontext(guard);
+        authentication.addSubcontext(mfa);
+        context.addSubcontext(authentication);
+        return context;
     }
 
     private static AuthenticationResult result(final String... users) {

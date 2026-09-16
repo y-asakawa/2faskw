@@ -1872,6 +1872,34 @@ sudo systemctl restart jetty-idp.service
 証明書・ホスト名検証付きTLSで保護されていることを確認する。受入試験後は`false`へ変更し、
 平文`ldap://`を使用する従来経路へrollbackしない。
 
+## 初回のGraphicalMatrix強制変更後に`GraphicalMatrixAccessDenied`となるのはなぜか
+
+v1.3.5の初期成果物では、認証中の登録状態変更を検出するMFA完了guardと、初回ログイン時の
+GraphicalMatrix強制変更が競合する場合がある。新しい画像列の保存は正常に
+`force_sequence_change=0`へ更新し、同時に`state_version`を1増やす。一方、旧実装の完了guardは
+認証開始時のversionを要求し続けるため、正規の強制変更を外部変更と誤認して
+`GraphicalMatrixAccessDenied`を返す。
+
+修正版は、利用者、`authn/External`、GraphicalMatrix方式、変更前versionがすべて一致する強制変更に限り、
+完了guardの期待versionも正確に1増やす。管理CLIや別sessionによる変更を許容するものではない。
+
+発生後は登録状態を確認する。
+
+```bash
+# force_sequence_changeと現在の登録状態を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+
+# 強制変更の保存成功と、その後の完了guard拒否を確認する。
+sudo grep -E \
+  'FORCE_SEQUENCE_CHANGE_SAVE|MFA completion|GraphicalMatrixAccessDenied' \
+  /opt/shibboleth-idp/logs/idp-process.log \
+  /opt/shibboleth-idp/logs/graphicalmatrix-audit.log | tail -n 50
+```
+
+`force_sequence_change=0`であれば新しい画像列は保存済みである。旧成果物を使用中の一時回避として、
+新しいbrowser sessionから新しい画像列でログインし直せる。恒久対応は修正版Pluginへ更新し、WAR再構築と
+Jetty再起動後に未使用のテスト利用者で初回強制変更からSP復帰までを再試験する。
+
 ## MFA利用者を一時停止または物理削除するにはどうすればよいか
 
 一時停止には`disable`を使用する。GraphicalMatrix、TOTP、WebAuthnのcredentialは保持されるが、

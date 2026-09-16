@@ -93,6 +93,26 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
         return "WEBAUTHN".equals(method);
     }
 
+    static boolean advanceGraphicalMatrixGuard(final ProfileRequestContext input,
+            final String user, final long previousStateVersion) {
+        if (previousStateVersion == Long.MAX_VALUE) {
+            return false;
+        }
+        final MultiFactorAuthenticationContext mfaCtx = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
+        final GraphicalMatrixMfaGuardContext guard = mfaCtx != null
+            ? mfaCtx.getSubcontext(GraphicalMatrixMfaGuardContext.class) : null;
+        if (guard == null
+                || !guard.user().equals(user)
+                || !"authn/External".equals(guard.expectedFlow())
+                || !"GRAPHICALMATRIX".equals(guard.expectedMethod())
+                || guard.stateVersion() != previousStateVersion) {
+            return false;
+        }
+        mfaCtx.addSubcontext(new GraphicalMatrixMfaGuardContext(
+            guard.user(), guard.expectedFlow(), guard.expectedMethod(), previousStateVersion + 1L), true);
+        return true;
+    }
+
     private static String deny(final MultiFactorAuthenticationContext mfaCtx,
             final String event, final String message) {
         LOG.warn(message);

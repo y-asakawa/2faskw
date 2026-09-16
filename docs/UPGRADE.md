@@ -1869,6 +1869,10 @@ WebAuthn追加登録画面の区別には、v1.3.5配布物の
 テスト利用者を使い、`delete USER`後にenrollmentとWebAuthn credentialの両方が存在しないことを確認する。
 Provisioning CSVの`D`は引き続き`DISABLED`であり、標準CSVの`D`は完全削除を保証できないため拒否される。
 
+`force_sequence_change=1`の未使用テスト利用者では、旧画像列による認証、新しい画像列の保存、同じSAML
+login要求への復帰が連続して成功し、`GraphicalMatrixAccessDenied`にならないことを確認する。完了後は
+`show USER`で`force_sequence_change=0`を確認し、次回ログインでは新しい画像列だけが成功することを確認する。
+
 既存WebAuthn credentialを持つテスト利用者のMFA方式をいったんGraphicalMatrixへ変更し、
 自己管理画面でWebAuthnを選択する。公式登録画面へ遷移せず変更完了が表示され、
 `show USER`の`mfa_method`が`WebAuthn`に変わることを確認する。監査ログには次が記録される。

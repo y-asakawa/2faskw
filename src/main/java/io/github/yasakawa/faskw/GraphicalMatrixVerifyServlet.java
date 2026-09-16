@@ -26,6 +26,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import net.shibboleth.idp.authn.ExternalAuthentication;
+import org.opensaml.profile.context.ProfileRequestContext;
 
 public final class GraphicalMatrixVerifyServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
@@ -359,6 +360,8 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
         }
 
         try {
+            final ProfileRequestContext profileRequestContext =
+                ExternalAuthentication.getProfileRequestContext(sessionKey, request);
             final GraphicalMatrixEnrollment current = repository.findEnrollment(user);
             if (current == null) {
                 audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "ENROLL_REQUIRED", null,
@@ -390,6 +393,16 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 return;
             }
 
+            if (!GraphicalMatrixMfaCompletionStrategy.advanceGraphicalMatrixGuard(
+                    profileRequestContext, user, stateVersion.longValue())) {
+                audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "DENIED", null,
+                    "mfa_completion_guard_mismatch", request);
+                request.setAttribute(ExternalAuthentication.AUTHENTICATION_EVENT_KEY,
+                    GraphicalMatrixMfaDecisionStrategy.ACCESS_DENIED_EVENT);
+                clearForcedSequenceChange(session);
+                ExternalAuthentication.finishExternalAuthentication(sessionKey, request, response);
+                return;
+            }
             audit.log("FORCE_SEQUENCE_CHANGE_SAVE", user, "OK", null,
                 "sequence_count=" + selected.size(), request);
             request.setAttribute(ExternalAuthentication.PRINCIPAL_NAME_KEY, user);
