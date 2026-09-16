@@ -34,25 +34,32 @@ final class GraphicalMatrixSecurityRegressionTest {
         final String verifyServlet = Files.readString(Path.of(
             "src/main/java/io/github/yasakawa/faskw/GraphicalMatrixVerifyServlet.java"));
 
-        assertFalse(startServlet.contains("repository.prepareTotpRegistration(user, now)"));
-        assertTrue(changeServlet.contains("totpEnroll.selfServiceAuthorized"));
-        assertTrue(verifyServlet.contains("|| !selfServiceAuthorized"));
+        assertFalse(startServlet.contains("beginTotpRegistration"));
+        assertTrue(changeServlet.contains("repository.beginTotpRegistration"));
+        assertTrue(changeServlet.contains("GraphicalMatrixTotpEnrollmentSession.initialize"));
+        assertTrue(verifyServlet.contains("GraphicalMatrixTotpEnrollmentSession.claim"));
+        assertTrue(verifyServlet.contains("repository.verifyTotpRegistration"));
     }
 
     @Test
-    void webAuthnMethodIsActivatedOnlyByTheCredentialRegistrationSuccessHook()
+    void webAuthnMethodRequiresAnExistingOrNewlyRegisteredCredential()
             throws Exception {
         final String changeServlet = source("GraphicalMatrixChangeServlet.java");
         final String hook = source("GraphicalMatrixWebAuthnRegistrationHook.java");
+        final String changeMethodView = Files.readString(Path.of("views/change-method.html"));
         final String postconfig = Files.readString(Path.of(
             "src/main/resources/META-INF/net.shibboleth.idp/postconfig.xml"));
 
         assertTrue(changeServlet.contains("beginWebAuthnRegistration"));
+        assertTrue(changeServlet.contains("GraphicalMatrixWebAuthnCredentialLookup.lookup"));
+        assertTrue(changeServlet.contains("existing_credential,mfa_method=WebAuthn"));
         assertTrue(changeServlet.contains(
             "GraphicalMatrixWebAuthnRegistrationSession.initialize"));
         assertTrue(hook.contains("activateWebAuthnIfMethodCurrent"));
         assertTrue(postconfig.contains(
             "shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook"));
+        assertTrue(changeMethodView.contains("登録済みcredentialがあればそのまま方式を変更"));
+        assertTrue(changeMethodView.contains("Add new security key"));
     }
 
     @Test
@@ -67,6 +74,37 @@ final class GraphicalMatrixSecurityRegressionTest {
         assertTrue(totpMigration.contains("AND state_version = ? AND totp_seed = ?"));
         assertTrue(totpMigration.contains("state_version = state_version + 1"));
     }
+
+    @Test
+    void physicalDeleteFailsClosedAndScopesWebAuthnCleanup() throws Exception {
+        final String adminApi = source("GraphicalMatrixAdminApiServlet.java");
+        final String dbCli = Files.readString(Path.of("graphicalmatrix-db.sh"));
+
+        assertTrue(adminApi.contains("SET status = 'DISABLED'"));
+        assertTrue(adminApi.contains("WHERE user_id = ? AND status = 'DISABLED'"));
+        assertTrue(adminApi.contains("net.shibboleth.idp.plugin.authn.webauthn"));
+        assertTrue(adminApi.contains("WebAuthn credential cleanup verification failed"));
+        assertTrue(adminApi.contains("method = normalizeMethod(row.mfaMethod)"));
+        assertTrue(dbCli.contains("missingEnrollmentPolicy=allow-on-bypass"));
+        assertTrue(dbCli.contains("normalized_method=\"$(normalize_method \"$method\")\""));
+        assertTrue(dbCli.contains("WHERE s.context = 'net.shibboleth.idp.plugin.authn.webauthn'"));
+        assertTrue(dbCli.contains("enrollment remains DISABLED"));
+        assertTrue(dbCli.contains("uses D in standard mode"));
+    }
+
+    @Test
+    void mfaFlowConfigurationRechecksAllSecondFactors() throws Exception {
+        final String mfaConfig = Files.readString(Path.of("mfa-authn-config.xml"));
+        final String events = Files.readString(Path.of("examples/authn-events-flow.xml"));
+
+        assertTrue(mfaConfig.contains("key=\"authn/External\""));
+        assertTrue(mfaConfig.contains("key=\"authn/TOTP\""));
+        assertTrue(mfaConfig.contains("key=\"authn/WebAuthn\""));
+        assertTrue(mfaConfig.contains("GraphicalMatrixMfaCompletionStrategy"));
+        assertTrue(events.contains("GraphicalMatrixAccessDenied"));
+        assertTrue(events.contains("GraphicalMatrixServiceUnavailable"));
+    }
+
     @Test
     void legacyChangeOnlyAcceptsTheCurrentlySelectedGraphicalMatrixMethod() {
         assertTrue(GraphicalMatrixChangeServlet.legacyGraphicalMatrixAllowed(

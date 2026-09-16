@@ -15,6 +15,7 @@
 - v1.3.1 から v1.3.2 への更新
 - v1.3.2 から v1.3.3 への更新
 - v1.3.3 から v1.3.4 への更新
+- v1.3.4 から v1.3.5 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -33,6 +34,7 @@
 | v1.3.1 | v1.3.2 | 旧JAR削除、WAR再構築、設定検査、既存認証の回帰試験 | 2FAS-KW固有ログのlogrotate設定、Admin Toolsの更新 |
 | v1.3.2 | v1.3.3 | 旧JAR削除、WAR再構築、設定検査、GraphicalMatrix認証の回帰試験 | 狭いviewportでのモバイル列数切替 |
 | v1.3.3 | v1.3.4 | `web.xml`へsecurity header Filterを反映し、外部JavaScriptと標準templateを統合する。IdP自己管理flow利用時は従来LDAP自己管理も停止する | 独自templateのCSP互換性、SAML POST、MFA、自己管理を回帰試験する |
+| v1.3.4 | v1.3.5 | missing enrollmentを既定拒否にし、MFA開始・完了の状態guard、custom failure event、MFA結果再利用停止を統合する | `delete USER`のWebAuthn credential完全削除と途中失敗時DISABLED保持を試験する |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -1684,6 +1686,226 @@ CSP違反がある場合は、原因調査中だけ`graphicalmatrix.securityHead
 
 ***
 ***
+
+## v1.3.4からv1.3.5への更新手順
+
+v1.3.5では、`DISABLED`登録がSP/IPのBYPASSやWebAuthn成功で認証されないように、Password成功後と
+第二要素成功後の両方で登録状態を確認する。また、TOTP自己登録を利用者、登録ID、状態version、固定期限へ
+結び付け、管理操作後の古い登録画面による確定・取消を拒否する。このためDB schemaまたはLDAP schemaの
+更新が必要であり、JARだけの更新では保護が完成しない。
+
+更新前に認証設定とMFA policyを退避する。
+
+```bash
+STAMP="$(date +%Y%m%d%H%M%S)"
+sudo cp -a /opt/shibboleth-idp/conf/authn \
+  "/opt/shibboleth-idp/conf/authn.bak.${STAMP}"
+sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties \
+  "/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties.bak.${STAMP}"
+sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties \
+  "/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties.bak.${STAMP}"
+sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties \
+  "/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties.bak.${STAMP}" 2>/dev/null || true
+```
+
+`mfa-policy.properties`へ未登録者の既定拒否を追加する。既に同名設定がある場合は重複させず値を確認する。
+
+```properties
+graphicalmatrix.mfa.missingEnrollmentPolicy = deny
+```
+
+未登録者をBYPASSで一時的に許可する既存運用だけ`allow-on-bypass`を使用できるが、その間は
+`graphicalmatrix-db.sh delete USER`と管理API DELETEが拒否される。対象利用者をprovisionした後に`deny`へ戻す。
+
+配布物の`examples/mfa-authn-config.xml`と稼働設定を比較し、既存遷移を保持したまま次を統合する。
+
+- `GraphicalMatrixMfaDecisionStrategy`によるPassword後の開始判定
+- `GraphicalMatrixMfaCompletionStrategy` bean
+- `authn/External`、`authn/TOTP`、`authn/WebAuthn`成功後のcompletion遷移
+
+```bash
+sudo diff -u \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
+  ./examples/mfa-authn-config.xml
+```
+
+配布物の`examples/authn-events-flow.xml`を参照し、既存custom eventを保持したまま
+`GraphicalMatrixAccessDenied`と`GraphicalMatrixServiceUnavailable`のend-stateおよびglobal transitionを
+`/opt/shibboleth-idp/conf/authn/authn-events-flow.xml`へ追加する。
+
+`/opt/shibboleth-idp/conf/authn/authn.properties`へ次を設定し、過去のトップレベルMFA結果による状態検査の
+省略を禁止する。
+
+```properties
+idp.authn.MFA.reuseCondition = shibboleth.Conditions.FALSE
+```
+
+TOTP登録専用の固定期限を`graphicalmatrix.properties`へ追加する。既定値は180秒で、設定範囲は30〜900秒である。
+誤った確認コードを入力して再表示しても、この期限は延長されない。
+
+```properties
+graphicalmatrix.totp.registrationTtlSeconds = 180
+```
+
+DB保存では、v1.3.5配布物のschemaを対象tableのDDL権限を持つDB roleとして適用する。既存のTOTP seed、
+登録済み状態、GraphicalMatrix sequenceは変更されず、進行中登録を識別する2列だけが追加される。
+
+PostgreSQLがIdPと同じサーバーにあり、`postgres` OSユーザーが存在する標準的なローカル構成では次を実行する。
+
+```bash
+sudo -u postgres psql -d graphicalmatrix -v ON_ERROR_STOP=1 \
+  -f /opt/shibboleth-idp/conf/graphicalmatrix/postgresql-schema.sql
+```
+
+PostgreSQLが別サーバーにある場合、IdPサーバーに`postgres` OSユーザーが存在しないことは正常である。
+`sudo -u postgres`は使用せず、現在の`db.properties`に設定された接続先、DB role、password設定を使用する。
+ランタイムと同じく`graphicalmatrix.db.password`を先に使用し、空の場合は
+`graphicalmatrix.db.passwordFile`から読み込む。
+次のコマンドはpasswordを画面へ表示せず、現在の接続設定へschemaを適用する。
+
+```bash
+sudo bash <<'BASH'
+set -euo pipefail
+
+DB_PROPERTIES=/opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+SCHEMA=/opt/shibboleth-idp/conf/graphicalmatrix/postgresql-schema.sql
+
+read_property() {
+  awk -F= -v wanted="$2" '
+    /^[[:space:]]*[#!]/ { next }
+    {
+      key=$1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      if (key == wanted) {
+        value=substr($0, index($0, "=") + 1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        result=value
+      }
+    }
+    END { print result }
+  ' "$1"
+}
+
+DB_URL="$(read_property "$DB_PROPERTIES" graphicalmatrix.db.url)"
+DB_USER="$(read_property "$DB_PROPERTIES" graphicalmatrix.db.user)"
+DB_PASSWORD="$(read_property "$DB_PROPERTIES" graphicalmatrix.db.password)"
+DB_PASSWORD_FILE="$(read_property "$DB_PROPERTIES" graphicalmatrix.db.passwordFile)"
+PSQL_BIN="$(command -v psql 2>/dev/null || true)"
+if [[ -z "$PSQL_BIN" ]]; then
+  for candidate in /usr/pgsql-*/bin/psql; do
+    [[ -x "$candidate" ]] || continue
+    PSQL_BIN="$candidate"
+  done
+fi
+
+test -n "$DB_URL" || { echo 'ERROR: graphicalmatrix.db.url is empty' >&2; exit 1; }
+test -n "$DB_USER" || { echo 'ERROR: graphicalmatrix.db.user is empty' >&2; exit 1; }
+test -x "$PSQL_BIN" || { echo 'ERROR: psql was not found' >&2; exit 1; }
+test -r "$SCHEMA" || { echo "ERROR: schema file is not readable: $SCHEMA" >&2; exit 1; }
+
+if [[ -z "$DB_PASSWORD" ]]; then
+  test -n "$DB_PASSWORD_FILE" || { echo 'ERROR: DB password and passwordFile are both empty' >&2; exit 1; }
+  test -r "$DB_PASSWORD_FILE" || { echo "ERROR: password file is not readable: $DB_PASSWORD_FILE" >&2; exit 1; }
+  DB_PASSWORD="$(tr -d '\r\n' < "$DB_PASSWORD_FILE")"
+fi
+
+export PGPASSWORD="$DB_PASSWORD"
+test -n "$PGPASSWORD" || { echo 'ERROR: resolved DB password is empty' >&2; exit 1; }
+"$PSQL_BIN" --no-password "${DB_URL#jdbc:}" -U "$DB_USER" -v ON_ERROR_STOP=1 -f "$SCHEMA"
+unset DB_PASSWORD PGPASSWORD
+BASH
+```
+
+この方法で`permission denied`が返る場合、`graphicalmatrix.db.user`はtable所有者またはDDL roleではない。
+DBサーバー管理者がDBサーバー上で同じschemaを対象DBへ適用する。権限エラーを回避するために
+アプリケーションroleへsuperuser権限を付与してはならない。
+
+旧版で`totp_status=PENDING`のまま残った行には新しい登録IDがないため、v1.3.5の画面から再開できない。
+まず対象件数と利用者を確認し、GraphicalMatrix sequenceと初期sequenceが非空で、現在のsequence保存方式と
+互換な行だけを明示的に無効化する。
+`--apply`前にDBバックアップを取得し、表示された利用者が想定どおりであることを確認する。
+
+```bash
+# 旧版の未完了TOTP登録と復旧可能性を確認する。DBは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp
+
+# 復旧可能な旧PENDING登録をGraphicalMatrixへ戻し、新しい登録を最初から開始可能にする。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp --apply
+```
+
+LDAP保存では、`ldap_totp_registration_id`と`ldap_totp_registration_expires_at`に相当する単一値属性を
+LDAP schema、補助objectClass、writer ACLへ追加し、`ldap.properties`へ対応するmappingを追加する。
+
+```properties
+graphicalmatrix.ldap.attr.totp_registration_id = ldap_totp_registration_id
+graphicalmatrix.ldap.attr.totp_registration_expires_at = ldap_totp_registration_expires_at
+```
+
+さらにLDAPサーバーがRFC 4528 Assertion Control（OID `1.3.6.1.1.12`）をサポートし、writer bind DNが
+必要属性をcompare・modifyできることを検証する。Controlは`critical=true`で送信されるため、未対応、ACL不足、
+schema不足の場合はTOTP登録をfail closedで拒否する。具体的なschemaと試験項目は
+[INSTALL_LDAP.md](./INSTALL_LDAP.md)を参照する。
+
+設定統合後にWARを再構築してJettyを再起動する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+WebAuthn追加登録画面の区別には、v1.3.5配布物の
+`views/webauthn/webauthn-authn.vm.idpnew`を使用する。`graphicalmatrix-plugin-config.sh --apply`は
+既存のIdP templateを上書きせず、次のような保留ファイルを作成する。
+
+```text
+/opt/shibboleth-idp/views/webauthn/webauthn-authn.vm.idpnew.TIMESTAMP
+```
+
+稼働templateの個別変更を確認したうえで配布版のRequester判定、専用説明、queryなしURL、
+再帰リンク非表示を統合する。統合後はJettyを再起動する。
+
+更新後はACTIVEのGraphicalMatrix、TOTP、WebAuthnが従来どおり成功することに加え、各方式の対象を
+`disable USER`にした場合にREQUIREとBYPASSの両方で拒否されることを確認する。削除試験では未使用の
+テスト利用者を使い、`delete USER`後にenrollmentとWebAuthn credentialの両方が存在しないことを確認する。
+Provisioning CSVの`D`は引き続き`DISABLED`であり、標準CSVの`D`は完全削除を保証できないため拒否される。
+
+既存WebAuthn credentialを持つテスト利用者のMFA方式をいったんGraphicalMatrixへ変更し、
+自己管理画面でWebAuthnを選択する。公式登録画面へ遷移せず変更完了が表示され、
+`show USER`の`mfa_method`が`WebAuthn`に変わることを確認する。監査ログには次が記録される。
+
+```text
+event=WEBAUTHN_REGISTER_ACTIVATE result=OK detail=existing_credential,mfa_method=WebAuthn
+```
+
+credentialが0件のテスト利用者では、方式を先に変更せず公式WebAuthn登録Flowへ進み、
+credentialの保存成功後だけ`WebAuthn`に変わることを確認する。`Finish`のみでFlowを終了した
+場合は元のMFA方式を維持する。
+
+TOTP自己登録では、登録開始後に別端末または管理CLIでMFA方式を変更し、開いたままの旧画面から確認と取消の
+両方が`409 Conflict`相当で拒否されることを確認する。誤コード再試行では同じQR登録情報を表示し、開始時の
+固定期限を延長しない。期限到達時は`410 Gone`相当で終了し、自己管理画面からの再開始を要求する。
+
+Dashboardを使用する環境では、v1.3.5のDashboard packageへ更新してserviceを再起動する。
+VIEWER／OPERATORの汎用イベント検索と集計は、認証・自己管理イベントの明示allowlistだけを返す。
+管理APIイベント、未分類イベント、現在ロック状態を確認する運用者にはAUDITOR以上を割り当てる。
+独自API clientは、下位roleのsummaryで`lockedUserCount`と`lockedUsersAsOf`が`null`になること、および
+`visibility.lockedUsersAvailable=false`へ対応する。
+
+Admin ToolsでCSV provisioningを使用する環境では、`graphicalmatrix-db.sh`と対応するPlugin/Admin Tools
+JARを同じv1.3.5配布物から更新する。CSV形式と実行コマンドは変わらない。更新後はtest CSVを使って
+dry-runとapplyを確認し、画像sequenceをJavaのprocess引数へ渡す旧shellが残っていないことを確認する。
+Dashboardのrole境界とCSV sequenceの標準入力受け渡しだけに起因する追加のDB schema変更や、既存sequenceの
+再変換は不要である。ただし、同じv1.3.5に含まれるTOTP登録Binding用の2列追加は、前述の手順どおり必要である。
+
+ソースtree上では、次の自動試験でDashboardのrole境界とCSV sequenceの標準入力受け渡しを確認できる。
+
+```bash
+# DashboardのPrincipal別イベントscopeとHTTP APIの回帰試験を実行する。
+mvn -q -f dashboard/pom.xml test
+
+# CSV dry-run／applyで子Java processのargvへ画像sequenceが現れないことを確認する。
+bash scripts/tests/security-regression.sh
+```
 
 ## 設定検査
 

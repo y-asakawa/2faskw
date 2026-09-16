@@ -15,8 +15,10 @@ DASHBOARD_ARTIFACT_ID=2faskw-dashboard
 `-Drevision` としてバージョンを渡す。plugin metadata、OpenAPI、パッケージに
 同梱する文書も同じバージョンで生成する。
 
-Mavenを直接実行する場合、`pom.xml` には `revision` の既定値がある。ただし、
-リリース成果物は `scripts/build-plugin-package.sh` で生成する。
+Mavenを直接実行する場合、PluginとDashboardの`pom.xml`は`revision`の既定値として
+`0.0.0-SNAPSHOT`を使用する。これは、`version.ini`を読み込まない直接buildを公開releaseと
+誤認しないための開発用versionである。リリース成果物は`scripts/build-plugin-package.sh`で
+生成する。
 
 ```bash
 mvn -B -ntp clean package
@@ -36,7 +38,9 @@ plugin、管理ツール、Standalone Dashboardのリリースパッケージを
 `bootstrap/keys.txt` が必要である。この公開鍵はpluginアーカイブ内の
 `bootstrap/keys.txt` として格納される。秘密鍵やpassphraseをリポジトリに置いてはいけない。
 
-スクリプトは最初に `mvn -B -ntp clean package` を実行し、リリース用ディレクトリ、
+スクリプトは`version.ini`の`VERSION`をMavenへ`-Drevision`で渡してbuildし、Pluginと
+DashboardのJAR Manifestに記録された`Implementation-Version`が同じ値であることを検査する。
+不一致の場合は配布物を生成せず終了する。その後、リリース用ディレクトリ、
 固定名およびバージョン付きのplugin ZIP/tar.gz、固定名およびバージョン付きの
 Admin Tools ZIP、固定名およびバージョン付きのDashboard ZIP、固定名アーカイブ4件の
 `SHA256SUMS`を生成する。

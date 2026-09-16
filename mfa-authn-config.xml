@@ -23,10 +23,25 @@
                   p:nextFlowStrategy-ref="GraphicalMatrixMfaDecisionStrategy" />
         </entry>
 
-        <!-- authn/External(GraphicalMatrix), authn/TOTP, authn/WebAuthn 成功で MFA 完了（暗黙の終端） -->
+        <!-- 第二要素成功後に利用者、方式、登録状態を再検査してからMFAを完了 -->
+        <entry key="authn/External">
+            <bean parent="shibboleth.authn.MFA.Transition"
+                  p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+        </entry>
+        <entry key="authn/TOTP">
+            <bean parent="shibboleth.authn.MFA.Transition"
+                  p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+        </entry>
+        <entry key="authn/WebAuthn">
+            <bean parent="shibboleth.authn.MFA.Transition"
+                  p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+        </entry>
     </util:map>
 
     <bean id="GraphicalMatrixMfaDecisionStrategy"
           class="io.github.yasakawa.faskw.GraphicalMatrixMfaDecisionStrategy" />
+
+    <bean id="GraphicalMatrixMfaCompletionStrategy"
+          class="io.github.yasakawa.faskw.GraphicalMatrixMfaCompletionStrategy" />
 
 </beans>

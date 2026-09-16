@@ -19,6 +19,10 @@ Shibboleth plugin形式ではtar.gzとZIPの両方を配布物として扱えま
 - [INSTALL.md](./INSTALL.md)
 - [SECURITY.md](./SECURITY.md)
 - [SECURITY-CHECKLIST.md](./SECURITY-CHECKLIST.md)
+- [SUPPORT-POLICY.md](./SUPPORT-POLICY.md)
+- [COMPATIBILITY.md](./COMPATIBILITY.md)
+- [BACKUP-RESTORE.md](./BACKUP-RESTORE.md)
+- [OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md)
 - [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)
 - [COMMAND-REFERENCE.md](./COMMAND-REFERENCE.md)
 - [LOG-REFERENCE.md](./LOG-REFERENCE.md)
@@ -59,6 +63,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [development/AUTHENTICATION-FLOW.md](./development/AUTHENTICATION-FLOW.md) | 認証、MFA選択、自己管理、TOTP、WebAuthnの呼出関係。 |
 | [development/SP-MANAGEMENT-INTERNALS.md](./development/SP-MANAGEMENT-INTERNALS.md) | SP registry、metadata、属性、access、MFA管理CLIの内部設計。 |
 | [development/DATA-STORAGE.md](./development/DATA-STORAGE.md) | DB/LDAP schema、状態遷移、sequence/TOTP保護、backup境界。 |
+| [development-history/README.md](./development-history/README.md) | 公開情報、設計判断、実装根拠、prior-art調査を結ぶdesign provenance記録。 |
 
 ## 導入・設定
 
@@ -72,7 +77,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [INSTALL_NEW_Manual_SP.md](./INSTALL_NEW_Manual_SP.md) | SP管理CLIを使わず、metadata provider、属性release、MFAポリシーを手作業で設定する手順。 |
 | [INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md) | GraphicalMatrix変更およびMFA方式変更を、IdP内のShibboleth再認証済み自己管理フローで提供するための設計。推奨方式。 |
 | [INSTALL_Passchange_SP.md](./INSTALL_Passchange_SP.md) | 外部自己管理SPを追加し、GraphicalMatrix変更およびMFA方式変更を提供するための設計。 |
-| [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md) | `*.properties` の設定項目、型、既定値、注意点の一覧。 |
+| [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md) | `*.properties`と主要な認証Flow XMLの設定項目、型、既定値、注意点の一覧。 |
 | [COMMAND-REFERENCE.md](./COMMAND-REFERENCE.md) | IdP/DB/SP管理、属性・アクセス制御、診断、移行のコマンドリファレンス。 |
 | [LOG-REFERENCE.md](./LOG-REFERENCE.md) | 2FAS-KW、IdP、Admin Tools、Dashboardのログ形式、event、確認順序、保持のリファレンス。 |
 | [FAQ.md](./FAQ.md) | 設定読込エラー、反映タイミング、ログ確認などのFAQ。 |
@@ -94,13 +99,19 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | File | Description |
 | --- | --- |
 | [ADMIN-TOOLS.md](./ADMIN-TOOLS.md) | 管理CLI、Admin Tools 単体導入、CSV import/export、監査ログの運用説明。 |
+| [BACKUP-RESTORE.md](./BACKUP-RESTORE.md) | DB/LDAP、storage-format secret、IdP設定、SP管理情報を同一世代で保存・検証復元する手順。 |
+| [OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md) | 日常点検、変更作業、障害切り分け、security incident初動、復旧完了判定。 |
 | [CSV-EXPORT.md](./CSV-EXPORT.md) | `graphicalmatrix_enrollment` から管理CSVを出力する手順。 |
 | [LOGROTATE.md](./LOGROTATE.md) | 2FAS-KW固有ログのlogrotate設定例。Shibboleth IdP標準ログはLogback設定で管理する。 |
 | [INSTALL_LOADTEST.md](./INSTALL_LOADTEST.md) | 負荷試験環境と load test に関する補助メモ。 |
 | [LOADTEST-POC-RESULTS.md](./LOADTEST-POC-RESULTS.md) | ローカル同居型PoCのGraphicalMatrix認証負荷試験結果、実施フロー、評価上の制約。 |
-| [release-notes/v1.3.2-RELEASE-NOTES.md](./release-notes/v1.3.2-RELEASE-NOTES.md) | 配布物の文書構成、Admin Tools installer、2FAS-KW固有ログのlogrotateサンプルを整理した運用改善リリース。 |
-| [release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md](./release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md) | GraphicalMatrixのモバイル列数切替とタッチ操作改善の詳細設計。 |
+| [release-notes/v1.3.5-TOTP-ENROLLMENT-SESSION-DESIGN.md](./release-notes/v1.3.5-TOTP-ENROLLMENT-SESSION-DESIGN.md) | TOTP自己登録を登録ID・状態version・固定期限へ束縛し、古い登録画面による管理変更の上書きと別登録seedの取得を防止する詳細設計。 |
+| [release-notes/v1.3.5-DASHBOARD-ACCESS-CLI-SECRETS-DESIGN.md](./release-notes/v1.3.5-DASHBOARD-ACCESS-CLI-SECRETS-DESIGN.md) | DashboardのPrincipalベース閲覧制御と、CSV画像列をJavaのプロセス引数へ渡さないAdmin Tools内部変更の詳細設計。 |
+| [release-notes/v1.3.5-WEBAUTHN-DISABLE-PHYSICAL-DELETE-DESIGN.md](./release-notes/v1.3.5-WEBAUTHN-DISABLE-PHYSICAL-DELETE-DESIGN.md) | 無効化済みWebAuthn利用者の拒否、MFA共通状態判定、disableと物理deleteの詳細設計。 |
+| [release-notes/v1.3.5-WEBAUTHN-EXISTING-CREDENTIAL-ACTIVATION.md](./release-notes/v1.3.5-WEBAUTHN-EXISTING-CREDENTIAL-ACTIVATION.md) | 登録済みWebAuthn credentialを持つ利用者が、自己管理画面から新規鍵を追加せず方式をWebAuthnへ戻す詳細設計。 |
 | [release-notes/v1.3.4-SECURITY-HEADER-HARDENING-DESIGN.md](./release-notes/v1.3.4-SECURITY-HEADER-HARDENING-DESIGN.md) | 2FAS-KW Servletの共通security header、厳格CSP、外部JavaScript、ローカルtest SP防御の詳細設計と実装仕様。 |
+| [release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md](./release-notes/v1.3.3-GRAPHICALMATRIX-RESPONSIVE-LAYOUT-DESIGN.md) | GraphicalMatrixのモバイル列数切替とタッチ操作改善の詳細設計。 |
+| [release-notes/v1.3.2-RELEASE-NOTES.md](./release-notes/v1.3.2-RELEASE-NOTES.md) | 配布物の文書構成、Admin Tools installer、2FAS-KW固有ログのlogrotateサンプルを整理した運用改善リリース。 |
 | [release-notes/v1.3.1-SP-MFA-POLICY-CLI.md](./release-notes/v1.3.1-SP-MFA-POLICY-CLI.md) | SP単位の`set-mfa`とIdP全体の`mfa`によるMFA方針管理、実効判定、手作業差分修復の仕様と手順。 |
 | [release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md](./release-notes/v1.3.1-LDAP-RESOLVER-ATTRIBUTE-CLI.md) | LDAP属性をAttribute Resolverへ安全に追加するSP管理CLI拡張の仕様と手順。 |
 | [release-notes/v1.3.0-RELEASE-NOTES.md](./release-notes/v1.3.0-RELEASE-NOTES.md) | Dashboard、SP管理CLI、SP別LDAP属性アクセス制御をまとめた現行統合リリースの概要と更新方針。 |
@@ -121,6 +132,15 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | --- | --- |
 | [SECURITY.md](./SECURITY.md) | 管理API、DB、sequence/TOTP seed、WebAuthn、監査ログなどのセキュリティ運用ガイド。 |
 | [SECURITY-CHECKLIST.md](./SECURITY-CHECKLIST.md) | 本番導入前に確認するセキュリティチェックリスト。 |
+| [SUPPORT-POLICY.md](./SUPPORT-POLICY.md) | 最新リリースのみを対象とするベストエフォートサポートと、プロジェクト全体のEOL方針。 |
+| [COMPATIBILITY.md](./COMPATIBILITY.md) | 最新リリースのIdP、Java、Jetty、OS、DB、LDAP、MFA Plugin、SPおよびbrowser互換性。 |
+| [THREAT-MODEL.md](./THREAT-MODEL.md) | 2FAS-KWの保護対象、信頼境界、攻撃者モデル、脅威シナリオ、既存対策と重要な運用前提。 |
+
+## 技術・法務調査
+
+| File | Description |
+| --- | --- |
+| [PATENT-REVIEW.md](./PATENT-REVIEW.md) | GraphicalMatrixに関連する公開特許文献の技術調査、実装との構成比較、継続確認方針。法的なFTO意見ではない。 |
 
 ## 移行
 
@@ -170,9 +190,9 @@ sudo tail -n 50 /opt/shibboleth-idp/logs/graphicalmatrix-audit.log
 
 TOTP登録とWebAuthn登録は、自己管理画面または変更メニューでMFA方式を選択して開始する。
 登録用URLを利用者へ直接案内せず、既存の認証・認可条件を通して開始する。
-WebAuthnでは、Shibboleth WebAuthn Pluginがcredentialの保存に成功した後だけ、
-2FAS-KWが利用者のMFA方式を`WebAuthn`へ切り替える。登録を中断または失敗した場合は、
-登録開始前のMFA方式を維持する。
+WebAuthnでは、登録済みcredentialがあれば公式CredentialRepositoryで確認して方式を切り替える。
+credentialがない場合は、Shibboleth WebAuthn Pluginがcredentialの保存に成功した後だけ切り替える。
+登録を中断または失敗した場合は、登録開始前のMFA方式を維持する。
 
 ### DB保存時の管理CLI
 

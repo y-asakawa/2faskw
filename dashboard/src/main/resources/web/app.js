@@ -9,6 +9,7 @@ const state = {
   mismatchLimit: 3,
   sourceNetworkLimit: 3,
   summary: null,
+  visibility: {},
   nextCursor: null,
   refreshController: null,
 };
@@ -113,6 +114,7 @@ function eventCount(counts, event, result) {
 
 function renderSummary(summary) {
   state.summary = summary;
+  applyVisibility(summary.visibility || {});
   state.mismatchLimit = Number(summary.topMismatchLimit || state.mismatchLimit);
   state.sourceNetworkLimit =
     Number(summary.topSourceNetworkLimit || state.sourceNetworkLimit);
@@ -139,10 +141,14 @@ function renderSummary(summary) {
   renderMismatchUsers(summary.topMismatchUsers || []);
   renderSourceNetworks(summary.topSourceNetworks || []);
   renderSourceNetworkMismatches(summary.topSourceMismatchNetworks || []);
-  renderLockedUsers(
-    summary.lockedUsers || [],
-    Number(summary.lockedUserCount || 0),
-    summary.lockedUsersAsOf);
+  if (state.visibility.lockedUsersAvailable === true) {
+    renderLockedUsers(
+      summary.lockedUsers || [],
+      Number(summary.lockedUserCount || 0),
+      summary.lockedUsersAsOf);
+  } else {
+    renderLockedUsersUnavailable();
+  }
 
   const bars = document.getElementById("event-bars");
   bars.replaceChildren();
@@ -169,6 +175,27 @@ function renderSummary(summary) {
     value.textContent = integer(item.count);
     row.append(label, track, value);
     bars.append(row);
+  }
+}
+
+function applyVisibility(visibility) {
+  state.visibility = visibility;
+  const availability = {
+    "admin-api": visibility.adminApiAvailable === true,
+    ingest: visibility.ingestHealthAvailable === true,
+    events: visibility.eventsAvailable === true,
+  };
+  Object.entries(availability).forEach(([view, available]) => {
+    const tab = document.querySelector(`.tab[data-view="${view}"]`);
+    tab.classList.toggle("hidden", !available);
+    tab.setAttribute("aria-hidden", String(!available));
+  });
+  const active = document.querySelector(".tab.active");
+  if (active && active.classList.contains("hidden")) {
+    document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+    document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
+    document.querySelector('.tab[data-view="overview"]').classList.add("active");
+    document.getElementById("view-overview").classList.add("active");
   }
 }
 
@@ -217,6 +244,16 @@ function renderLockedUsers(users, total, asOf) {
       item.nodeId,
       formatTime(item.lockedUntil),
     ]));
+}
+
+function renderLockedUsersUnavailable() {
+  text("locked-users-count", "この権限では表示できません");
+  const target = document.getElementById("locked-users");
+  target.replaceChildren();
+  const message = document.createElement("div");
+  message.className = "empty";
+  message.textContent = "現在のロック状態はAUDITOR以上で確認できます。";
+  target.append(message);
 }
 
 function renderCompactTable(targetId, headers, rows) {
@@ -396,13 +433,17 @@ async function refresh() {
     summaryParams.set("topSourceNetworkLimit", String(state.sourceNetworkLimit));
     const summary = await api("summary", summaryParams, controller.signal);
     renderSummary(summary);
-    try {
-      renderHealth(await api(
-        "ingest-health", new URLSearchParams(), controller.signal));
-    } catch (ignored) {
-      if (controller.signal.aborted) {
-        return;
+    if (state.visibility.ingestHealthAvailable === true) {
+      try {
+        renderHealth(await api(
+          "ingest-health", new URLSearchParams(), controller.signal));
+      } catch (ignored) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setCollectionStateForNodes([]);
       }
+    } else {
       setCollectionStateForNodes([]);
     }
     text("last-updated", `更新 ${formatTime(new Date())}`);

@@ -16,6 +16,7 @@ fi
 
 DB_PROPERTIES="${DB_PROPERTIES:-$IDP_HOME/conf/graphicalmatrix/db.properties}"
 GRAPHICAL_PROPERTIES="${GRAPHICAL_PROPERTIES:-$IDP_HOME/conf/graphicalmatrix/graphicalmatrix.properties}"
+MFA_POLICY_PROPERTIES="${MFA_POLICY_PROPERTIES:-$IDP_HOME/conf/graphicalmatrix/mfa-policy.properties}"
 if [[ -n "${H2_JAR:-}" ]]; then
   :
 elif compgen -G "$SCRIPT_HOME/lib/h2-*.jar" >/dev/null; then
@@ -78,7 +79,8 @@ Account status / lock:
       Clear failed_count without changing the sequence.
 
   delete USER
-      Delete the GraphicalMatrix enrollment row.
+      Physically delete the enrollment and related PostgreSQL WebAuthn credentials.
+      The account is disabled before credential cleanup; a cleanup failure leaves it disabled.
 
 CSV import / export:
   csv FILE
@@ -87,7 +89,7 @@ CSV import / export:
 
   csv FILE --apply
       Apply CSV import in standard mode.
-      WARNING: D deletes the user row in standard mode.
+      D is rejected; use delete USER for complete physical deletion.
 
   csv FILE --provisioning
       Dry-run CSV import in provisioning mode.
@@ -117,6 +119,13 @@ TOTP:
 
   reset-totp USER
       Reset TOTP registration state so the user can register again.
+
+  invalidate-pending-totp
+      Dry-run migration of pre-v1.3.5 PENDING TOTP registrations.
+
+  invalidate-pending-totp --apply
+      Return recoverable PENDING users to GraphicalMatrix and clear the pending seed.
+      Rows without both sequences or with an incompatible storage mode are listed for manual recovery.
 
 WebAuthn:
   webauthn-list [USER]
@@ -171,7 +180,7 @@ Safety notes:
   - CSV import without --apply is dry-run.
   - WebAuthn reset/delete without --apply is dry-run.
   - Other update commands modify the DB immediately.
-  - Standard CSV mode treats D as physical delete.
+  - Standard CSV mode rejects D; physical deletion uses delete USER.
   - Provisioning CSV mode treats D as disable.
   - Production should not use plaintext sequence storage.
   - Production should not use plaintext TOTP seed storage.
@@ -182,6 +191,7 @@ Environment:
   IDP_HOME         compatibility alias for GRAPHICALMATRIX_HOME
   DB_PROPERTIES   default: $GRAPHICALMATRIX_HOME/conf/graphicalmatrix/db.properties
   GRAPHICAL_PROPERTIES default: $GRAPHICALMATRIX_HOME/conf/graphicalmatrix/graphicalmatrix.properties
+  MFA_POLICY_PROPERTIES default: $GRAPHICALMATRIX_HOME/conf/graphicalmatrix/mfa-policy.properties
   H2_JAR          default: $GRAPHICALMATRIX_HOME/lib/h2-*.jar if present,
                   otherwise $IDP_HOME/edit-webapp/WEB-INF/lib/h2-2.2.224.jar
   GRAPHICALMATRIX_TIME_ZONE
@@ -226,6 +236,20 @@ config_prop() {
   if [[ -f "$GRAPHICAL_PROPERTIES" ]]; then
     local value
     value="$(grep -E "^[[:space:]]*$key[[:space:]]*=" "$GRAPHICAL_PROPERTIES" | tail -n 1 | sed -E 's/^[^=]*=//' | trim || true)"
+    if [[ -n "$value" ]]; then
+      printf "%s" "$value"
+      return
+    fi
+  fi
+  printf "%s" "$default_value"
+}
+
+mfa_policy_prop() {
+  local key="$1"
+  local default_value="${2:-}"
+  if [[ -f "$MFA_POLICY_PROPERTIES" ]]; then
+    local value
+    value="$(grep -E "^[[:space:]]*$key[[:space:]]*=" "$MFA_POLICY_PROPERTIES" | tail -n 1 | sed -E 's/^[^=]*=//' | trim || true)"
     if [[ -n "$value" ]]; then
       printf "%s" "$value"
       return
@@ -615,10 +639,10 @@ sequence_tool_classpath() {
 
 sequence_storage_encode() {
   local sequence="$1"
-  local mode ordered duplicates cp
+  local mode ordered duplicates cp encoded
   mode="$(sequence_storage_mode)"
   if [[ "$mode" == "plaintext" ]]; then
-    printf "%s" "$sequence"
+    builtin printf "%s" "$sequence"
     return
   fi
   command -v java >/dev/null 2>&1 || die "java is required for graphicalmatrix.sequence.storage=$mode"
@@ -626,8 +650,15 @@ sequence_storage_encode() {
   [[ "$(config_prop 'graphicalmatrix.order' '1')" == "1" ]] && ordered="true"
   duplicates="$(bool_config 'graphicalmatrix.allow_duplicates' '0')"
   cp="$(sequence_tool_classpath)"
-  java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
-    encode "$IDP_HOME" "$sequence" "$ordered" "$duplicates"
+  if ! encoded="$(
+    builtin printf '%s' "$sequence" |
+      java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool \
+        encode-stdin "$IDP_HOME" "$ordered" "$duplicates"
+  )"; then
+    die "sequence encoding failed"
+  fi
+  [[ -n "$encoded" ]] || die "sequence encoding returned no data"
+  builtin printf '%s' "$encoded"
 }
 
 initial_sequence_plaintext() {
@@ -955,6 +986,8 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_seed VARCHAR(255),
   totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED',
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
+  totp_registration_id VARCHAR(64),
+  totp_registration_expires_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INT NOT NULL DEFAULT 0,
   state_version BIGINT NOT NULL DEFAULT 0,
@@ -970,7 +1003,11 @@ ALTER TABLE graphicalmatrix_enrollment
 ALTER TABLE graphicalmatrix_enrollment
   ADD COLUMN IF NOT EXISTS totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED';
 ALTER TABLE graphicalmatrix_enrollment
-  ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0;"
+  ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS totp_registration_id VARCHAR(64);
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS totp_registration_expires_at BIGINT NOT NULL DEFAULT 0;"
 init_sql="$init_sql
 ALTER TABLE graphicalmatrix_enrollment
   ADD COLUMN IF NOT EXISTS force_sequence_change INT NOT NULL DEFAULT 0;"
@@ -1073,6 +1110,8 @@ SET sequence = EXCLUDED.sequence,
     status = 'ACTIVE',
     failed_count = 0,
     locked_until = 0,
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
     state_version = graphicalmatrix_enrollment.state_version + 1,
     updated_at = $now_expr;
 SQL
@@ -1080,8 +1119,8 @@ SQL
     cat <<SQL
 MERGE INTO graphicalmatrix_enrollment
   (user_id, sequence, initial_sequence, status, failed_count, locked_until, mfa_method, totp_seed,
-   totp_status, totp_registered_at, last_success_at, force_sequence_change, state_version,
-   created_at, updated_at)
+   totp_status, totp_registered_at, last_success_at, force_sequence_change,
+   totp_registration_id, totp_registration_expires_at, state_version, created_at, updated_at)
 KEY(user_id)
 VALUES
   ('$user_q', '$sequence_q',
@@ -1106,6 +1145,8 @@ VALUES
    CASEWHEN((SELECT force_sequence_change FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') IS NULL,
      0,
      (SELECT force_sequence_change FROM graphicalmatrix_enrollment WHERE user_id = '$user_q')),
+   NULL,
+   0,
    CASEWHEN((SELECT state_version FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') IS NULL,
      1,
      (SELECT state_version FROM graphicalmatrix_enrollment WHERE user_id = '$user_q') + 1),
@@ -1225,6 +1266,8 @@ PY
     user_q="$(sql_quote "$user")"
 
     if [[ "$action" == "D" ]]; then
+      [[ "$provisioning_mode" == "1" ]] \
+        || die "CSV line $line_no uses D in standard mode; use delete USER for complete physical deletion"
       if [[ "$provisioning_mode" == "1" ]]; then
         printf "line=%s action=D user_id=%s deprovision=disable\n" "$line_no" "$user" >> "$preview_file"
       else
@@ -1238,11 +1281,11 @@ PY
           echo "SET status = 'DISABLED',"
           echo "    failed_count = 0,"
           echo "    locked_until = 0,"
+          echo "    totp_registration_id = NULL,"
+          echo "    totp_registration_expires_at = 0,"
           echo "    state_version = state_version + 1,"
           echo "    updated_at = $now_expr"
           echo "WHERE user_id = '$user_q';"
-        else
-          echo "DELETE FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';"
         fi
       } >> "$sql_file"
       return
@@ -1293,6 +1336,8 @@ PY
         echo "    status = 'ACTIVE',"
         echo "    failed_count = 0,"
         echo "    locked_until = 0,"
+        echo "    totp_registration_id = NULL,"
+        echo "    totp_registration_expires_at = 0,"
         echo "    state_version = state_version + 1,"
         echo "    updated_at = $now_expr"
         echo "WHERE user_id = '$user_q';"
@@ -1303,6 +1348,8 @@ PY
         echo "    initial_sequence = '$initial_sequence_q',"
         echo "    mfa_method = '$method_q',"
         echo "    force_sequence_change = $force_sql,"
+        echo "    totp_registration_id = NULL,"
+        echo "    totp_registration_expires_at = 0,"
         echo "    state_version = state_version + 1,"
         echo "    updated_at = $now_expr"
         echo "WHERE user_id = '$user_q';"
@@ -1357,8 +1404,6 @@ PY
   echo "  modify: $modify_count"
   if [[ "$provisioning_mode" == "1" ]]; then
     echo "  disable: $delete_count"
-  else
-    echo "  delete: $delete_count"
   fi
   echo
   cat "$preview_file"
@@ -1367,11 +1412,12 @@ PY
   if [[ "$provisioning_mode" == "1" ]]; then
     echo "  A inserts or reactivates/updates an existing user."
     echo "  D disables the user instead of deleting the row."
+    echo "  M/D fail if the user does not exist."
   else
     echo "  A fails if the user already exists."
-    echo "  D deletes the user row."
+    echo "  D is rejected; use delete USER for complete physical deletion."
+    echo "  M fails if the user does not exist."
   fi
-  echo "  M/D fail if the user does not exist."
   echo
 
   if [[ "$apply_mode" != "1" ]]; then
@@ -1473,7 +1519,8 @@ webauthn_reset() {
     [[ "$set_method" == "GraphicalMatrix" ]] || die "webauthn-reset --set-method currently supports GraphicalMatrix only"
     method_sql="
 UPDATE graphicalmatrix_enrollment
-SET mfa_method = 'GraphicalMatrix', state_version = state_version + 1,
+SET mfa_method = 'GraphicalMatrix', totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';"
   fi
@@ -1625,6 +1672,7 @@ WITH expanded AS (
       ELSE '[]'::jsonb
     END
   ) AS elem
+  WHERE s.context = 'net.shibboleth.idp.plugin.authn.webauthn'
 ),
 target AS (
   SELECT
@@ -1679,6 +1727,90 @@ SELECT
 SQL
 }
 
+webauthn_user_credential_count_sql() {
+  local user_q="$1"
+  cat <<SQL
+WITH expanded AS (
+  SELECT s.id, elem
+  FROM storagerecords s
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(s.value::jsonb) = 'array' THEN s.value::jsonb ELSE '[]'::jsonb END
+  ) AS elem
+  WHERE s.context = 'net.shibboleth.idp.plugin.authn.webauthn'
+)
+SELECT count(*) FROM expanded
+WHERE id = '$user_q'
+   OR elem ->> 'username' = '$user_q'
+   OR elem -> 'userIdentity' ->> 'name' = '$user_q'
+   OR elem -> 'userIdentity' ->> 'id' = '$user_q';
+SQL
+}
+
+physical_delete_user() {
+  local user="$1"
+  local user_q policy method normalized_method status storage_records_present=0 credential_count="not-applicable" remaining
+  validate_user "$user"
+  [[ "$(config_prop 'graphicalmatrix.savedata' 'db' | tr '[:upper:]' '[:lower:]')" != "ldap" ]] \
+    || die "delete USER manages DB enrollment only; delete LDAP-backed enrollment with an approved directory operation"
+  [[ -z "$init_sql" ]] || run_sql "$init_sql"
+  user_q="$(sql_quote "$user")"
+  policy="$(mfa_policy_prop 'graphicalmatrix.mfa.missingEnrollmentPolicy' 'deny' | tr '[:upper:]' '[:lower:]')"
+  case "$policy" in
+    deny) ;;
+    allow-on-bypass)
+      die "delete is unsafe while graphicalmatrix.mfa.missingEnrollmentPolicy=allow-on-bypass; set it to deny first"
+      ;;
+    *)
+      die "invalid graphicalmatrix.mfa.missingEnrollmentPolicy: $policy"
+      ;;
+  esac
+
+  method="$(run_scalar "SELECT mfa_method FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';" | tail -n 1 | trim)"
+  [[ -n "$method" ]] || die "user not found: $user"
+  normalized_method="$(normalize_method "$method")"
+  status="$(run_scalar "SELECT status FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';" | tail -n 1 | trim)"
+
+  if [[ "$db_type" == "postgresql" ]]; then
+    storage_records_present="$(run_scalar_postgresql "SELECT CASE WHEN to_regclass('storagerecords') IS NULL THEN 0 ELSE 1 END;" | tail -n 1 | trim)"
+    if [[ "$storage_records_present" == "1" ]]; then
+      credential_count="$(run_scalar_postgresql "$(webauthn_user_credential_count_sql "$user_q")" | tail -n 1 | trim)"
+    elif [[ "$normalized_method" == "WebAuthn" ]]; then
+      credential_count="unavailable"
+    fi
+  fi
+
+  echo "Physical delete: user=$user status=$status mfa_method=$method webauthn_credentials=$credential_count missing_enrollment_policy=$policy"
+  run_sql "UPDATE graphicalmatrix_enrollment
+SET status = 'DISABLED', totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
+WHERE user_id = '$user_q';"
+  echo "Enrollment disabled before credential cleanup: user=$user"
+
+  if [[ "$db_type" == "postgresql" ]]; then
+    if [[ "$storage_records_present" == "1" ]]; then
+      run_sql "$(webauthn_delete_user_sql "$user_q")"
+      remaining="$(run_scalar_postgresql "$(webauthn_user_credential_count_sql "$user_q")" | tail -n 1 | trim)"
+      [[ "$remaining" == "0" ]] \
+        || die "WebAuthn credential cleanup verification failed; enrollment remains DISABLED"
+      echo "WebAuthn credential cleanup completed: user=$user"
+    elif [[ "$normalized_method" == "WebAuthn" ]]; then
+      die "WebAuthn credential storage table storagerecords was not found; enrollment remains DISABLED"
+    else
+      echo "WebAuthn credential storage table is not present; no PostgreSQL credentials were removed"
+    fi
+  elif [[ "$normalized_method" == "WebAuthn" ]]; then
+    die "automatic WebAuthn credential cleanup requires PostgreSQL StorageRecords; enrollment remains DISABLED"
+  else
+    echo "WebAuthn credential cleanup is not applicable to the configured H2 enrollment database"
+  fi
+
+  run_sql "DELETE FROM graphicalmatrix_enrollment
+WHERE user_id = '$user_q' AND status = 'DISABLED';"
+  remaining="$(run_scalar "SELECT COUNT(*) FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';" | tail -n 1 | trim)"
+  [[ "$remaining" == "0" ]] || die "enrollment delete did not complete; user remains disabled: $user"
+  echo "Physical delete completed: user=$user"
+}
+
 cmd="${1:-}"
 if [[ "${2:-}" =~ ^[Rr][Ee][Ss][Ee][Tt]$ ]]; then
   cmd="reset-user"
@@ -1730,6 +1862,60 @@ case "$cmd" in
         die "unknown migrate-totp-seed-storage option: ${2:-}"
         ;;
     esac
+    ;;
+
+  invalidate-pending-totp)
+    pending_apply=0
+    case "${2:-}" in
+      ""|--dry-run|plan) ;;
+      --apply|apply) pending_apply=1 ;;
+      *) die "unknown invalidate-pending-totp option: ${2:-}" ;;
+    esac
+    [[ -z "$init_sql" ]] || run_sql "$init_sql" >/dev/null
+    pending_sequence_predicate="$(sequence_storage_sql_predicate)"
+    recoverable="$(run_scalar "SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE UPPER(totp_status) = 'PENDING'
+  AND COALESCE(sequence, '') <> ''
+  AND COALESCE(initial_sequence, '') <> ''
+  AND ($pending_sequence_predicate);" | tail -n 1 | trim)"
+    manual="$(run_scalar "SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
+WHERE UPPER(totp_status) = 'PENDING'
+  AND (COALESCE(sequence, '') = '' OR COALESCE(initial_sequence, '') = ''
+       OR NOT ($pending_sequence_predicate));" | tail -n 1 | trim)"
+    echo "mode=$([[ "$pending_apply" == "1" ]] && echo apply || echo dry-run)"
+    echo "pending_recoverable=$recoverable"
+    echo "pending_manual_recovery=$manual"
+    run_sql "SELECT user_id,
+  CASE WHEN COALESCE(sequence, '') <> '' AND COALESCE(initial_sequence, '') <> ''
+            AND ($pending_sequence_predicate)
+       THEN 'RECOVERABLE' ELSE 'MANUAL_RECOVERY' END AS migration_status
+FROM graphicalmatrix_enrollment
+WHERE UPPER(totp_status) = 'PENDING'
+ORDER BY user_id;"
+    if [[ "$pending_apply" != "1" ]]; then
+      echo "result=DRY_RUN"
+      echo "next_command=sudo $0 invalidate-pending-totp --apply"
+    else
+      run_sql "UPDATE graphicalmatrix_enrollment
+SET mfa_method = 'GraphicalMatrix',
+    totp_seed = NULL,
+    totp_status = 'UNREGISTERED',
+    totp_registered_at = 0,
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
+    failed_count = 0,
+    locked_until = 0,
+    state_version = state_version + 1,
+    updated_at = $now_expr
+WHERE UPPER(totp_status) = 'PENDING'
+  AND COALESCE(sequence, '') <> ''
+  AND COALESCE(initial_sequence, '') <> ''
+  AND ($pending_sequence_predicate);"
+      echo "result=APPLY_OK"
+      if [[ "$manual" != "0" ]]; then
+        echo "warning=manual recovery remains for $manual enrollment(s)"
+      fi
+    fi
     ;;
 
   csv-export|export-csv)
@@ -1810,6 +1996,8 @@ WHERE user_id = '$user_q';"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
 SET initial_sequence = '$initial_sequence_q',
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
     state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
@@ -1825,7 +2013,8 @@ WHERE user_id = '$user_q';"
     method_q="$(sql_quote "$method")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET mfa_method = '$method_q', state_version = state_version + 1, updated_at = $now_expr
+SET mfa_method = '$method_q', totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1842,6 +2031,9 @@ WHERE user_id = '$user_q';"
 UPDATE graphicalmatrix_enrollment
 SET totp_seed = '$seed_q',
     totp_status = $totp_seed_status_expr,
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
+    state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
@@ -1855,6 +2047,7 @@ WHERE user_id = '$user_q';"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
 SET totp_seed = NULL, totp_status = 'UNREGISTERED', totp_registered_at = 0,
+    totp_registration_id = NULL, totp_registration_expires_at = 0,
     state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
@@ -1934,7 +2127,8 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET force_sequence_change = $force_value, state_version = state_version + 1, updated_at = $now_expr
+SET force_sequence_change = $force_value, totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1963,6 +2157,8 @@ SET mfa_method = 'GraphicalMatrix',
     totp_seed = NULL,
     totp_status = 'UNREGISTERED',
     totp_registered_at = 0,
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
     state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
@@ -1976,7 +2172,8 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET status = 'ACTIVE', state_version = state_version + 1, updated_at = $now_expr
+SET status = 'ACTIVE', totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -1988,7 +2185,8 @@ WHERE user_id = '$user_q';"
     user_q="$(sql_quote "$user")"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
-SET status = 'DISABLED', state_version = state_version + 1, updated_at = $now_expr
+SET status = 'DISABLED', totp_registration_id = NULL,
+    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
 WHERE user_id = '$user_q';"
@@ -2001,6 +2199,7 @@ WHERE user_id = '$user_q';"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
 SET failed_count = 0, locked_until = 0,
+    totp_registration_id = NULL, totp_registration_expires_at = 0,
     state_version = state_version + 1, updated_at = $now_expr
 WHERE user_id = '$user_q';
 $select_public_columns
@@ -2016,6 +2215,8 @@ WHERE user_id = '$user_q';"
     run_sql "$init_sql
 UPDATE graphicalmatrix_enrollment
 SET locked_until = $now_expr + ($minutes * 60 * 1000),
+    totp_registration_id = NULL,
+    totp_registration_expires_at = 0,
     state_version = state_version + 1,
     updated_at = $now_expr
 WHERE user_id = '$user_q';
@@ -2048,16 +2249,12 @@ WHERE user_id = '$user_q';"
     if [[ "$with_webauthn" == "1" && "$with_webauthn_apply" != "1" ]]; then
       die "delete USER --with-webauthn requires --apply"
     fi
-    webauthn_delete_sql=""
     if [[ "$with_webauthn" == "1" ]]; then
-      require_postgresql_webauthn
-      webauthn_delete_sql="$(webauthn_delete_user_sql "$user_q")"
+      echo "WARNING: --with-webauthn --apply is deprecated; delete USER now performs credential cleanup automatically" >&2
+    elif [[ "$with_webauthn_apply" == "1" ]]; then
+      die "delete USER --apply is only accepted with the deprecated --with-webauthn option"
     fi
-    run_sql "$init_sql
-DELETE FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';
-$webauthn_delete_sql
-$select_public_columns
-ORDER BY user_id;"
+    physical_delete_user "$user"
     ;;
 
   -h|--help|help|"")

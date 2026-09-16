@@ -60,8 +60,9 @@ getter、config check、`CONFIG-REFERENCE.md`、unit testを更新します。
 | `verifyForSequenceChange()` | 自己管理前の現在sequence確認 |
 | `updateSequence()` | sequence、初期sequence、強制変更状態を更新 |
 | `findMfaSettings()` | MFA方式とTOTP状態を読取 |
-| `prepareTotpRegistration()` | seedを生成しTOTPを`PENDING`へ遷移 |
-| `verifyAndActivateTotp()` | 登録codeを検証しTOTPを`ACTIVE`へ遷移 |
+| `beginTotpRegistration()` | 事前`state_version`を照合し、方式、seed、登録ID、固定期限を一つの原子的更新で`PENDING`へ遷移 |
+| `verifyTotpRegistration()` | HTTPセッションと保存先の登録Bindingを照合してcodeを検証し、同じ登録だけを`ACTIVE`へ遷移 |
+| `cancelTotpRegistration()` | 同じ登録Bindingと利用可能な画像sequenceを確認し、条件付きでGraphicalMatrixへ復帰 |
 | `updateMfaMethod()` | MFA方式を変更し、必要な関連状態を整合化 |
 | `activateWebAuthnIfMethodCurrent()` | 期待する旧方式のときだけWebAuthnへ切替 |
 
@@ -204,4 +205,3 @@ Dashboardは別Maven moduleです。plugin本体のunit testだけでは検証�
 
 最低確認は`mvn test`です。配布物、権限、shell、別moduleへ触れた変更では、該当するpackage
 buildとshell regressionも実行してください。
-

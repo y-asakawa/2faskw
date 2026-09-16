@@ -198,94 +198,80 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             final HttpServletResponse response, final HttpSession session,
             final GraphicalMatrixAuditLogger audit, final GraphicalMatrixRepository repository)
             throws ServletException, IOException {
-        final String user = (String) session.getAttribute("totpEnroll.user");
-        final String sessionKey = (String) session.getAttribute("totpEnroll.key");
-        final String csrfToken = (String) session.getAttribute("totpEnroll.csrfToken");
-        final Long expiresAt = (Long) session.getAttribute("totpEnroll.expiresAt");
-        final Boolean used = (Boolean) session.getAttribute("totpEnroll.used");
-        final boolean selfServiceAuthorized = Boolean.TRUE.equals(
-            session.getAttribute("totpEnroll.selfServiceAuthorized"));
         final long now = System.currentTimeMillis();
-
-        if (user == null
-                || !selfServiceAuthorized
-                || !matchesFlowKey(sessionKey, request.getParameter("key"))
-                || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
-                || expiresAt == null
-                || expiresAt.longValue() < now
-                || Boolean.TRUE.equals(used)) {
-            audit.log("TOTP_REGISTER_VERIFY", user, "BAD_REQUEST", null,
-                "invalid_or_expired_registration", request);
-            clearTotpRegistration(session);
+        final GraphicalMatrixTotpEnrollmentSession.Claim claim =
+            GraphicalMatrixTotpEnrollmentSession.claim(session, request.getParameter("key"),
+                request.getParameter("csrfToken"), now);
+        if (!claim.isValid()) {
+            audit.log("TOTP_REGISTER_VERIFY", null, "BAD_REQUEST", null,
+                claim.error(), request);
+            response.setStatus(claim.expired()
+                ? HttpServletResponse.SC_GONE : HttpServletResponse.SC_BAD_REQUEST);
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "TOTP登録を確認できません。",
                 "登録画面の有効期限が切れています。サービス画面からログインをやり直してください。");
             return;
         }
 
-        final GraphicalMatrixVerifyResult result =
-            repository.verifyAndActivateTotp(user, request.getParameter("tokencode"), now);
-        audit.log("TOTP_REGISTER_VERIFY", user, result.getAuditResult(), null,
+        final GraphicalMatrixTotpEnrollmentBinding binding = claim.binding();
+        final GraphicalMatrixTotpEnrollmentResult result = repository.verifyTotpRegistration(
+            binding, request.getParameter("tokencode"), now);
+        audit.log("TOTP_REGISTER_VERIFY", binding.user(), result.getAuditResult(), null,
             result.getAuditDetail(), request);
 
-        try {
-            if (result.isSuccess()) {
-                session.setAttribute("totpEnroll.used", Boolean.TRUE);
-                clearTotpRegistration(session);
-                final GraphicalMatrixConfig config =
-                    GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
-                GraphicalMatrixChangeServlet.renderComplete(request, response, config, user,
-                    "TOTP登録を完了しました。次回ログインからTOTPを利用してください。");
-                return;
-            }
-
-            if ("FAIL".equals(result.getAuditResult())) {
-                final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
-                final String seed = repository.prepareTotpRegistration(user, now);
-                final String retryCsrfToken = GraphicalMatrixSupport.token();
-                session.setAttribute("totpEnroll.key", sessionKey);
-                session.setAttribute("totpEnroll.user", user);
-                session.setAttribute("totpEnroll.csrfToken", retryCsrfToken);
-                session.setAttribute("totpEnroll.expiresAt", Long.valueOf(now + config.getChallengeMillis()));
-                session.setAttribute("totpEnroll.used", Boolean.FALSE);
-                session.setAttribute("totpEnroll.selfServiceAuthorized", Boolean.TRUE);
-                GraphicalMatrixStartServlet.renderTotpRegistration(request, response, sessionKey, user,
-                    seed, retryCsrfToken, "コードが正しくありません。認証アプリの6桁コードを確認してください。");
-                return;
-            }
-
-            clearTotpRegistration(session);
-            GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                "TOTP登録を完了できません。",
-                "登録状態が変更されました。自己管理画面から最初からやり直してください。");
-        } catch (Exception ex) {
-            throw new ServletException(ex);
+        if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.ACTIVATED) {
+            GraphicalMatrixTotpEnrollmentSession.clearIfCurrent(session, binding);
+            final GraphicalMatrixConfig config =
+                GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
+            GraphicalMatrixChangeServlet.renderComplete(request, response, config, binding.user(),
+                "TOTP登録を完了しました。次回ログインからTOTPを利用してください。");
+            return;
         }
+
+        if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.RETRY) {
+            final String retryCsrfToken = GraphicalMatrixSupport.token();
+            if (GraphicalMatrixTotpEnrollmentSession.retry(
+                    session, binding, retryCsrfToken)) {
+                GraphicalMatrixStartServlet.renderTotpRegistration(request, response, claim.key(),
+                    binding.user(), result.getSeed(), retryCsrfToken,
+                    "コードが正しくありません。認証アプリの6桁コードを確認してください。");
+            } else {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "TOTP登録を続行できません。",
+                    "別の登録が開始されました。現在の登録画面を使用してください。");
+            }
+            return;
+        }
+
+        GraphicalMatrixTotpEnrollmentSession.clearIfCurrent(session, binding);
+        if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.LOCKED) {
+            GraphicalMatrixStartServlet.renderLocked(request, response, result.getLockedUntil());
+            return;
+        }
+        response.setStatus(switch (result.getStatus()) {
+            case EXPIRED -> HttpServletResponse.SC_GONE;
+            case UNAVAILABLE -> HttpServletResponse.SC_SERVICE_UNAVAILABLE;
+            default -> HttpServletResponse.SC_CONFLICT;
+        });
+        GraphicalMatrixStartServlet.renderUnavailable(request, response,
+            "TOTP登録を完了できません。",
+            "登録状態が変更されました。自己管理画面から最初からやり直してください。");
     }
 
     private static void handleTotpRegistrationCancel(final HttpServletRequest request,
             final HttpServletResponse response, final HttpSession session,
             final GraphicalMatrixAuditLogger audit, final GraphicalMatrixRepository repository)
             throws ServletException, IOException {
-        final String user = (String) session.getAttribute("totpEnroll.user");
-        final String sessionKey = (String) session.getAttribute("totpEnroll.key");
-        final String csrfToken = (String) session.getAttribute("totpEnroll.csrfToken");
-        final Long expiresAt = (Long) session.getAttribute("totpEnroll.expiresAt");
-        final Boolean used = (Boolean) session.getAttribute("totpEnroll.used");
-        final boolean selfServiceAuthorized = Boolean.TRUE.equals(
-            session.getAttribute("totpEnroll.selfServiceAuthorized"));
         final long now = System.currentTimeMillis();
-
-        if (user == null
-                || !selfServiceAuthorized
-                || !matchesFlowKey(sessionKey, request.getParameter("key"))
-                || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
-                || expiresAt == null
-                || expiresAt.longValue() < now
-                || Boolean.TRUE.equals(used)) {
-            audit.log("TOTP_REGISTER_CANCEL", user, "BAD_REQUEST", null,
-                "invalid_or_expired_registration", request);
-            clearTotpRegistration(session);
+        final GraphicalMatrixTotpEnrollmentSession.Claim claim =
+            GraphicalMatrixTotpEnrollmentSession.claim(session, request.getParameter("key"),
+                request.getParameter("csrfToken"), now);
+        if (!claim.isValid()) {
+            audit.log("TOTP_REGISTER_CANCEL", null, "BAD_REQUEST", null,
+                claim.error(), request);
+            response.setStatus(claim.expired()
+                ? HttpServletResponse.SC_GONE : HttpServletResponse.SC_BAD_REQUEST);
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "TOTP登録を取り消せません。",
                 "登録画面の有効期限が切れています。サービス画面からログインをやり直してください。");
@@ -294,66 +280,39 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
 
         try {
             final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
-            final GraphicalMatrixEnrollment enrollment = repository.findEnrollment(user);
-            if (enrollment == null || !enrollment.isActive()) {
-                audit.log("TOTP_REGISTER_CANCEL", user, "ENROLL_REQUIRED", null,
-                    "missing_or_inactive", request);
-                clearTotpRegistration(session);
-                GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                    "GraphicalMatrixに戻せません。",
-                    "このアカウントのGraphicalMatrix登録情報を確認できません。管理者に連絡してください。");
-                return;
-            }
-
-            if (!repository.sequenceUsable(enrollment.getSequence(), config)) {
-                final int sequenceCount = repository.sequenceCount(enrollment.getSequence());
-                audit.log("TOTP_REGISTER_CANCEL", user, "ENROLL_REQUIRED", null,
-                    "sequence_mismatch,sequence_count=" + sequenceCount, request);
-                clearTotpRegistration(session);
-                GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                    "GraphicalMatrixに戻せません。",
-                    "登録済みのGraphicalMatrixが現在の設定と一致していません。管理者に連絡してください。");
-                return;
-            }
-
-            if (enrollment.getLockedUntil() > now) {
-                audit.log("TOTP_REGISTER_CANCEL", user, "LOCKED", null,
-                    "locked_until=" + enrollment.getLockedUntil(), request);
-                clearTotpRegistration(session);
-                GraphicalMatrixStartServlet.renderLocked(request, response, enrollment.getLockedUntil());
-                return;
-            }
-
-            if (!repository.updateMfaMethodIfCurrent(user, "GraphicalMatrix", now,
-                    enrollment.getStateVersion())) {
-                audit.log("TOTP_REGISTER_CANCEL", user, "ENROLL_REQUIRED", null,
-                    "state_changed_after_verification", request);
-                clearTotpRegistration(session);
+            final GraphicalMatrixTotpEnrollmentResult result = repository.cancelTotpRegistration(
+                claim.binding(), config, now);
+            audit.log("TOTP_REGISTER_CANCEL", claim.binding().user(), result.getAuditResult(), null,
+                result.getAuditDetail(), request);
+            GraphicalMatrixTotpEnrollmentSession.clearIfCurrent(session, claim.binding());
+            if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.CANCELLED) {
+                GraphicalMatrixChangeServlet.renderComplete(request, response, config,
+                    claim.binding().user(), "TOTP登録を取り消し、GraphicalMatrixに戻しました。");
+            } else if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.LOCKED) {
+                GraphicalMatrixStartServlet.renderLocked(request, response, result.getLockedUntil());
+            } else {
+                response.setStatus(switch (result.getStatus()) {
+                    case EXPIRED -> HttpServletResponse.SC_GONE;
+                    case UNAVAILABLE -> HttpServletResponse.SC_SERVICE_UNAVAILABLE;
+                    default -> HttpServletResponse.SC_CONFLICT;
+                });
                 GraphicalMatrixStartServlet.renderUnavailable(request, response,
                     "GraphicalMatrixに戻せません。",
                     "登録状態が変更されました。サービス画面からログインをやり直してください。");
-                return;
             }
-
-            clearTotpRegistration(session);
-            audit.log("TOTP_REGISTER_CANCEL", user, "OK", null,
-                "mfa_method=GraphicalMatrix,authorization=self_service", request);
-            GraphicalMatrixChangeServlet.renderComplete(request, response, config, user,
-                "TOTP登録を取り消し、GraphicalMatrixに戻しました。");
         } catch (Exception ex) {
-            audit.log("TOTP_REGISTER_CANCEL", user, "DB_ERROR", null,
+            audit.log("TOTP_REGISTER_CANCEL", claim.binding().user(), "DB_ERROR", null,
                 ex.getClass().getSimpleName(), request);
-            throw new ServletException(ex);
+            GraphicalMatrixTotpEnrollmentSession.clearIfCurrent(session, claim.binding());
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                "GraphicalMatrixに戻せません。",
+                "時間をおいて再度試すか、管理者に連絡してください。");
         }
     }
 
     private static void clearTotpRegistration(final HttpSession session) {
-        session.removeAttribute("totpEnroll.key");
-        session.removeAttribute("totpEnroll.user");
-        session.removeAttribute("totpEnroll.csrfToken");
-        session.removeAttribute("totpEnroll.expiresAt");
-        session.removeAttribute("totpEnroll.used");
-        session.removeAttribute("totpEnroll.selfServiceAuthorized");
+        GraphicalMatrixTotpEnrollmentSession.clear(session);
     }
 
     private static void handleForcedSequenceSave(final HttpServletRequest request,

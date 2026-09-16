@@ -331,8 +331,8 @@ defaults
     option                  dontlognull
     retries                 3
     timeout connect         10s
-    timeout client          1m
-    timeout server          1m
+    timeout client          40m
+    timeout server          40m
     timeout check           10s
     maxconn                 3000
 
@@ -348,6 +348,58 @@ listen stats
     mode http
     stats enable
     stats uri /haproxy?stats
+```
+
+`timeout client` と `timeout server` はTCP接続の無通信時間に対する上限である。
+GraphicalMatrixの標準設定ではHikariCPの
+`graphicalmatrix.db.pool.maxLifetimeMillis` が `1800000`（30分）であるため、
+HAProxy側はそれより十分に長い40分としている。TCPモードではclient/serverの
+タイムアウトを同じ値にする。
+
+HAProxyを1分、HikariCPを30分のまま運用すると、プール内で待機している接続を
+HAProxyが先に切断する。その後にHikariCPが接続を検査または再利用した時点で、
+`Failed to validate connection`、`already closed`、または
+`このコネクションは既にクローズされています` という警告がIdPログへ出力される。
+通常はHikariCPが新しい接続を作成して処理を継続するが、不要な再接続と警告を
+発生させるため、タイムアウトの大小関係を修正する。
+
+既存環境が1分になっている場合は、DB1/DB2の両方で次のように変更する。
+`defaults` の変更は、その設定を継承するすべてのHAProxy proxyへ適用されるため、
+PostgreSQL以外も収容している環境では対象の `listen` または
+`frontend` / `backend` へ設定を限定する。
+
+```bash
+TS="$(date +%Y%m%d%H%M%S)"
+sudo cp -a /etc/haproxy/haproxy.cfg \
+  "/etc/haproxy/haproxy.cfg.bak.${TS}"
+
+sudo sed -i -E \
+  -e 's/^([[:space:]]*timeout[[:space:]]+client)[[:space:]]+.*/\1 40m/' \
+  -e 's/^([[:space:]]*timeout[[:space:]]+server)[[:space:]]+.*/\1 40m/' \
+  /etc/haproxy/haproxy.cfg
+
+sudo grep -nE \
+  '^[[:space:]]*timeout[[:space:]]+(connect|client|server|check)' \
+  /etc/haproxy/haproxy.cfg
+
+sudo haproxy -c \
+  -f /etc/haproxy/haproxy.cfg \
+  -f /etc/haproxy/conf.d
+
+sudo systemctl reload haproxy.service
+sudo systemctl status haproxy.service --no-pager
+```
+
+HAProxyの反映後、IdPを再起動して既存の切断済みプール接続を破棄する。
+
+```bash
+sudo systemctl restart jetty-idp.service
+
+until curl --noproxy '*' -fsSI \
+  http://127.0.0.1:8080/idp/status >/dev/null; do
+  echo 'Waiting for Jetty...'
+  sleep 2
+done
 ```
 
 VIP未保持ノードでもHAProxyを起動できるよう、DB1/DB2両方で設定。
@@ -2158,6 +2210,53 @@ PgBouncer
 HAProxy + PgBouncer + PostgreSQL
 ```
 
+GraphicalMatrixのHikariCP設定はIdPの
+`/opt/shibboleth-idp/conf/graphicalmatrix/db.properties` にある。
+配布時の標準値は次のとおりである。
+
+```properties
+graphicalmatrix.db.pool.enabled=true
+graphicalmatrix.db.pool.maximumPoolSize=10
+graphicalmatrix.db.pool.minimumIdle=2
+graphicalmatrix.db.pool.connectionTimeoutMillis=30000
+graphicalmatrix.db.pool.idleTimeoutMillis=600000
+graphicalmatrix.db.pool.maxLifetimeMillis=1800000
+graphicalmatrix.db.pool.validationTimeoutMillis=5000
+```
+
+接続経路にHAProxyなどの中継装置がある場合は、次の関係を維持する。
+
+```text
+HikariCP maxLifetime < HAProxy client/server timeout
+30分（標準値）       < 40分（本書の推奨初期値）
+```
+
+`minimumIdle=2` では少なくとも2接続をプールに維持するため、
+`idleTimeoutMillis=600000` だけを見てHAProxyのタイムアウトを決めてはならない。
+接続経路上の装置がHikariCPより先に接続を切らないようにする。
+HikariCPの `maxLifetimeMillis` を変更した場合は、HAProxy側も再確認し、
+HikariCP側を経路上の接続寿命より短くするための余裕を設ける。
+
+現在値は次のコマンドで確認する。
+
+```bash
+sudo grep -nE \
+  '^graphicalmatrix\.db\.pool\.(maximumPoolSize|minimumIdle|connectionTimeoutMillis|idleTimeoutMillis|maxLifetimeMillis|validationTimeoutMillis)[[:space:]]*=' \
+  /opt/shibboleth-idp/conf/graphicalmatrix/db.properties
+
+sudo grep -R -nE \
+  '^[[:space:]]*timeout[[:space:]]+(connect|client|server|check)' \
+  /etc/haproxy 2>/dev/null
+```
+
+IdPログに切断済み接続の警告が出ていないことは、次で確認する。
+
+```bash
+sudo grep -E \
+  'Failed to validate connection|already closed|既にクローズ' \
+  /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
+```
+
 PgBouncerを使う場合の接続グラフィカル:
 
 ```text
@@ -2211,8 +2310,8 @@ global
 defaults
     mode tcp
     timeout connect 5s
-    timeout client  60s
-    timeout server  60s
+    timeout client  40m
+    timeout server  40m
 
 frontend pgsql
     bind 192.0.2.64:5432

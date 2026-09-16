@@ -49,6 +49,17 @@ DASHBOARD_FIXED_ZIP="$DASHBOARD_DIST_ROOT/$DASHBOARD_ARTIFACT_ID.zip"
 
 "$MVN" -B -ntp -f dashboard/pom.xml -Drevision="$VERSION" clean package
 
+DASHBOARD_MAVEN_VERSION="$("$MVN" -q -DforceStdout -f dashboard/pom.xml \
+  -Drevision="$VERSION" help:evaluate -Dexpression=project.version)"
+if [[ "$DASHBOARD_MAVEN_VERSION" != "$VERSION" ]]; then
+  echo "ERROR: Dashboard Maven project.version ($DASHBOARD_MAVEN_VERSION) does not match version.ini VERSION ($VERSION)" >&2
+  exit 1
+fi
+
+"$PYTHON" "$ROOT_DIR/scripts/check-jar-manifest-version.py" \
+  "$DASHBOARD_BUILD_ROOT/$DASHBOARD_BASE_NAME.jar" \
+  "$VERSION"
+
 rm -rf \
   "$DASHBOARD_DIST_DIR" \
   "$DASHBOARD_VERSIONED_ZIP" \

@@ -31,7 +31,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 
 public final class DashboardStore implements AutoCloseable {
 
@@ -423,55 +423,65 @@ public final class DashboardStore implements AutoCloseable {
         }
     }
 
-    public Map<String, Object> summary(final Instant from, final Instant to) throws SQLException {
+    public Map<String, Object> summary(
+            final DashboardEventScope eventScope,
+            final Instant from,
+            final Instant to) throws SQLException {
         return summary(
-                from, to, Instant.now(),
+                eventScope, from, to, Instant.now(),
                 DEFAULT_TOP_MISMATCH_LIMIT, DEFAULT_TOP_SOURCE_NETWORK_LIMIT);
     }
 
     public Map<String, Object> summary(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final int topMismatchLimit) throws SQLException {
         return summary(
-                from, to, Instant.now(),
+                eventScope, from, to, Instant.now(),
                 topMismatchLimit, DEFAULT_TOP_SOURCE_NETWORK_LIMIT);
     }
 
     public Map<String, Object> summary(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final int topMismatchLimit,
             final int topSourceNetworkLimit) throws SQLException {
         return summary(
-                from, to, Instant.now(), topMismatchLimit, topSourceNetworkLimit);
+                eventScope, from, to, Instant.now(),
+                topMismatchLimit, topSourceNetworkLimit);
     }
 
     Map<String, Object> summary(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final Instant asOf) throws SQLException {
         return summary(
-                from, to, asOf,
+                eventScope, from, to, asOf,
                 DEFAULT_TOP_MISMATCH_LIMIT, DEFAULT_TOP_SOURCE_NETWORK_LIMIT);
     }
 
     Map<String, Object> summary(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final Instant asOf,
             final int topMismatchLimit) throws SQLException {
         return summary(
-                from, to, asOf,
+                eventScope, from, to, asOf,
                 topMismatchLimit, DEFAULT_TOP_SOURCE_NETWORK_LIMIT);
     }
 
     Map<String, Object> summary(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final Instant asOf,
             final int topMismatchLimit,
             final int topSourceNetworkLimit) throws SQLException {
+        Objects.requireNonNull(eventScope, "eventScope");
         if (topMismatchLimit < 1 || topMismatchLimit > MAX_TOP_MISMATCH_LIMIT) {
             throw new IllegalArgumentException(
                     "topMismatchLimit must be between 1 and "
@@ -495,18 +505,24 @@ public final class DashboardStore implements AutoCloseable {
         final Instant lastFullHourExclusive = to.truncatedTo(ChronoUnit.HOURS);
         try (Connection connection = connection()) {
             if (firstFullHour.isBefore(lastFullHourExclusive)) {
-                addRawCounts(connection, totals, from, firstFullHour);
-                addHourlyCounts(connection, totals, firstFullHour, lastFullHourExclusive);
-                addRawCounts(connection, totals, lastFullHourExclusive, to);
+                addRawCounts(connection, eventScope, totals, from, firstFullHour);
+                addHourlyCounts(
+                        connection, eventScope, totals,
+                        firstFullHour, lastFullHourExclusive);
+                addRawCounts(connection, eventScope, totals, lastFullHourExclusive, to);
             } else {
-                addRawCounts(connection, totals, from, to);
+                addRawCounts(connection, eventScope, totals, from, to);
             }
-            topMismatchUsers = topMismatchUsers(connection, from, to, topMismatchLimit);
+            topMismatchUsers = topMismatchUsers(
+                    connection, eventScope, from, to, topMismatchLimit);
             topSourceNetworks =
-                    topSourceNetworks(connection, from, to, topSourceNetworkLimit);
+                    topSourceNetworks(
+                            connection, eventScope, from, to, topSourceNetworkLimit);
             topSourceMismatchNetworks =
-                    topSourceMismatchNetworks(connection, from, to, topSourceNetworkLimit);
-            lockedUsers = lockedUsers(connection, asOf);
+                    topSourceMismatchNetworks(
+                            connection, eventScope, from, to, topSourceNetworkLimit);
+            lockedUsers = eventScope.allowsLockedUsers()
+                    ? lockedUsers(connection, asOf) : null;
         }
         final List<Map<String, Object>> counts = totals.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
@@ -528,30 +544,44 @@ public final class DashboardStore implements AutoCloseable {
         summary.put("topSourceNetworkLimit", topSourceNetworkLimit);
         summary.put("topSourceNetworks", topSourceNetworks);
         summary.put("topSourceMismatchNetworks", topSourceMismatchNetworks);
-        summary.put("lockedUserCount", lockedUsers.total());
-        summary.put("lockedUsers", lockedUsers.rows());
-        summary.put("lockedUsersAsOf", asOf);
+        if (lockedUsers == null) {
+            summary.put("lockedUserCount", null);
+            summary.put("lockedUsers", List.of());
+            summary.put("lockedUsersAsOf", null);
+        } else {
+            summary.put("lockedUserCount", lockedUsers.total());
+            summary.put("lockedUsers", lockedUsers.rows());
+            summary.put("lockedUsersAsOf", asOf);
+        }
         return summary;
     }
 
     private static List<Map<String, Object>> topMismatchUsers(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final int limit) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
+        final StringBuilder sql = new StringBuilder("""
                 SELECT user_ref, COUNT(*) AS mismatch_count
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                   AND event_type = 'VERIFY' AND result = 'FAIL'
                   AND user_ref IS NOT NULL
+                """);
+        predicate.appendTo(sql);
+        sql.append("""
                 GROUP BY user_ref
                 ORDER BY mismatch_count DESC, user_ref
                 LIMIT ?
-                """)) {
+                """);
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             statement.setObject(1, utc(from));
             statement.setObject(2, utc(to));
-            statement.setInt(3, limit);
+            final int parameter = predicate.bind(statement, 3);
+            statement.setInt(parameter, limit);
             try (ResultSet resultSet = statement.executeQuery()) {
                 final List<Map<String, Object>> rows = new ArrayList<>();
                 while (resultSet.next()) {
@@ -566,23 +596,31 @@ public final class DashboardStore implements AutoCloseable {
 
     private static List<Map<String, Object>> topSourceNetworks(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final int limit) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
+        final StringBuilder sql = new StringBuilder("""
                 SELECT source_network, COUNT(*) AS authentication_count
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                   AND event_type = 'VERIFY'
                   AND result IN ('OK', 'FAIL', 'LOCKED')
                   AND source_network IS NOT NULL
+                """);
+        predicate.appendTo(sql);
+        sql.append("""
                 GROUP BY source_network
                 ORDER BY authentication_count DESC, source_network
                 LIMIT ?
-                """)) {
+                """);
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             statement.setObject(1, utc(from));
             statement.setObject(2, utc(to));
-            statement.setInt(3, limit);
+            final int parameter = predicate.bind(statement, 3);
+            statement.setInt(parameter, limit);
             try (ResultSet resultSet = statement.executeQuery()) {
                 final List<Map<String, Object>> rows = new ArrayList<>();
                 while (resultSet.next()) {
@@ -597,23 +635,31 @@ public final class DashboardStore implements AutoCloseable {
 
     private static List<Map<String, Object>> topSourceMismatchNetworks(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final int limit) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
+        final StringBuilder sql = new StringBuilder("""
                 SELECT source_network, COUNT(*) AS mismatch_count
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                   AND event_type = 'VERIFY'
                   AND result = 'FAIL'
                   AND source_network IS NOT NULL
+                """);
+        predicate.appendTo(sql);
+        sql.append("""
                 GROUP BY source_network
                 ORDER BY mismatch_count DESC, source_network
                 LIMIT ?
-                """)) {
+                """);
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             statement.setObject(1, utc(from));
             statement.setObject(2, utc(to));
-            statement.setInt(3, limit);
+            final int parameter = predicate.bind(statement, 3);
+            statement.setInt(parameter, limit);
             try (ResultSet resultSet = statement.executeQuery()) {
                 final List<Map<String, Object>> rows = new ArrayList<>();
                 while (resultSet.next()) {
@@ -688,42 +734,50 @@ public final class DashboardStore implements AutoCloseable {
 
     private static void addRawCounts(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Map<CountKey, Long> totals,
             final Instant from,
             final Instant to) throws SQLException {
         if (!from.isBefore(to)) {
             return;
         }
-        addCounts(connection, totals, """
+        addCounts(connection, eventScope, totals, """
                 SELECT event_type, result, COUNT(*) AS total
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
-                GROUP BY event_type, result
-                """, from, to);
+                """, "GROUP BY event_type, result", from, to);
     }
 
     private static void addHourlyCounts(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Map<CountKey, Long> totals,
             final Instant from,
             final Instant to) throws SQLException {
-        addCounts(connection, totals, """
+        addCounts(connection, eventScope, totals, """
                 SELECT event_type, result, SUM(event_count) AS total
                 FROM dashboard_hourly
                 WHERE bucket_start >= ? AND bucket_start < ?
-                GROUP BY event_type, result
-                """, from, to);
+                """, "GROUP BY event_type, result", from, to);
     }
 
     private static void addCounts(
             final Connection connection,
+            final DashboardEventScope eventScope,
             final Map<CountKey, Long> totals,
-            final String sql,
+            final String sqlPrefix,
+            final String sqlSuffix,
             final Instant from,
             final Instant to) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
+        final StringBuilder sql = new StringBuilder(sqlPrefix);
+        predicate.appendTo(sql);
+        sql.append(' ').append(sqlSuffix);
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
             statement.setObject(1, utc(from));
             statement.setObject(2, utc(to));
+            predicate.bind(statement, 3);
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     totals.merge(
@@ -746,16 +800,20 @@ public final class DashboardStore implements AutoCloseable {
     }
 
     public List<Map<String, Object>> events(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
             final String result,
             final int limit,
             final int offset) throws SQLException {
-        return events(from, to, eventType, result, null, null, null, limit, offset);
+        return events(
+                eventScope, from, to, eventType, result,
+                null, null, null, limit, offset);
     }
 
     public List<Map<String, Object>> events(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -766,10 +824,12 @@ public final class DashboardStore implements AutoCloseable {
             final int limit,
             final int offset) throws SQLException {
         return events(
-                from, to, eventType, result, nodeId, reason, userRef, limit, offset, null);
+                eventScope, from, to, eventType, result,
+                nodeId, reason, userRef, limit, offset, null);
     }
 
     public List<Map<String, Object>> events(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -781,11 +841,12 @@ public final class DashboardStore implements AutoCloseable {
             final int offset,
             final EventRegexFilter regexFilter) throws SQLException {
         return events(
-                from, to, eventType, result, nodeId, reason, userRef, null,
+                eventScope, from, to, eventType, result, nodeId, reason, userRef, null,
                 limit, offset, regexFilter);
     }
 
     public List<Map<String, Object>> events(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -797,12 +858,16 @@ public final class DashboardStore implements AutoCloseable {
             final int limit,
             final int offset,
             final EventRegexFilter regexFilter) throws SQLException {
+        Objects.requireNonNull(eventScope, "eventScope");
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
                        user_ref, source_network, locked_until
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
+        predicate.appendTo(sql);
         if (eventType != null) {
             sql.append(" AND event_type = ?");
         }
@@ -829,6 +894,7 @@ public final class DashboardStore implements AutoCloseable {
             int parameter = 1;
             statement.setObject(parameter++, utc(from));
             statement.setObject(parameter++, utc(to));
+            parameter = predicate.bind(statement, parameter);
             if (eventType != null) {
                 statement.setString(parameter++, eventType);
             }
@@ -858,48 +924,28 @@ public final class DashboardStore implements AutoCloseable {
     }
 
     public List<Map<String, Object>> categoryEvents(
+            final DashboardEventScope eventScope,
+            final DashboardEventPolicy.RouteCategory category,
             final Instant from,
             final Instant to,
-            final Set<String> eventTypes,
-            final String eventPrefix,
             final String requestedEvent,
             final String result,
             final String nodeId,
             final String reason,
             final String userRef,
             final int limit) throws SQLException {
-        if (eventTypes.isEmpty() && eventPrefix == null) {
-            return List.of();
-        }
-        if (requestedEvent != null
-                && !eventTypes.contains(requestedEvent)
-                && (eventPrefix == null || !requestedEvent.startsWith(eventPrefix))) {
-            return List.of();
-        }
-
+        Objects.requireNonNull(eventScope, "eventScope");
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, category);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
                        user_ref, source_network, locked_until
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
+        predicate.appendTo(sql);
         if (requestedEvent != null) {
             sql.append(" AND event_type = ?");
-        } else {
-            sql.append(" AND (");
-            if (!eventTypes.isEmpty()) {
-                sql.append("event_type IN (");
-                sql.append("?, ".repeat(eventTypes.size()));
-                sql.setLength(sql.length() - 2);
-                sql.append(')');
-            }
-            if (eventPrefix != null) {
-                if (!eventTypes.isEmpty()) {
-                    sql.append(" OR ");
-                }
-                sql.append("event_type LIKE ?");
-            }
-            sql.append(')');
         }
         if (result != null) {
             sql.append(" AND result = ?");
@@ -920,15 +966,9 @@ public final class DashboardStore implements AutoCloseable {
             int parameter = 1;
             statement.setObject(parameter++, utc(from));
             statement.setObject(parameter++, utc(to));
+            parameter = predicate.bind(statement, parameter);
             if (requestedEvent != null) {
                 statement.setString(parameter++, requestedEvent);
-            } else {
-                for (String eventType : eventTypes) {
-                    statement.setString(parameter++, eventType);
-                }
-                if (eventPrefix != null) {
-                    statement.setString(parameter++, eventPrefix + "%");
-                }
             }
             if (result != null) {
                 statement.setString(parameter++, result);
@@ -948,6 +988,7 @@ public final class DashboardStore implements AutoCloseable {
     }
 
     public List<Map<String, Object>> eventPage(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -958,10 +999,12 @@ public final class DashboardStore implements AutoCloseable {
             final int limit,
             final EventCursor cursor) throws SQLException {
         return eventPage(
-                from, to, eventType, result, nodeId, reason, userRef, limit, cursor, null);
+                eventScope, from, to, eventType, result,
+                nodeId, reason, userRef, limit, cursor, null);
     }
 
     public List<Map<String, Object>> eventPage(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -973,11 +1016,12 @@ public final class DashboardStore implements AutoCloseable {
             final EventCursor cursor,
             final EventRegexFilter regexFilter) throws SQLException {
         return eventPage(
-                from, to, eventType, result, nodeId, reason, userRef, null,
+                eventScope, from, to, eventType, result, nodeId, reason, userRef, null,
                 limit, cursor, regexFilter);
     }
 
     public List<Map<String, Object>> eventPage(
+            final DashboardEventScope eventScope,
             final Instant from,
             final Instant to,
             final String eventType,
@@ -989,12 +1033,16 @@ public final class DashboardStore implements AutoCloseable {
             final int limit,
             final EventCursor cursor,
             final EventRegexFilter regexFilter) throws SQLException {
+        Objects.requireNonNull(eventScope, "eventScope");
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(
+                eventScope, DashboardEventPolicy.RouteCategory.ALL);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
                        user_ref, source_network, locked_until
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
+        predicate.appendTo(sql);
         if (eventType != null) {
             sql.append(" AND event_type = ?");
         }
@@ -1024,6 +1072,7 @@ public final class DashboardStore implements AutoCloseable {
             int parameter = 1;
             statement.setObject(parameter++, utc(from));
             statement.setObject(parameter++, utc(to));
+            parameter = predicate.bind(statement, parameter);
             if (eventType != null) {
                 statement.setString(parameter++, eventType);
             }

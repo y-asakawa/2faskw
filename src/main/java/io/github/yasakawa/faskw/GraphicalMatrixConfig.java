@@ -40,6 +40,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private static final int DEFAULT_CHOICE_COUNT = 4;
     private static final int DEFAULT_ORDER_MODE = 1;
     private static final int DEFAULT_CHALLENGE_SECONDS = 180;
+    private static final int DEFAULT_TOTP_REGISTRATION_TTL_SECONDS = 180;
     private static final int DEFAULT_LOCKOUT_FAILURE_LIMIT = 5;
     private static final int DEFAULT_LOCKOUT_LOCK_SECONDS = 900;
     private static final int DEFAULT_LOCKOUT_MAX_LOCK_FAILURE_COUNT = 10;
@@ -97,6 +98,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final int choiceCount;
     private final int orderMode;
     private final int challengeSeconds;
+    private final int totpRegistrationTtlSeconds;
     private final int lockoutFailureLimit;
     private final int lockoutLockSeconds;
     private final int lockoutMaxLockFailureCount;
@@ -140,7 +142,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     private GraphicalMatrixConfig(final int columns, final int rows,
             final int mobileBreakpointPx, final int mobileColumns, final int choiceCount,
-            final int orderMode, final int challengeSeconds,
+            final int orderMode, final int challengeSeconds, final int totpRegistrationTtlSeconds,
             final int lockoutFailureLimit, final int lockoutLockSeconds,
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
             final boolean changeLdapRateLimitEnabled,
@@ -172,6 +174,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.choiceCount = choiceCount;
         this.orderMode = orderMode;
         this.challengeSeconds = challengeSeconds;
+        this.totpRegistrationTtlSeconds = totpRegistrationTtlSeconds;
         this.lockoutFailureLimit = lockoutFailureLimit;
         this.lockoutLockSeconds = lockoutLockSeconds;
         this.lockoutMaxLockFailureCount = lockoutMaxLockFailureCount;
@@ -238,6 +241,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         final int orderMode = intProperty(properties, "graphicalmatrix.order", DEFAULT_ORDER_MODE);
         final int challengeSeconds =
             intProperty(properties, "graphicalmatrix.challenge.seconds", DEFAULT_CHALLENGE_SECONDS);
+        final int totpRegistrationTtlSeconds = intProperty(properties,
+            "graphicalmatrix.totp.registrationTtlSeconds", DEFAULT_TOTP_REGISTRATION_TTL_SECONDS);
         final int lockoutFailureLimit = intProperty(properties,
             "graphicalmatrix.lockout.failureLimit", DEFAULT_LOCKOUT_FAILURE_LIMIT);
         final int lockoutLockSeconds = intProperty(properties,
@@ -328,7 +333,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             "graphicalmatrix.view.changeCompleteTemplate", DEFAULT_CHANGE_COMPLETE_TEMPLATE_PATH)).normalize();
 
         validate(columns, rows, mobileBreakpointPx, mobileColumns,
-            choiceCount, orderMode, challengeSeconds,
+            choiceCount, orderMode, challengeSeconds, totpRegistrationTtlSeconds,
             lockoutFailureLimit, lockoutLockSeconds,
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
@@ -354,7 +359,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
                 "GraphicalMatrix responsive columns require external CSS to be enabled.");
         }
         return new GraphicalMatrixConfig(columns, rows, mobileBreakpointPx, mobileColumns,
-            choiceCount, orderMode, challengeSeconds,
+            choiceCount, orderMode, challengeSeconds, totpRegistrationTtlSeconds,
             lockoutFailureLimit, lockoutLockSeconds,
             lockoutMaxLockFailureCount, lockoutMaxLockSeconds,
             changeLdapRateLimitEnabled, changeLdapRateLimitFailureLimit,
@@ -411,6 +416,14 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     public long getChallengeMillis() {
         return challengeSeconds * 1000L;
+    }
+
+    public int getTotpRegistrationTtlSeconds() {
+        return totpRegistrationTtlSeconds;
+    }
+
+    public long getTotpRegistrationTtlMillis() {
+        return totpRegistrationTtlSeconds * 1000L;
     }
 
     public int getLockoutFailureLimit() {
@@ -774,7 +787,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
 
     private static void validate(final int columns, final int rows,
             final int mobileBreakpointPx, final int mobileColumns, final int choiceCount,
-            final int orderMode, final int challengeSeconds,
+            final int orderMode, final int challengeSeconds, final int totpRegistrationTtlSeconds,
             final int lockoutFailureLimit, final int lockoutLockSeconds,
             final int lockoutMaxLockFailureCount, final int lockoutMaxLockSeconds,
             final boolean changeLdapRateLimitEnabled, final int changeLdapRateLimitFailureLimit,
@@ -805,6 +818,10 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         }
         if (challengeSeconds < 30 || challengeSeconds > 900) {
             throw new IllegalArgumentException("GraphicalMatrix challenge seconds must be between 30 and 900.");
+        }
+        if (totpRegistrationTtlSeconds < 30 || totpRegistrationTtlSeconds > 900) {
+            throw new IllegalArgumentException(
+                "GraphicalMatrix TOTP registration TTL must be between 30 and 900 seconds.");
         }
         if (lockoutFailureLimit < 1 || lockoutFailureLimit > 100) {
             throw new IllegalArgumentException(

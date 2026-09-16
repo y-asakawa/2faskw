@@ -62,7 +62,7 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 | `TOTP_REGISTER_VERIFY` | `OK`、`FAIL`、`BAD_REQUEST` | TOTP初回登録時のコード確認結果。 |
 | `TOTP_REGISTER_CANCEL` | `OK` | TOTP登録を利用者が取り消した。 |
 | `WEBAUTHN_REGISTER_START` | `OK`、`ENROLL_REQUIRED`、`DB_ERROR` | 現在のMFA方式で本人確認済みの一回限り登録要求を作成し、公式WebAuthn登録flowへ遷移した。 |
-| `WEBAUTHN_REGISTER_ACTIVATE` | `OK`、`DENIED`、`ENROLL_REQUIRED`、`DB_ERROR` | 公式Pluginのcredential保存成功hookを受け、2FAS-KWのMFA方式をWebAuthnへ切り替えた結果。credentialや公開鍵は記録しない。 |
+| `WEBAUTHN_REGISTER_ACTIVATE` | `OK`、`DENIED`、`ENROLL_REQUIRED`、`DB_ERROR` | 既存credential確認後または公式Pluginのcredential保存成功hook後に、2FAS-KWのMFA方式をWebAuthnへ切り替えた結果。`detail=existing_credential`は既存鍵の再利用を示す。credentialや公開鍵は記録しない。 |
 
 `VERIFY result=FAIL`が連続した後に`VERIFY result=LOCKED`または`START result=LOCKED`が出る場合は、
 GraphicalMatrixロックアウトが働いている。`locked_until`が`detail`に出る場合はUnix epoch millisecondsであり、

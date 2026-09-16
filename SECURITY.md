@@ -30,3 +30,5 @@ whether user authentication data, credentials, TOTP seeds, authentication sequen
 
 Only the latest published release is expected to receive security fixes unless the release notes state otherwise.
 
+The complete best-effort support scope and project EOL policy are documented in
+[docs/SUPPORT-POLICY.md](docs/SUPPORT-POLICY.md).

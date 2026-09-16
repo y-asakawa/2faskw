@@ -6,6 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 VERSION="$(awk -F= '$1 == "VERSION" { print $2; exit }' "$ROOT/version.ini")"
+ARTIFACT_ID="$(awk -F= '$1 == "ARTIFACT_ID" { print $2; exit }' "$ROOT/version.ini")"
+DASHBOARD_ARTIFACT_ID="$(awk -F= '$1 == "DASHBOARD_ARTIFACT_ID" { print $2; exit }' "$ROOT/version.ini")"
 PLUGIN_DIST="$ROOT/target/plugin-dist"
 ADMIN_DIST="$ROOT/target/admin-dist"
 ADMIN_ROOT="2faskw-admin-tools-$VERSION"
@@ -25,6 +27,16 @@ fail() {
 }
 
 [[ -n "$VERSION" ]] || fail "VERSION is missing from version.ini"
+[[ -n "$ARTIFACT_ID" ]] || fail "ARTIFACT_ID is missing from version.ini"
+[[ -n "$DASHBOARD_ARTIFACT_ID" ]] || fail "DASHBOARD_ARTIFACT_ID is missing from version.ini"
+
+"$PYTHON" "$ROOT/scripts/check-jar-manifest-version.py" \
+  "$ROOT/target/$ARTIFACT_ID-$VERSION.jar" \
+  "$VERSION"
+
+"$PYTHON" "$ROOT/scripts/check-jar-manifest-version.py" \
+  "$ROOT/dashboard/target/$DASHBOARD_ARTIFACT_ID-$VERSION.jar" \
+  "$VERSION"
 
 for file in \
   "$PLUGIN_DIST/2faskw-idp-plugin.tar.gz" \
@@ -71,11 +83,16 @@ required = {
     f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew",
     f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew",
     f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew",
+    f"{expected_root}/conf/graphicalmatrix/ldap.properties.idpnew",
+    f"{expected_root}/conf/graphicalmatrix/postgresql-schema.sql",
     f"{expected_root}/examples/logrotate/README.md",
     f"{expected_root}/examples/logrotate/graphicalmatrix-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-sp-management-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-access-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
+    f"{expected_root}/examples/authn-events-flow.xml",
+    f"{expected_root}/examples/mfa-authn-config.xml",
+    f"{expected_root}/views/webauthn/webauthn-authn.vm.idpnew",
 }
 with zipfile.ZipFile(archive) as zf:
     names = set(zf.namelist())
@@ -103,6 +120,55 @@ with zipfile.ZipFile(archive) as zf:
         raise SystemExit("security headers must be enabled by default")
     if "graphicalmatrix.securityHeaders.cspMode = enforce" not in graphical_config:
         raise SystemExit("CSP must be enforced by default")
+    if "graphicalmatrix.totp.registrationTtlSeconds = 180" not in graphical_config:
+        raise SystemExit("TOTP registration TTL setting is missing")
+    webauthn_registration = zf.read(
+        f"{expected_root}/conf/authn/webauthn-registration.properties.idpnew"
+    ).decode("utf-8")
+    if "idp.authnwebauthn.registration.allowInline = false" not in webauthn_registration:
+        raise SystemExit("WebAuthn inline registration must be disabled for the standard MFA flow")
+    if "idp.authn.webauthn.admin.registration.forceAuthn = true" not in webauthn_registration:
+        raise SystemExit("WebAuthn credential registration must force reauthentication")
+    webauthn_view = zf.read(
+        f"{expected_root}/views/webauthn/webauthn-authn.vm.idpnew"
+    ).decode("utf-8")
+    if "http://shibboleth.net/ns/profiles/admin/webauthn/register-credential" not in webauthn_view:
+        raise SystemExit("WebAuthn registration requester view branch is missing")
+    if "#if (!$credentialRegistrationRequester)" not in webauthn_view:
+        raise SystemExit("WebAuthn registration view must hide the recursive add link")
+    if "?reg=inline" in webauthn_view:
+        raise SystemExit("WebAuthn view must not expose inline credential registration")
+    ldap_config = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/ldap.properties.idpnew"
+    ).decode("utf-8")
+    for mapping in (
+        "graphicalmatrix.ldap.attr.totp_registration_id = ldap_totp_registration_id",
+        "graphicalmatrix.ldap.attr.totp_registration_expires_at = ldap_totp_registration_expires_at",
+    ):
+        if mapping not in ldap_config:
+            raise SystemExit(f"TOTP registration LDAP mapping is missing: {mapping}")
+    schema = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/postgresql-schema.sql"
+    ).decode("utf-8")
+    for column in ("totp_registration_id", "totp_registration_expires_at"):
+        if column not in schema:
+            raise SystemExit(f"TOTP registration DB column is missing: {column}")
+    mfa_policy = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/mfa-policy.properties.idpnew"
+    ).decode("utf-8")
+    if "graphicalmatrix.mfa.missingEnrollmentPolicy = deny" not in mfa_policy:
+        raise SystemExit("missing enrollment policy must deny by default")
+    mfa_config = zf.read(
+        f"{expected_root}/examples/mfa-authn-config.xml"
+    ).decode("utf-8")
+    if "GraphicalMatrixMfaCompletionStrategy" not in mfa_config:
+        raise SystemExit("MFA completion state guard is missing")
+    authn_events = zf.read(
+        f"{expected_root}/examples/authn-events-flow.xml"
+    ).decode("utf-8")
+    for event in ("GraphicalMatrixAccessDenied", "GraphicalMatrixServiceUnavailable"):
+        if event not in authn_events:
+            raise SystemExit(f"MFA failure event is missing: {event}")
     if "graphicalmatrix.view.javascript = /opt/shibboleth-idp/conf/graphicalmatrix/assets/graphicalmatrix.js" not in graphical_config:
         raise SystemExit("external GraphicalMatrix JavaScript setting is missing")
     graphical_css = zf.read(
@@ -162,6 +228,9 @@ required = {
     f"{expected_root}/bin/graphicalmatrix-db.sh",
     f"{expected_root}/bin/graphicalmatrix-admin-install.sh",
     f"{expected_root}/bin/graphicalmatrix-csv-import-runner.sh",
+    f"{expected_root}/conf/graphicalmatrix/graphicalmatrix.properties.adminnew",
+    f"{expected_root}/conf/graphicalmatrix/ldap.properties.adminnew",
+    f"{expected_root}/conf/graphicalmatrix/postgresql-schema.sql",
     f"{expected_root}/examples/logrotate/README.md",
     f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
     f"{expected_root}/package-metadata/PACKAGE-CONTENTS.txt",
@@ -203,6 +272,24 @@ with zipfile.ZipFile(archive) as zf:
         raise SystemExit("required entries are missing: " + ", ".join(missing))
     if any(pathlib.PurePosixPath(name).name == "graphicalmatrix-sp.sh" for name in names):
         raise SystemExit("SP management CLI must not be bundled in Admin Tools")
+
+    graphical_config = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/graphicalmatrix.properties.adminnew"
+    ).decode("utf-8")
+    if "graphicalmatrix.totp.registrationTtlSeconds = 180" not in graphical_config:
+        raise SystemExit("Admin Tools TOTP registration TTL setting is missing")
+    ldap_config = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/ldap.properties.adminnew"
+    ).decode("utf-8")
+    for mapping in ("totp_registration_id", "totp_registration_expires_at"):
+        if mapping not in ldap_config:
+            raise SystemExit(f"Admin Tools TOTP registration LDAP mapping is missing: {mapping}")
+    schema = zf.read(
+        f"{expected_root}/conf/graphicalmatrix/postgresql-schema.sql"
+    ).decode("utf-8")
+    for column in ("totp_registration_id", "totp_registration_expires_at"):
+        if column not in schema:
+            raise SystemExit(f"Admin Tools TOTP registration DB column is missing: {column}")
 
     installer = zf.read(
         f"{expected_root}/bin/graphicalmatrix-admin-install.sh"

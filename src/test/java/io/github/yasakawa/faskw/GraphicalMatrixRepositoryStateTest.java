@@ -19,12 +19,12 @@ package io.github.yasakawa.faskw;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -35,6 +35,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import net.shibboleth.shared.codec.Base32Support;
 
 final class GraphicalMatrixRepositoryStateTest {
     @TempDir
@@ -116,6 +117,31 @@ final class GraphicalMatrixRepositoryStateTest {
     }
 
     @Test
+    void mfaSettingsExposeStatusCredentialReadinessAndStateVersion() throws Exception {
+        final GraphicalMatrixMfaSettings settings = repository.findMfaSettings("alice");
+
+        assertTrue(settings.isActive());
+        assertTrue(settings.hasValidStatus());
+        assertTrue(settings.isSequenceSet());
+        assertFalse(settings.isTotpSeedSet());
+        assertEquals("GraphicalMatrix", settings.getMethod());
+        assertEquals(0L, settings.getStateVersion());
+
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE graphicalmatrix_enrollment SET status = 'DISABLED', "
+                 + "state_version = state_version + 1 WHERE user_id = ?")) {
+            statement.setString(1, "alice");
+            statement.executeUpdate();
+        }
+
+        final GraphicalMatrixMfaSettings disabled = repository.findMfaSettings("alice");
+        assertTrue(disabled.isDisabled());
+        assertFalse(disabled.isActive());
+        assertEquals(1L, disabled.getStateVersion());
+    }
+
+    @Test
     void updateMfaMethodIfCurrentRequiresExpectedVersionAndUnlockedEnrollment() throws Exception {
         final GraphicalMatrixEnrollment verified = repository.findEnrollment("alice");
 
@@ -154,25 +180,99 @@ final class GraphicalMatrixRepositoryStateTest {
     void totpRegistrationDoesNotStartOrActivateWhileLocked() throws Exception {
         configureTotpPending("alice", 5000L);
 
-        assertNull(repository.prepareTotpRegistration("alice", 1200L));
+        final GraphicalMatrixTotpEnrollmentResult start =
+            repository.beginTotpRegistration("alice", 0L, 1200L, 180000L);
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.LOCKED, start.getStatus());
 
-        final GraphicalMatrixVerifyResult result =
-            repository.verifyAndActivateTotp("alice", "000000", 1200L);
-        assertFalse(result.isSuccess());
+        final GraphicalMatrixTotpEnrollmentBinding binding =
+            new GraphicalMatrixTotpEnrollmentBinding("alice", "locked", 1L, 200000L);
+        final GraphicalMatrixTotpEnrollmentResult result =
+            repository.verifyTotpRegistration(binding, "000000", 1200L);
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.LOCKED, result.getStatus());
         assertEquals("LOCKED", result.getAuditResult());
         assertEquals("PENDING", findTotpStatus("alice"));
     }
 
     @Test
     void totpRegistrationAdvancesEnrollmentStateVersion() throws Exception {
-        assertTrue(repository.updateMfaMethod("alice", "TOTP", 1100L));
+        allowMfaMethodChange("alice");
         final long beforePrepare = repository.findEnrollment("alice").getStateVersion();
 
-        final String seed = repository.prepareTotpRegistration("alice", 1200L);
+        final GraphicalMatrixTotpEnrollmentResult result =
+            repository.beginTotpRegistration("alice", beforePrepare, 1200L, 180000L);
 
-        assertTrue(seed != null && !seed.isEmpty());
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.STARTED, result.getStatus());
+        assertFalse(result.getSeed().isEmpty());
+        assertEquals(181200L, result.getBinding().expiresAt());
         assertEquals(beforePrepare + 1,
             repository.findEnrollment("alice").getStateVersion());
+    }
+
+    @Test
+    void wrongTotpCodeKeepsTheSameRegistrationAndFixedExpiry() throws Exception {
+        allowMfaMethodChange("alice");
+        final GraphicalMatrixTotpEnrollmentResult start = repository.beginTotpRegistration(
+            "alice", repository.findEnrollment("alice").getStateVersion(), 1200L, 180000L);
+
+        final GraphicalMatrixTotpEnrollmentResult retry = repository.verifyTotpRegistration(
+            start.getBinding(), "not-a-code", 5000L);
+
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.RETRY, retry.getStatus());
+        assertEquals(start.getBinding(), retry.getBinding());
+        assertEquals(start.getSeed(), retry.getSeed());
+        assertEquals(181200L, retry.getBinding().expiresAt());
+        assertEquals(start.getBinding().stateVersion(),
+            repository.findEnrollment("alice").getStateVersion());
+    }
+
+    @Test
+    void staleTotpPageCannotActivateOrCancelAfterAdministrativeChange() throws Exception {
+        allowMfaMethodChange("alice");
+        final GraphicalMatrixTotpEnrollmentResult start = repository.beginTotpRegistration(
+            "alice", repository.findEnrollment("alice").getStateVersion(), 30000L, 180000L);
+        final String validCode = totpCode(start.getSeed(), 30000L);
+
+        assertTrue(repository.updateMfaMethod("alice", "GraphicalMatrix", 31000L));
+        final GraphicalMatrixTotpEnrollmentResult activate = repository.verifyTotpRegistration(
+            start.getBinding(), validCode, 32000L);
+        final GraphicalMatrixTotpEnrollmentResult cancel = repository.cancelTotpRegistration(
+            start.getBinding(), testConfig(), 32000L);
+
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.STALE, activate.getStatus());
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.STALE, cancel.getStatus());
+        assertEquals("GraphicalMatrix", findMethod("alice"));
+        assertEquals("PENDING", findTotpStatus("alice"));
+        assertEquals("", findTotpRegistrationId("alice"));
+    }
+
+    @Test
+    void currentTotpBindingActivatesWithAValidCode() throws Exception {
+        allowMfaMethodChange("alice");
+        final GraphicalMatrixTotpEnrollmentResult start = repository.beginTotpRegistration(
+            "alice", repository.findEnrollment("alice").getStateVersion(), 30000L, 180000L);
+
+        final GraphicalMatrixTotpEnrollmentResult activated = repository.verifyTotpRegistration(
+            start.getBinding(), totpCode(start.getSeed(), 30000L), 30000L);
+
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.ACTIVATED, activated.getStatus());
+        assertEquals("ACTIVE", findTotpStatus("alice"));
+        assertEquals(start.getBinding().stateVersion() + 1,
+            repository.findEnrollment("alice").getStateVersion());
+    }
+
+    @Test
+    void totpRegistrationExpiresAtThePersistedDeadline() throws Exception {
+        allowMfaMethodChange("alice");
+        final GraphicalMatrixTotpEnrollmentResult start = repository.beginTotpRegistration(
+            "alice", repository.findEnrollment("alice").getStateVersion(), 30000L, 180000L);
+
+        final GraphicalMatrixTotpEnrollmentResult expired = repository.verifyTotpRegistration(
+            start.getBinding(), totpCode(start.getSeed(), start.getBinding().expiresAt()),
+            start.getBinding().expiresAt());
+
+        assertEquals(GraphicalMatrixTotpEnrollmentResult.Status.EXPIRED, expired.getStatus());
+        assertEquals("PENDING", findTotpStatus("alice"));
+        assertEquals(start.getBinding().registrationId(), findTotpRegistrationId("alice"));
     }
 
     @Test
@@ -302,6 +402,33 @@ final class GraphicalMatrixRepositoryStateTest {
         }
     }
 
+    private void allowMfaMethodChange(final String user) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "UPDATE graphicalmatrix_enrollment SET force_sequence_change = 0 WHERE user_id = ?")) {
+            statement.setString(1, user);
+            statement.executeUpdate();
+        }
+    }
+
+    private GraphicalMatrixConfig testConfig() throws Exception {
+        final Path conf = idpHome.resolve("conf/graphicalmatrix");
+        Files.writeString(conf.resolve("graphicalmatrix.properties"),
+            "graphicalmatrix.sequence.storage=plaintext\n"
+            + "graphicalmatrix.columns=1\n"
+            + "graphicalmatrix.rows=1\n"
+            + "graphicalmatrix.graphicals=g1\n"
+            + "graphicalmatrix.choice=1\n");
+        return GraphicalMatrixConfig.load(idpHome.toString());
+    }
+
+    private static String totpCode(final String seed, final long now) throws Exception {
+        final Method method = GraphicalMatrixTotpSupport.class.getDeclaredMethod(
+            "generateCode", byte[].class, long.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, Base32Support.decode(seed), now / 30000L);
+    }
+
     private String findMethod(final String user) throws Exception {
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
              PreparedStatement statement = connection.prepareStatement(
@@ -322,6 +449,19 @@ final class GraphicalMatrixRepositoryStateTest {
             try (var rs = statement.executeQuery()) {
                 assertTrue(rs.next());
                 return rs.getString("totp_status");
+            }
+        }
+    }
+
+    private String findTotpRegistrationId(final String user) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT totp_registration_id FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
+            statement.setString(1, user);
+            try (var rs = statement.executeQuery()) {
+                assertTrue(rs.next());
+                final String value = rs.getString("totp_registration_id");
+                return value == null ? "" : value;
             }
         }
     }

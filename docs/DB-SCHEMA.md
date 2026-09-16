@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_seed VARCHAR(255),
   totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED',
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
+  totp_registration_id VARCHAR(64),
+  totp_registration_expires_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INTEGER NOT NULL DEFAULT 0,
   state_version BIGINT NOT NULL DEFAULT 0,
@@ -78,6 +80,8 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 | `totp_seed` | `VARCHAR(255)` | yes | `NULL` | TOTP seed。保存方式により平文または暗号化文字列になる。 |
 | `totp_status` | `VARCHAR(32)` | no | `UNREGISTERED` | TOTP登録状態。`UNREGISTERED`、`PENDING`、`ACTIVE` を想定する。 |
 | `totp_registered_at` | `BIGINT` | no | `0` | TOTP登録完了時刻。Unix epoch milliseconds。 |
+| `totp_registration_id` | `VARCHAR(64)` | yes | `NULL` | 現在のPENDING自己登録を一意に識別する値。監査ログや画面へ完全値を出力しない。 |
+| `totp_registration_expires_at` | `BIGINT` | no | `0` | PENDING自己登録の固定失効時刻。Unix epoch milliseconds。完了・取消・管理変更時は0。 |
 | `last_success_at` | `BIGINT` | no | `0` | 最終認証成功時刻。Unix epoch milliseconds。 |
 | `force_sequence_change` | `INTEGER` | no | `0` | 次回ログイン時のGraphicalMatrix変更強制フラグ。`0` は無効、非0は有効。 |
 | `state_version` | `BIGINT` | no | `0` | 管理状態の世代番号。本人確認後の古い画面から無効化・ロック状態を上書きしないために使用する。 |
@@ -169,12 +173,15 @@ Shibboleth JDBC StorageServiceも引用符なしで参照するため、この�
 | GraphicalMatrix認証失敗 | `failed_count` を加算し、閾値到達時に `locked_until` を設定する。 |
 | GraphicalMatrix変更完了 | `sequence` を更新し、`force_sequence_change=0` に戻す。 |
 | MFA方式変更 | `mfa_method` を更新し、必要に応じてTOTP状態や失敗回数を初期化する。 |
-| TOTP登録開始 | `totp_seed` を発行し、`totp_status=PENDING` にする。 |
-| TOTP登録完了 | `totp_status=ACTIVE`、`totp_registered_at`、`last_success_at` を更新する。 |
+| TOTP登録開始 | 方式、seed、`PENDING`、登録ID、固定期限、`state_version + 1`を一つの更新で設定する。 |
+| TOTP登録再試行 | 同じ登録ID、version、期限、seedを維持する。期限は延長しない。 |
+| TOTP登録完了 | Binding一致を条件に`ACTIVE`化し、登録IDと期限を消去してversionを増加する。 |
+| TOTP登録取消 | Binding一致を条件にGraphicalMatrixへ戻し、PENDING seed、登録ID、期限を消去する。 |
 | WebAuthn登録 | Shibboleth WebAuthn Pluginが `storagerecords` を更新する。 |
 | WebAuthn reset/delete | 管理CLIが `storagerecords.value` を更新または行削除する。 |
 
 認証時のGraphicalMatrix/TOTP関連更新では、ユーザー行を `FOR UPDATE` で取得して同時更新を抑制する。
+TOTP自己登録の確認・取消は、利用者IDだけでなく登録ID、開始後`state_version`、固定期限の全一致を必要とする。
 
 ## 7. 保存データの保護
 

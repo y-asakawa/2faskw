@@ -1,6 +1,7 @@
 # Install Guide
 
-この文書は、2FAS-KW Plugin配布物を既存のShibboleth IdP 5へ導入する手順です。
+この文書は、2FAS-KW Plugin配布物を対応範囲内のShibboleth IdPへ導入する手順です。
+現行リリースの正確な範囲は[COMPATIBILITY.md](./COMPATIBILITY.md)を参照してください。
 公式Shibboleth plugin packageとしては未完成です。
 
 ## この文書の使い方
@@ -178,7 +179,7 @@ sequence保存用secretを配置してください。
 
 IdP 実行環境:
 
-- Shibboleth IdP 5.2 系
+- Shibboleth IdP 5.2.1以上、5.2.4未満
 - Java 21 実行環境
 - Jetty 12
 - PostgreSQL 推奨
@@ -221,7 +222,7 @@ MFA連携:
 IdP/APサーバの導入は [INSTALL_AP.md](./INSTALL_AP.md)、
 DBサーバの導入は [INSTALL_DB.md](./INSTALL_DB.md) を参照する。
 
-- Shibboleth IdP 5系
+- Shibboleth IdP 5.2.1以上、5.2.4未満
 - Java 21
 - Jetty 12
 - PostgreSQL
@@ -945,6 +946,8 @@ graphicalmatrix.ldap.attr.mfa_method = ldap_mfa_method
 graphicalmatrix.ldap.attr.totp_seed = ldap_totp_seed
 graphicalmatrix.ldap.attr.totp_status = ldap_totp_status
 graphicalmatrix.ldap.attr.totp_registered_at = ldap_totp_registered_at
+graphicalmatrix.ldap.attr.totp_registration_id = ldap_totp_registration_id
+graphicalmatrix.ldap.attr.totp_registration_expires_at = ldap_totp_registration_expires_at
 graphicalmatrix.ldap.attr.last_success_at = ldap_last_success_at
 graphicalmatrix.ldap.attr.force_sequence_change = ldap_force_sequence_change
 graphicalmatrix.ldap.attr.state_version = ldap_state_version
@@ -1122,17 +1125,27 @@ sudo diff -u \
 ```
 
 差分レビュー後、既存の`TransitionMap`へ`authn/Password`後に
-`GraphicalMatrixMfaDecisionStrategy`を呼び出す遷移とbean定義だけを統合する。
+`GraphicalMatrixMfaDecisionStrategy`を呼び出す遷移に加え、`authn/External`、`authn/TOTP`、
+`authn/WebAuthn`成功後に`GraphicalMatrixMfaCompletionStrategy`を呼び出す3遷移とbean定義を統合する。
 既存のMFA設計と統合できない場合は、このファイルを変更せず、先にMFAフロー設計を確認する。
 
 確認:
 
 ```bash
-sudo grep -nE 'TransitionMap|authn/Password|GraphicalMatrixMfaDecisionStrategy|authn/External|authn/TOTP|authn/WebAuthn' \
+sudo grep -nE 'TransitionMap|authn/Password|GraphicalMatrixMfaDecisionStrategy|GraphicalMatrixMfaCompletionStrategy|authn/External|authn/TOTP|authn/WebAuthn' \
   /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
 ```
 
-`GraphicalMatrixMfaDecisionStrategy` が表示されることを確認する。
+両方のstrategyと4つのflowが表示されることを確認する。
+
+カスタム拒否イベントをIdPへ登録する。新規IdPで既存custom eventがない場合は配布例を配置できる。
+既存IdPでは現在のend-stateとglobal transitionを保持して、配布例の2イベントだけを統合する。
+
+```bash
+sudo diff -u \
+  /opt/shibboleth-idp/conf/authn/authn-events-flow.xml \
+  ./examples/authn-events-flow.xml
+```
 
 ### authn.properties
 
@@ -1158,6 +1171,9 @@ idp.authn.External.externalAuthnPath = contextRelative:/graphicalmatrix/start
 idp.authn.External.nonBrowserSupported = false
 idp.authn.External.passiveAuthenticationSupported = false
 idp.authn.External.forcedAuthenticationSupported = true
+
+# MFA全体の過去の結果で最新enrollment状態確認を省略しない。
+idp.authn.MFA.reuseCondition = shibboleth.Conditions.FALSE
 ```
 
 `forcedAuthenticationSupported=true` は、自己管理profileが要求するForceAuthn時にも
@@ -1167,7 +1183,7 @@ GraphicalMatrix External flowを実行可能にする設定である。この設
 確認:
 
 ```bash
-sudo grep -nE '^idp.authn.flows|idp.authn.External.externalAuthnPath|idp.authn.External.forcedAuthenticationSupported|external.jsp|/graphicalmatrix/start' \
+sudo grep -nE '^idp.authn.flows|idp.authn.External.externalAuthnPath|idp.authn.External.forcedAuthenticationSupported|idp.authn.MFA.reuseCondition|external.jsp|/graphicalmatrix/start' \
   /opt/shibboleth-idp/conf/authn/authn.properties \
   /opt/shibboleth-idp/conf/idp.properties
 ```
@@ -1417,6 +1433,8 @@ graphicalmatrix.aliases = A:img01,B:img02,C:img03,D:img04,E:img05,F:img06,G:img0
 graphicalmatrix.choice = 4
 graphicalmatrix.order = 1
 graphicalmatrix.challenge.seconds = 180
+# TOTP QR登録専用の固定期限。誤コードによる再表示では延長しない。
+graphicalmatrix.totp.registrationTtlSeconds = 180
 graphicalmatrix.allow_duplicates = 0
 graphicalmatrix.force_sequence_change = 1
 
@@ -1472,8 +1490,10 @@ graphicalmatrix.view.javascript = /opt/shibboleth-idp/conf/graphicalmatrix/asset
 graphicalmatrix.view.javascript.cacheSeconds = 0
 ```
 
-`graphicalmatrix.challenge.seconds` はGraphicalMatrix、TOTP登録、強制sequence変更、
-ユーザー自身の変更画面で利用するチャレンジ有効期限です。設定可能範囲は30〜900秒です。
+`graphicalmatrix.challenge.seconds` はGraphicalMatrix、強制sequence変更、ユーザー自身の変更画面で
+利用するチャレンジ有効期限である。TOTP QR登録は専用の
+`graphicalmatrix.totp.registrationTtlSeconds`を使用する。どちらも設定可能範囲は30〜900秒である。
+TOTP登録期限は開始時に固定され、確認コードを誤って再表示しても延長されない。
 
 スマートフォンで画像を大きく表示する場合は、`graphicalmatrix.mobile.columns = 4`へ変更する。
 CSS viewport幅が`graphicalmatrix.mobile.breakpointPx`以下の場合だけ4列となり、25画像は4列7行で
@@ -1655,6 +1675,34 @@ WebAuthnプラグインを使う場合の代表項目です。FQDN/HTTPSが正�
 FIDO metadataを使用する場合の設定は`/opt/shibboleth-idp/conf/authn/webauthn-metadata.properties`である。
 これらはShibboleth WebAuthn Plugin側の設定であり、2FAS-KW本体設定とは別である。
 
+2FAS-KWの標準MFA FlowはDBの`mfa_method`から第二要素を選ぶ。この構成でWebAuthn認証画面の
+`Register a new credential`を使用すると、登録Flowの本人認証でも`authn/WebAuthn`が選ばれ、
+登録画面へ再び入る循環を利用者が起こし得る。そのため、配布設定では公式Pluginの
+inline registrationを無効にする。
+
+```properties
+idp.authnwebauthn.registration.allowInline = false
+```
+
+初回登録と方式変更は2FAS-KW自己管理画面を使用する。すでにWebAuthn credentialを持つ利用者が
+2本目以降を追加する場合は、queryを付けない
+`/idp/profile/admin/webauthn-registration`を開き、Password認証後のWebAuthn画面で
+`Login with passkey or security key`を押し、現在のcredentialで本人認証を完了してから
+新しいcredentialを追加する。この再認証画面で`Register a new credential`を再度押すと
+登録Flowが循環するため使用しない。
+inline registrationを有効にするのは、`WebAuthnRegistrationContext`を考慮したPassword fallbackなど、
+登録専用MFA Flowを別途設計・試験した環境に限る。
+
+2FAS-KWの`views/webauthn/webauthn-authn.vm`は、登録Requesterを次のIDで判定する。
+
+```text
+http://shibboleth.net/ns/profiles/admin/webauthn/register-credential
+```
+
+登録Requesterの場合は新しいcredential追加前の本人確認であることを明示し、
+追加登録リンクを表示しない。通常のWebAuthn認証画面だけにqueryなしの追加登録リンクを
+表示する。配置先は`/opt/shibboleth-idp/views/webauthn/webauthn-authn.vm`である。
+
 ```properties
 idp.authn.webauthn.relyingPartyId = idp.example.com
 idp.authn.webauthn.relyingPartyName = Example IdP
@@ -1672,10 +1720,14 @@ idp.authn.webauthn.2fa.enabled = true
 idp.authn.webauthn.2fa.allowedPreviousFactors = authn/Password
 ```
 
-利用者が自己管理画面でWebAuthnを選択すると、2FAS-KWは現在のMFA方式を保持したまま
+利用者が自己管理画面でWebAuthnを選択すると、2FAS-KWは公式WebAuthn
+CredentialRepositoryへ登録済みcredentialを問い合わせます。1件以上あればstate versionを
+再確認したうえでMFA方式を`WebAuthn`へ変更し、登録画面へは遷移しません。
+
+credentialが0件またはRepositoryを確認できない場合は、現在のMFA方式を保持したまま
 `/idp/profile/admin/webauthn-registration`へ遷移します。公式Pluginがcredentialを保存し、
-登録成功hookが同一利用者の一回限りの登録要求を確認した後だけ、MFA方式を`WebAuthn`へ
-切り替えます。画面を閉じる、登録が失敗する、または登録中に管理者がMFA方式を変更した場合は、
+登録成功hookが同一利用者の一回限りの登録要求を確認した後だけ方式を切り替えます。
+画面を閉じる、`Finish`だけを押す、登録が失敗する、または登録中に別の操作が状態を変更した場合は、
 方式を切り替えません。
 
 WebAuthn credentialはDB/JDBC StorageService保存を推奨します。

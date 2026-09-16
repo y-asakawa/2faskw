@@ -388,6 +388,11 @@ logにもこのheaderを追加しない。proxy secretを変更した場合はAp
 | `DASHBOARD_AUDITOR` | OPERATORに加えて、管理API操作履歴と有効時のCSV export。 |
 | `DASHBOARD_ADMIN` | 現行の全参照API。DashboardからIdPを変更する機能はない。 |
 
+VIEWERとOPERATORが参照できるイベントは、認証イベントと自己管理イベントの明示的な
+allowlistに限定される。`/api/v1/events`で管理イベントを完全一致または正規表現指定しても、
+`API_`イベントと未分類イベントは返らない。AUDITORとADMINだけが管理イベントを含む全イベントを
+参照できる。閲覧範囲は認証済みPrincipalから決定され、query parameterでは拡張できない。
+
 `/etc/2faskw-dashboard/roles.properties`では、認証済みユーザーをroleへ固定できる。
 
 ```properties
@@ -856,7 +861,11 @@ IPアドレスが`drop`で保存されたイベントは送信元IPランキン�
 含み、終了日時は含まない。指定可能な最大期間は`dashboard.query.maxRangeDays`（既定・最大100日）
 である。
 
-現在ロック中の一覧は選択期間ではなく、保持中の監査ログ全体から最新の状態遷移を評価する。
+現在ロック中の一覧はAUDITORまたはADMINでだけ表示する。VIEWERとOPERATORではロック件数を`0`と
+表示せず、権限上利用できないことを表示する。APIの`lockedUserCount`と`lockedUsersAsOf`は`null`、
+`lockedUsers`は空配列となり、`visibility.lockedUsersAvailable=false`で判別できる。
+
+AUDITORまたはADMINでは、現在ロック中の一覧を選択期間ではなく、保持中の監査ログ全体から最新の状態遷移を評価する。
 `LOCKED`イベントから抽出した`locked_until`が現在時刻より後であり、その後に認証成功または管理APIの
 unlock・RESET・MFA方式変更が記録されていないユーザーを表示する。画面へ表示する一覧は100件までで、
 総件数は別に表示する。

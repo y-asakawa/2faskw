@@ -457,6 +457,172 @@ class DashboardServerTest {
         }
     }
 
+    @Test
+    void principalRoleScopesGenericQueriesSummariesAndLockState() throws Exception {
+        final int port = freePort();
+        final String proxySecret = "event-scope-proxy-secret-123456789012";
+        final Path proxySecretFile = Files.writeString(
+                temporary.resolve("event-scope-proxy.secret"), proxySecret);
+        final Path database = temporary.resolve("event-scope-db");
+        final Instant now = Instant.now();
+        try (DashboardStore store = new DashboardStore(database)) {
+            store.ingest(List.of(
+                    event(now.minusSeconds(50), "1", "VERIFY", "OK", null, null),
+                    event(now.minusSeconds(40), "2", "CHANGE_SAVE", "OK", null, null),
+                    event(now.minusSeconds(30), "3", "API_USER_UPDATED", "OK", null, null),
+                    event(now.minusSeconds(20), "4", "APIX_USER_UPDATED", "OK", null, null),
+                    event(now.minusSeconds(10), "5", "UNRECOGNIZED", "OK", null, null),
+                    event(
+                            now.minusSeconds(5),
+                            "6",
+                            "VERIFY",
+                            "LOCKED",
+                            "locked-user",
+                            now.plusSeconds(900).toEpochMilli())),
+                    "test");
+        }
+
+        final Path configuration = temporary.resolve("event-scope.properties");
+        Files.writeString(configuration, """
+                dashboard.enabled=true
+                dashboard.http.bindAddress=127.0.0.1
+                dashboard.http.port=%d
+                dashboard.auth.mode=proxy
+                dashboard.auth.trustedProxies=127.0.0.1/32
+                dashboard.auth.proxySecretFile=%s
+                dashboard.ingest.enabled=false
+                dashboard.storage.path=%s
+                """.formatted(port, proxySecretFile, database));
+
+        try (DashboardServer server =
+                new DashboardServer(DashboardConfig.load(configuration))) {
+            server.start();
+            final HttpClient client = HttpClient.newHttpClient();
+            final String base = "http://127.0.0.1:" + port
+                    + "/2faskw-dashboard/api/v1";
+
+            final HttpResponse<String> viewerSummary = sendAs(
+                    client, base + "/summary", "viewer", "DASHBOARD_VIEWER", proxySecret);
+            final HttpResponse<String> viewerEvents = sendAs(
+                    client, base + "/events", "viewer", "DASHBOARD_VIEWER", proxySecret);
+            assertEquals(200, viewerSummary.statusCode());
+            assertEquals(403, viewerEvents.statusCode());
+            final JsonNode viewerSummaryJson =
+                    JsonSupport.MAPPER.readTree(viewerSummary.body());
+            assertEquals("OPERATIONAL",
+                    viewerSummaryJson.path("visibility").path("scope").asText());
+            assertFalse(viewerSummaryJson.path("visibility")
+                    .path("eventsAvailable").asBoolean());
+            assertTrue(viewerSummaryJson.path("lockedUserCount").isNull());
+
+            final HttpResponse<String> operatorEvents = sendAs(
+                    client, base + "/events", "operator", "DASHBOARD_OPERATOR", proxySecret);
+            final HttpResponse<String> operatorExactAdmin = sendAs(
+                    client,
+                    base + "/events?event=API_USER_UPDATED",
+                    "operator",
+                    "DASHBOARD_OPERATOR",
+                    proxySecret);
+            final HttpResponse<String> operatorRegexAdmin = sendAs(
+                    client,
+                    base + "/events?match=regex&event=%5EAPI_.*%24",
+                    "operator",
+                    "DASHBOARD_OPERATOR",
+                    proxySecret);
+            final HttpResponse<String> operatorAdminRoute = sendAs(
+                    client,
+                    base + "/admin-api",
+                    "operator",
+                    "DASHBOARD_OPERATOR",
+                    proxySecret);
+            final HttpResponse<String> operatorSummary = sendAs(
+                    client,
+                    base + "/summary",
+                    "operator",
+                    "DASHBOARD_OPERATOR",
+                    proxySecret);
+            assertEquals(3, JsonSupport.MAPPER.readTree(operatorEvents.body())
+                    .path("events").size());
+            assertEquals(0, JsonSupport.MAPPER.readTree(operatorExactAdmin.body())
+                    .path("events").size());
+            assertEquals(0, JsonSupport.MAPPER.readTree(operatorRegexAdmin.body())
+                    .path("events").size());
+            assertEquals(403, operatorAdminRoute.statusCode());
+            final JsonNode operatorSummaryJson =
+                    JsonSupport.MAPPER.readTree(operatorSummary.body());
+            assertEquals("OPERATIONAL",
+                    operatorSummaryJson.path("visibility").path("scope").asText());
+            assertTrue(operatorSummaryJson.path("lockedUserCount").isNull());
+
+            final HttpResponse<String> auditorEvents = sendAs(
+                    client, base + "/events", "auditor", "DASHBOARD_AUDITOR", proxySecret);
+            final HttpResponse<String> auditorAdminRoute = sendAs(
+                    client,
+                    base + "/admin-api",
+                    "auditor",
+                    "DASHBOARD_AUDITOR",
+                    proxySecret);
+            final HttpResponse<String> auditorSummary = sendAs(
+                    client,
+                    base + "/summary",
+                    "auditor",
+                    "DASHBOARD_AUDITOR",
+                    proxySecret);
+            assertEquals(6, JsonSupport.MAPPER.readTree(auditorEvents.body())
+                    .path("events").size());
+            final JsonNode adminEvents = JsonSupport.MAPPER.readTree(
+                    auditorAdminRoute.body()).path("events");
+            assertEquals(1, adminEvents.size());
+            assertEquals("API_USER_UPDATED", adminEvents.get(0).path("event").asText());
+            final JsonNode auditorSummaryJson =
+                    JsonSupport.MAPPER.readTree(auditorSummary.body());
+            assertEquals("ALL",
+                    auditorSummaryJson.path("visibility").path("scope").asText());
+            assertEquals(1, auditorSummaryJson.path("lockedUserCount").asLong());
+        }
+    }
+
+    private static NormalizedEvent event(
+            final Instant time,
+            final String idCharacter,
+            final String type,
+            final String result,
+            final String user,
+            final Long lockedUntil) {
+        return new NormalizedEvent(
+                1,
+                idCharacter.repeat(64),
+                time,
+                time,
+                "node-01",
+                type,
+                result,
+                "test",
+                user,
+                "192.0.2.25",
+                lockedUntil,
+                "ok",
+                "1",
+                0,
+                idCharacter.repeat(64));
+    }
+
+    private static HttpResponse<String> sendAs(
+            final HttpClient client,
+            final String uri,
+            final String user,
+            final String role,
+            final String proxySecret) throws Exception {
+        return client.send(
+                HttpRequest.newBuilder(URI.create(uri))
+                        .header("X-Remote-User", user)
+                        .header("X-2FASKW-Role", role)
+                        .header("X-2FASKW-Proxy-Secret", proxySecret)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
     private static int freePort() throws Exception {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();

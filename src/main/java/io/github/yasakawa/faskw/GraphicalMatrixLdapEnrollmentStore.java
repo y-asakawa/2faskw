@@ -18,7 +18,9 @@ package io.github.yasakawa.faskw;
 
 import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.naming.Context;
@@ -66,81 +68,173 @@ final class GraphicalMatrixLdapEnrollmentStore {
                 return null;
             }
             return new GraphicalMatrixMfaSettings(
+                entry.record.status,
                 entry.record.mfaMethod,
                 entry.record.totpStatus,
-                !entry.record.totpSeed.isEmpty()
+                !entry.record.totpSeed.isEmpty(),
+                !entry.record.sequence.isEmpty(),
+                entry.record.stateVersion
             );
         }
     }
 
-    String prepareTotpRegistration(final String user, final long now) throws Exception {
+    GraphicalMatrixTotpEnrollmentResult beginTotpRegistration(final String user,
+            final long expectedStateVersion, final long now, final long ttlMillis) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
             final Entry entry = findEntry(context, user);
             if (entry == null || !"ACTIVE".equals(entry.record.status)
                     || entry.record.lockedUntil > now) {
-                return null;
+                return entry != null && entry.record.lockedUntil > now
+                    ? GraphicalMatrixTotpEnrollmentResult.locked(entry.record.lockedUntil)
+                    : GraphicalMatrixTotpEnrollmentResult.stale("missing_or_inactive_enrollment");
             }
-            if (!"TOTP".equals(normalizeMethod(entry.record.mfaMethod))) {
-                return null;
-            }
-            if ("ACTIVE".equalsIgnoreCase(entry.record.totpStatus) && !entry.record.totpSeed.isEmpty()) {
-                return null;
-            }
-            if ("PENDING".equalsIgnoreCase(entry.record.totpStatus) && !entry.record.totpSeed.isEmpty()) {
-                return totpSeedStorage.decode(entry.record.totpSeed);
+            if (!entry.record.stateVersionPresent
+                    || entry.record.stateVersion != expectedStateVersion
+                    || entry.record.forceSequenceChange) {
+                return GraphicalMatrixTotpEnrollmentResult.stale(
+                    "state_changed_after_verification");
             }
 
             final String seed = GraphicalMatrixTotpSupport.newBase32Seed();
-            modify(context, entry.dn, withStateVersionUpdate(entry, true,
-                replace(config.totpSeedAttr(), totpSeedStorage.encode(seed)),
-                replace(config.totpStatusAttr(), "PENDING"),
-                replace(config.updatedAtAttr(), String.valueOf(now))
-            ));
-            return seed;
+            final String registrationId = GraphicalMatrixSupport.token();
+            final long expiresAt = Math.addExact(now, ttlMillis);
+            try {
+                modifyStarting(context, entry, withStateVersionUpdate(entry, true,
+                    replace(config.mfaMethodAttr(), "TOTP"),
+                    replace(config.totpSeedAttr(), totpSeedStorage.encode(seed)),
+                    replace(config.totpStatusAttr(), "PENDING"),
+                    replace(config.totpRegisteredAtAttr(), "0"),
+                    replace(config.totpRegistrationIdAttr(), registrationId),
+                    replace(config.totpRegistrationExpiresAtAttr(), String.valueOf(expiresAt)),
+                    replace(config.failedCountAttr(), "0"),
+                    replace(config.lockedUntilAttr(), "0"),
+                    replace(config.updatedAtAttr(), String.valueOf(now))
+                ));
+            } catch (NamingException ex) {
+                if (GraphicalMatrixLdapAssertionSupport.isAssertionFailed(ex)
+                        || ex instanceof AttributeInUseException
+                        || ex instanceof NoSuchAttributeException) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "state_changed_during_registration_start");
+                }
+                throw ex;
+            }
+            return GraphicalMatrixTotpEnrollmentResult.started(
+                new GraphicalMatrixTotpEnrollmentBinding(user, registrationId,
+                    Math.addExact(expectedStateVersion, 1L), expiresAt), seed);
         }
     }
 
-    GraphicalMatrixVerifyResult verifyAndActivateTotp(final String user, final String code,
+    GraphicalMatrixTotpEnrollmentResult verifyTotpRegistration(
+            final GraphicalMatrixTotpEnrollmentBinding binding, final String code,
             final long now) throws Exception {
         try (LdapSession session = context()) {
             final LdapContext context = session.context;
-            final Entry entry = findEntry(context, user);
+            final Entry entry = findEntry(context, binding.user());
             if (entry == null) {
-                return GraphicalMatrixVerifyResult.enrollRequired("missing_enrollment");
+                return GraphicalMatrixTotpEnrollmentResult.stale("missing_enrollment");
             }
             if (!"ACTIVE".equals(entry.record.status)) {
-                return GraphicalMatrixVerifyResult.enrollRequired("inactive_enrollment");
+                return GraphicalMatrixTotpEnrollmentResult.stale("inactive_enrollment");
             }
             if (entry.record.lockedUntil > now) {
-                return GraphicalMatrixVerifyResult.locked(
-                    "locked_until=" + entry.record.lockedUntil, entry.record.lockedUntil);
+                return GraphicalMatrixTotpEnrollmentResult.locked(entry.record.lockedUntil);
             }
-            if (!"TOTP".equals(normalizeMethod(entry.record.mfaMethod))) {
-                return GraphicalMatrixVerifyResult.enrollRequired("not_totp_method");
+            if (!matchesBinding(entry.record, binding)) {
+                return GraphicalMatrixTotpEnrollmentResult.stale(
+                    "totp_registration_binding_mismatch");
             }
-            if (entry.record.totpSeed.isEmpty() || !"PENDING".equalsIgnoreCase(entry.record.totpStatus)) {
-                return GraphicalMatrixVerifyResult.enrollRequired("totp_not_pending");
+            if (binding.expiresAt() <= now) {
+                return GraphicalMatrixTotpEnrollmentResult.expired();
             }
 
             final String seed = totpSeedStorage.decode(entry.record.totpSeed);
             if (!GraphicalMatrixTotpSupport.verify(seed, code, now, 1)) {
-                return GraphicalMatrixVerifyResult.failed("totp_registration_code_mismatch");
+                return GraphicalMatrixTotpEnrollmentResult.retry(binding, seed);
             }
 
             try {
-                modify(context, entry.dn, withStateVersionUpdate(entry, true,
+                modifyBound(context, entry, binding, withStateVersionUpdate(entry, true,
                     replace(config.totpStatusAttr(), "ACTIVE"),
                     replace(config.totpRegisteredAtAttr(), String.valueOf(now)),
+                    remove(config.totpRegistrationIdAttr(), binding.registrationId()),
+                    remove(config.totpRegistrationExpiresAtAttr(), String.valueOf(binding.expiresAt())),
                     replace(config.lastSuccessAtAttr(), String.valueOf(now)),
                     replace(config.updatedAtAttr(), String.valueOf(now))
                 ));
-            } catch (AttributeInUseException | NoSuchAttributeException ex) {
-                return GraphicalMatrixVerifyResult.enrollRequired(
-                    "totp_state_changed_after_verification");
+            } catch (NamingException ex) {
+                if (GraphicalMatrixLdapAssertionSupport.isAssertionFailed(ex)
+                        || ex instanceof AttributeInUseException
+                        || ex instanceof NoSuchAttributeException) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "totp_state_changed_after_verification");
+                }
+                throw ex;
             }
-            return GraphicalMatrixVerifyResult.success("totp_registered");
+            return GraphicalMatrixTotpEnrollmentResult.activated();
         }
+    }
+
+    GraphicalMatrixTotpEnrollmentResult cancelTotpRegistration(
+            final GraphicalMatrixTotpEnrollmentBinding binding,
+            final GraphicalMatrixConfig graphicalConfig, final long now) throws Exception {
+        try (LdapSession session = context()) {
+            final LdapContext context = session.context;
+            final Entry entry = findEntry(context, binding.user());
+            if (entry == null || !matchesBinding(entry.record, binding)) {
+                return GraphicalMatrixTotpEnrollmentResult.stale(
+                    "totp_registration_binding_mismatch");
+            }
+            if (!"ACTIVE".equals(entry.record.status)) {
+                return GraphicalMatrixTotpEnrollmentResult.stale("inactive_enrollment");
+            }
+            if (entry.record.lockedUntil > now) {
+                return GraphicalMatrixTotpEnrollmentResult.locked(entry.record.lockedUntil);
+            }
+            if (binding.expiresAt() <= now) {
+                return GraphicalMatrixTotpEnrollmentResult.expired();
+            }
+            if (!sequenceStorage.acceptedForRuntime(entry.record.sequence)
+                    || sequenceStorage.count(entry.record.sequence)
+                        != graphicalConfig.getChoiceCount()) {
+                return GraphicalMatrixTotpEnrollmentResult.stale(
+                    "graphicalmatrix_sequence_unusable");
+            }
+            try {
+                modifyBound(context, entry, binding, withStateVersionUpdate(entry, true,
+                    replace(config.mfaMethodAttr(), "GraphicalMatrix"),
+                    replace(config.totpSeedAttr(), ""),
+                    replace(config.totpStatusAttr(), "UNREGISTERED"),
+                    replace(config.totpRegisteredAtAttr(), "0"),
+                    remove(config.totpRegistrationIdAttr(), binding.registrationId()),
+                    remove(config.totpRegistrationExpiresAtAttr(), String.valueOf(binding.expiresAt())),
+                    replace(config.failedCountAttr(), "0"),
+                    replace(config.lockedUntilAttr(), "0"),
+                    replace(config.updatedAtAttr(), String.valueOf(now))
+                ));
+            } catch (NamingException ex) {
+                if (GraphicalMatrixLdapAssertionSupport.isAssertionFailed(ex)
+                        || ex instanceof AttributeInUseException
+                        || ex instanceof NoSuchAttributeException) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "totp_state_changed_during_cancel");
+                }
+                throw ex;
+            }
+            return GraphicalMatrixTotpEnrollmentResult.cancelled();
+        }
+    }
+
+    private static boolean matchesBinding(final Record record,
+            final GraphicalMatrixTotpEnrollmentBinding binding) {
+        return "TOTP".equals(normalizeMethod(record.mfaMethod))
+            && "PENDING".equalsIgnoreCase(record.totpStatus)
+            && !record.totpSeed.isEmpty()
+            && record.stateVersionPresent
+            && record.stateVersion == binding.stateVersion()
+            && binding.registrationId().equals(record.totpRegistrationId)
+            && record.totpRegistrationExpiresAt == binding.expiresAt();
     }
 
     GraphicalMatrixVerifyResult verify(final String user, final List<String> selected,
@@ -203,6 +297,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
             modify(context, entry.dn, withStateVersionUpdate(entry, true,
                 replace(config.sequenceAttr(), storedSequence),
                 replace(config.forceSequenceChangeAttr(), "0"),
+                replace(config.totpRegistrationIdAttr(), ""),
+                replace(config.totpRegistrationExpiresAtAttr(), "0"),
                 replace(config.updatedAtAttr(), String.valueOf(now))
             ));
             return true;
@@ -234,6 +330,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
                     replace(config.mfaMethodAttr(), "WebAuthn"),
                     replace(config.failedCountAttr(), "0"),
                     replace(config.lockedUntilAttr(), "0"),
+                    replace(config.totpRegistrationIdAttr(), ""),
+                    replace(config.totpRegistrationExpiresAtAttr(), "0"),
                     replace(config.updatedAtAttr(), String.valueOf(now))
                 ));
                 return true;
@@ -266,6 +364,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
                     replace(config.totpSeedAttr(), ""),
                     replace(config.totpStatusAttr(), "UNREGISTERED"),
                     replace(config.totpRegisteredAtAttr(), "0"),
+                    replace(config.totpRegistrationIdAttr(), ""),
+                    replace(config.totpRegistrationExpiresAtAttr(), "0"),
                     replace(config.failedCountAttr(), "0"),
                     replace(config.lockedUntilAttr(), "0"),
                     replace(config.updatedAtAttr(), String.valueOf(now))
@@ -277,6 +377,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
                     replace(config.mfaMethodAttr(), "WebAuthn"),
                     replace(config.failedCountAttr(), "0"),
                     replace(config.lockedUntilAttr(), "0"),
+                    replace(config.totpRegistrationIdAttr(), ""),
+                    replace(config.totpRegistrationExpiresAtAttr(), "0"),
                     replace(config.updatedAtAttr(), String.valueOf(now))
                 ));
                 return true;
@@ -285,6 +387,8 @@ final class GraphicalMatrixLdapEnrollmentStore {
                 replace(config.mfaMethodAttr(), "GraphicalMatrix"),
                 replace(config.failedCountAttr(), "0"),
                 replace(config.lockedUntilAttr(), "0"),
+                replace(config.totpRegistrationIdAttr(), ""),
+                replace(config.totpRegistrationExpiresAtAttr(), "0"),
                 replace(config.updatedAtAttr(), String.valueOf(now))
             ));
             return true;
@@ -431,6 +535,32 @@ final class GraphicalMatrixLdapEnrollmentStore {
         context.modifyAttributes(dn, items);
     }
 
+    private void modifyBound(final LdapContext context, final Entry entry,
+            final GraphicalMatrixTotpEnrollmentBinding binding,
+            final ModificationItem... items) throws NamingException {
+        final Map<String, String> assertions = new LinkedHashMap<>();
+        assertions.put(config.statusAttr(), "ACTIVE");
+        assertions.put(config.mfaMethodAttr(), "TOTP");
+        assertions.put(config.totpStatusAttr(), "PENDING");
+        assertions.put(config.stateVersionAttr(), String.valueOf(binding.stateVersion()));
+        assertions.put(config.totpRegistrationIdAttr(), binding.registrationId());
+        assertions.put(config.totpRegistrationExpiresAtAttr(), String.valueOf(binding.expiresAt()));
+        assertions.put(config.lockedUntilAttr(), String.valueOf(entry.record.lockedUntil));
+        GraphicalMatrixLdapAssertionSupport.modify(context, entry.dn, assertions, items);
+    }
+
+    private void modifyStarting(final LdapContext context, final Entry entry,
+            final ModificationItem... items) throws NamingException {
+        final Map<String, String> assertions = new LinkedHashMap<>();
+        assertions.put(config.statusAttr(), "ACTIVE");
+        assertions.put(config.mfaMethodAttr(), entry.record.mfaMethod);
+        assertions.put(config.failedCountAttr(), String.valueOf(entry.record.failedCount));
+        assertions.put(config.lockedUntilAttr(), String.valueOf(entry.record.lockedUntil));
+        assertions.put(config.forceSequenceChangeAttr(), "0");
+        assertions.put(config.stateVersionAttr(), String.valueOf(entry.record.stateVersion));
+        GraphicalMatrixLdapAssertionSupport.modify(context, entry.dn, assertions, items);
+    }
+
     private ModificationItem[] withStateVersionUpdate(final Entry entry, final boolean compareCurrent,
             final ModificationItem... items) {
         return stateVersionUpdate(config.stateVersionAttr(), entry.record.stateVersion,
@@ -489,6 +619,22 @@ final class GraphicalMatrixLdapEnrollmentStore {
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    private static String singleAttr(final Attributes attributes, final String name)
+            throws NamingException {
+        if (attributes == null || name == null || name.isBlank()) {
+            return "";
+        }
+        final Attribute attribute = attributes.get(name);
+        if (attribute == null || attribute.size() == 0) {
+            return "";
+        }
+        if (attribute.size() != 1) {
+            throw new NamingException("LDAP enrollment attribute must be single-valued: " + name);
+        }
+        final Object value = attribute.get();
+        return value != null ? String.valueOf(value).trim() : "";
     }
 
     private static boolean hasAttribute(final Attributes attributes, final String name) {
@@ -580,13 +726,16 @@ final class GraphicalMatrixLdapEnrollmentStore {
         private final String mfaMethod;
         private final String totpSeed;
         private final String totpStatus;
+        private final String totpRegistrationId;
+        private final long totpRegistrationExpiresAt;
         private final boolean forceSequenceChange;
         private final long stateVersion;
         private final boolean stateVersionPresent;
 
         private Record(final String sequence, final String status, final int failedCount,
                 final long lockedUntil, final String mfaMethod, final String totpSeed,
-                final String totpStatus, final boolean forceSequenceChange,
+                final String totpStatus, final String totpRegistrationId,
+                final long totpRegistrationExpiresAt, final boolean forceSequenceChange,
                 final long stateVersion, final boolean stateVersionPresent) {
             this.sequence = sequence;
             this.status = status;
@@ -595,20 +744,25 @@ final class GraphicalMatrixLdapEnrollmentStore {
             this.mfaMethod = mfaMethod;
             this.totpSeed = totpSeed;
             this.totpStatus = totpStatus;
+            this.totpRegistrationId = totpRegistrationId;
+            this.totpRegistrationExpiresAt = totpRegistrationExpiresAt;
             this.forceSequenceChange = forceSequenceChange;
             this.stateVersion = stateVersion;
             this.stateVersionPresent = stateVersionPresent;
         }
 
-        private static Record from(final Attributes attributes, final GraphicalMatrixLdapConfig config) {
+        private static Record from(final Attributes attributes, final GraphicalMatrixLdapConfig config)
+                throws NamingException {
             return new Record(
                 attr(attributes, config.sequenceAttr()),
-                defaultValue(attr(attributes, config.statusAttr()), "ACTIVE"),
+                singleAttr(attributes, config.statusAttr()),
                 intValue(attr(attributes, config.failedCountAttr()), 0),
                 longValue(attr(attributes, config.lockedUntilAttr()), 0L),
-                defaultValue(attr(attributes, config.mfaMethodAttr()), "GraphicalMatrix"),
+                singleAttr(attributes, config.mfaMethodAttr()),
                 attr(attributes, config.totpSeedAttr()),
-                defaultValue(attr(attributes, config.totpStatusAttr()), "UNREGISTERED"),
+                singleAttr(attributes, config.totpStatusAttr()),
+                attr(attributes, config.totpRegistrationIdAttr()),
+                longValue(attr(attributes, config.totpRegistrationExpiresAtAttr()), 0L),
                 intValue(attr(attributes, config.forceSequenceChangeAttr()), 0) != 0,
                 longValue(attr(attributes, config.stateVersionAttr()), 0L),
                 hasAttribute(attributes, config.stateVersionAttr())

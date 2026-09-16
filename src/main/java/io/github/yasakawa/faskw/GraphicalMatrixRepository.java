@@ -86,16 +86,20 @@ public final class GraphicalMatrixRepository {
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT mfa_method, totp_status, totp_seed "
+                    "SELECT status, mfa_method, totp_status, totp_seed, sequence, state_version "
                     + "FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
                 ps.setString(1, user);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
                         final String seed = rs.getString("totp_seed");
+                        final String sequence = rs.getString("sequence");
                         return new GraphicalMatrixMfaSettings(
+                            trim(rs.getString("status")),
                             rs.getString("mfa_method"),
                             rs.getString("totp_status"),
-                            seed != null && !seed.trim().isEmpty()
+                            seed != null && !seed.trim().isEmpty(),
+                            sequence != null && !sequence.trim().isEmpty(),
+                            rs.getLong("state_version")
                         );
                     }
                 }
@@ -104,17 +108,19 @@ public final class GraphicalMatrixRepository {
         return null;
     }
 
-    public String prepareTotpRegistration(final String user, final long now) throws Exception {
+    public GraphicalMatrixTotpEnrollmentResult beginTotpRegistration(final String user,
+            final long expectedStateVersion, final long now, final long ttlMillis) throws Exception {
         if (ldapStore != null) {
-            return ldapStore.prepareTotpRegistration(user, now);
+            return ldapStore.beginTotpRegistration(user, expectedStateVersion, now, ttlMillis);
         }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
             try {
-                final String seed = prepareTotpRegistrationInTransaction(c, user, now);
+                final GraphicalMatrixTotpEnrollmentResult result =
+                    beginTotpRegistrationInTransaction(c, user, expectedStateVersion, now, ttlMillis);
                 c.commit();
-                return seed;
+                return result;
             } catch (Exception ex) {
                 c.rollback();
                 throw ex;
@@ -122,67 +128,80 @@ public final class GraphicalMatrixRepository {
         }
     }
 
-    private String prepareTotpRegistrationInTransaction(final Connection c, final String user,
-            final long now) throws Exception {
+    private GraphicalMatrixTotpEnrollmentResult beginTotpRegistrationInTransaction(
+            final Connection c, final String user, final long expectedStateVersion,
+            final long now, final long ttlMillis) throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT mfa_method, status, locked_until, totp_seed, totp_status "
+                "SELECT mfa_method, status, locked_until, force_sequence_change, state_version "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    return null;
+                    return GraphicalMatrixTotpEnrollmentResult.stale("missing_enrollment");
                 }
                 if (!"ACTIVE".equals(rs.getString("status"))) {
-                    return null;
+                    return GraphicalMatrixTotpEnrollmentResult.stale("inactive_enrollment");
                 }
-                if (rs.getLong("locked_until") > now) {
-                    return null;
+                final long lockedUntil = rs.getLong("locked_until");
+                if (lockedUntil > now) {
+                    return GraphicalMatrixTotpEnrollmentResult.locked(lockedUntil);
                 }
-                final String method = normalizeMethod(rs.getString("mfa_method"));
-                if (!"TOTP".equals(method)) {
-                    return null;
+                if (rs.getInt("force_sequence_change") != 0) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "force_sequence_change_required");
                 }
-
-                final String status = trim(rs.getString("totp_status"));
-                final String currentSeed = trim(rs.getString("totp_seed"));
-                if ("ACTIVE".equalsIgnoreCase(status) && !currentSeed.isEmpty()) {
-                    return null;
-                }
-                if ("PENDING".equalsIgnoreCase(status) && !currentSeed.isEmpty()) {
-                    return totpSeedStorage.decode(currentSeed);
+                if (rs.getLong("state_version") != expectedStateVersion) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "state_changed_after_verification");
                 }
 
                 final String seed = GraphicalMatrixTotpSupport.newBase32Seed();
                 final String storedSeed = totpSeedStorage.encode(seed);
+                final String registrationId = GraphicalMatrixSupport.token();
+                final long expiresAt = Math.addExact(now, ttlMillis);
+                final long nextStateVersion = Math.addExact(expectedStateVersion, 1L);
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
-                        + "SET totp_seed = ?, totp_status = 'PENDING', updated_at = ?, "
+                        + "SET mfa_method = 'TOTP', totp_seed = ?, totp_status = 'PENDING', "
+                        + "totp_registered_at = 0, totp_registration_id = ?, "
+                        + "totp_registration_expires_at = ?, failed_count = 0, locked_until = 0, "
+                        + "updated_at = ?, "
                         + "state_version = state_version + 1 "
-                        + "WHERE user_id = ?")) {
+                        + "WHERE user_id = ? AND state_version = ?")) {
                     up.setString(1, storedSeed);
-                    up.setLong(2, now);
-                    up.setString(3, user);
-                    up.executeUpdate();
+                    up.setString(2, registrationId);
+                    up.setLong(3, expiresAt);
+                    up.setLong(4, now);
+                    up.setString(5, user);
+                    up.setLong(6, expectedStateVersion);
+                    if (up.executeUpdate() != 1) {
+                        return GraphicalMatrixTotpEnrollmentResult.stale(
+                            "state_changed_during_registration_start");
+                    }
                 }
-                return seed;
+                return GraphicalMatrixTotpEnrollmentResult.started(
+                    new GraphicalMatrixTotpEnrollmentBinding(
+                        user, registrationId, nextStateVersion, expiresAt), seed);
             }
         }
     }
 
-    public GraphicalMatrixVerifyResult verifyAndActivateTotp(final String user, final String code,
-            final long now) {
+    public GraphicalMatrixTotpEnrollmentResult verifyTotpRegistration(
+            final GraphicalMatrixTotpEnrollmentBinding binding, final String code, final long now) {
         if (ldapStore != null) {
             try {
-                return ldapStore.verifyAndActivateTotp(user, code, now);
+                return ldapStore.verifyTotpRegistration(binding, code, now);
             } catch (Exception ex) {
-                return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
+                return GraphicalMatrixTotpEnrollmentResult.unavailable(
+                    ex.getClass().getSimpleName());
             }
         }
         try (Connection c = db()) {
             initDbIfEnabled(c);
             c.setAutoCommit(false);
             try {
-                final GraphicalMatrixVerifyResult result = verifyAndActivateTotpInTransaction(c, user, code, now);
+                final GraphicalMatrixTotpEnrollmentResult result =
+                    verifyTotpRegistrationInTransaction(c, binding, code, now);
                 c.commit();
                 return result;
             } catch (Exception ex) {
@@ -190,56 +209,140 @@ public final class GraphicalMatrixRepository {
                 throw ex;
             }
         } catch (Exception ex) {
-            return GraphicalMatrixVerifyResult.dbError(ex.getClass().getSimpleName());
+            return GraphicalMatrixTotpEnrollmentResult.unavailable(
+                ex.getClass().getSimpleName());
         }
     }
 
-    private GraphicalMatrixVerifyResult verifyAndActivateTotpInTransaction(final Connection c,
-            final String user, final String code, final long now) throws Exception {
+    private GraphicalMatrixTotpEnrollmentResult verifyTotpRegistrationInTransaction(
+            final Connection c, final GraphicalMatrixTotpEnrollmentBinding binding,
+            final String code, final long now) throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT mfa_method, status, locked_until, totp_seed, totp_status "
+                "SELECT mfa_method, status, locked_until, totp_seed, totp_status, state_version, "
+                + "totp_registration_id, totp_registration_expires_at "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
-            ps.setString(1, user);
+            ps.setString(1, binding.user());
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("missing_enrollment");
+                    return GraphicalMatrixTotpEnrollmentResult.stale("missing_enrollment");
                 }
                 if (!"ACTIVE".equals(rs.getString("status"))) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("inactive_enrollment");
+                    return GraphicalMatrixTotpEnrollmentResult.stale("inactive_enrollment");
                 }
                 final long lockedUntil = rs.getLong("locked_until");
                 if (lockedUntil > now) {
-                    return GraphicalMatrixVerifyResult.locked(
-                        "locked_until=" + lockedUntil, lockedUntil);
+                    return GraphicalMatrixTotpEnrollmentResult.locked(lockedUntil);
                 }
-                if (!"TOTP".equals(normalizeMethod(rs.getString("mfa_method")))) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("not_totp_method");
-                }
-
+                final long persistedExpiry = rs.getLong("totp_registration_expires_at");
                 final String storedSeed = trim(rs.getString("totp_seed"));
                 final String status = trim(rs.getString("totp_status"));
-                if (storedSeed.isEmpty() || !"PENDING".equalsIgnoreCase(status)) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("totp_not_pending");
+                if (!"TOTP".equals(normalizeMethod(rs.getString("mfa_method")))
+                        || storedSeed.isEmpty()
+                        || !"PENDING".equalsIgnoreCase(status)
+                        || rs.getLong("state_version") != binding.stateVersion()
+                        || !binding.registrationId().equals(trim(rs.getString("totp_registration_id")))
+                        || persistedExpiry != binding.expiresAt()) {
+                    return GraphicalMatrixTotpEnrollmentResult.stale(
+                        "totp_registration_binding_mismatch");
+                }
+                if (persistedExpiry <= now) {
+                    return GraphicalMatrixTotpEnrollmentResult.expired();
                 }
                 final String seed = totpSeedStorage.decode(storedSeed);
 
                 if (!GraphicalMatrixTotpSupport.verify(seed, code, now, 1)) {
-                    return GraphicalMatrixVerifyResult.failed("totp_registration_code_mismatch");
+                    return GraphicalMatrixTotpEnrollmentResult.retry(binding, seed);
                 }
 
                 try (PreparedStatement up = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET totp_status = 'ACTIVE', totp_registered_at = ?, "
+                        + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                         + "last_success_at = ?, updated_at = ?, "
                         + "state_version = state_version + 1 "
-                        + "WHERE user_id = ?")) {
+                        + "WHERE user_id = ? AND state_version = ? "
+                        + "AND totp_registration_id = ? AND totp_registration_expires_at = ?")) {
                     up.setLong(1, now);
                     up.setLong(2, now);
                     up.setLong(3, now);
-                    up.setString(4, user);
-                    up.executeUpdate();
+                    up.setString(4, binding.user());
+                    up.setLong(5, binding.stateVersion());
+                    up.setString(6, binding.registrationId());
+                    up.setLong(7, binding.expiresAt());
+                    if (up.executeUpdate() != 1) {
+                        return GraphicalMatrixTotpEnrollmentResult.stale(
+                            "totp_state_changed_during_activation");
+                    }
                 }
-                return GraphicalMatrixVerifyResult.success("totp_registered");
+                return GraphicalMatrixTotpEnrollmentResult.activated();
+            }
+        }
+    }
+
+    public GraphicalMatrixTotpEnrollmentResult cancelTotpRegistration(
+            final GraphicalMatrixTotpEnrollmentBinding binding,
+            final GraphicalMatrixConfig config, final long now) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.cancelTotpRegistration(binding, config, now);
+        }
+        try (Connection c = db()) {
+            initDbIfEnabled(c);
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT status, mfa_method, locked_until, sequence, totp_status, state_version, "
+                    + "totp_registration_id, totp_registration_expires_at "
+                    + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
+                ps.setString(1, binding.user());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next() || !"ACTIVE".equals(rs.getString("status"))
+                            || !"TOTP".equals(normalizeMethod(rs.getString("mfa_method")))
+                            || !"PENDING".equalsIgnoreCase(trim(rs.getString("totp_status")))
+                            || rs.getLong("state_version") != binding.stateVersion()
+                            || !binding.registrationId().equals(
+                                trim(rs.getString("totp_registration_id")))
+                            || rs.getLong("totp_registration_expires_at") != binding.expiresAt()) {
+                        c.rollback();
+                        return GraphicalMatrixTotpEnrollmentResult.stale(
+                            "totp_registration_binding_mismatch");
+                    }
+                    final long lockedUntil = rs.getLong("locked_until");
+                    if (lockedUntil > now) {
+                        c.rollback();
+                        return GraphicalMatrixTotpEnrollmentResult.locked(lockedUntil);
+                    }
+                    if (binding.expiresAt() <= now) {
+                        c.rollback();
+                        return GraphicalMatrixTotpEnrollmentResult.expired();
+                    }
+                    if (!sequenceUsable(rs.getString("sequence"), config)) {
+                        c.rollback();
+                        return GraphicalMatrixTotpEnrollmentResult.stale(
+                            "graphicalmatrix_sequence_unusable");
+                    }
+                }
+                try (PreparedStatement up = c.prepareStatement(
+                        "UPDATE graphicalmatrix_enrollment SET mfa_method = 'GraphicalMatrix', "
+                        + "totp_seed = NULL, totp_status = 'UNREGISTERED', totp_registered_at = 0, "
+                        + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
+                        + "failed_count = 0, locked_until = 0, state_version = state_version + 1, "
+                        + "updated_at = ? WHERE user_id = ? AND state_version = ? "
+                        + "AND totp_registration_id = ? AND totp_registration_expires_at = ?")) {
+                    up.setLong(1, now);
+                    up.setString(2, binding.user());
+                    up.setLong(3, binding.stateVersion());
+                    up.setString(4, binding.registrationId());
+                    up.setLong(5, binding.expiresAt());
+                    if (up.executeUpdate() != 1) {
+                        c.rollback();
+                        return GraphicalMatrixTotpEnrollmentResult.stale(
+                            "totp_state_changed_during_cancel");
+                    }
+                }
+                c.commit();
+                return GraphicalMatrixTotpEnrollmentResult.cancelled();
+            } catch (Exception ex) {
+                c.rollback();
+                throw ex;
             }
         }
     }
@@ -319,6 +422,7 @@ public final class GraphicalMatrixRepository {
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
                     + "SET sequence = ?, force_sequence_change = 0, updated_at = ?, "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1 "
                     + "WHERE user_id = ? AND status = 'ACTIVE' "
                     + "AND locked_until <= ? "
@@ -352,6 +456,7 @@ public final class GraphicalMatrixRepository {
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
                     + "SET mfa_method = 'WebAuthn', failed_count = 0, locked_until = 0, "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1, updated_at = ? "
                     + "WHERE user_id = ? AND status = 'ACTIVE' "
                     + "AND locked_until <= ? AND mfa_method = ?")) {
@@ -386,6 +491,7 @@ public final class GraphicalMatrixRepository {
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET mfa_method = 'TOTP', totp_seed = NULL, "
                         + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
+                        + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                         + "failed_count = 0, locked_until = 0, "
                         + "state_version = state_version + 1, updated_at = ? "
                         + "WHERE user_id = ? AND status = 'ACTIVE' "
@@ -404,6 +510,7 @@ public final class GraphicalMatrixRepository {
                 try (PreparedStatement ps = c.prepareStatement(
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET mfa_method = ?, failed_count = 0, locked_until = 0, "
+                        + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                         + "state_version = state_version + 1, updated_at = ? "
                         + "WHERE user_id = ? AND status = 'ACTIVE' "
                         + "AND locked_until <= ?" + statePredicate)) {
@@ -421,6 +528,7 @@ public final class GraphicalMatrixRepository {
             try (PreparedStatement ps = c.prepareStatement(
                     "UPDATE graphicalmatrix_enrollment "
                     + "SET mfa_method = 'GraphicalMatrix', failed_count = 0, locked_until = 0, "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1, updated_at = ? "
                     + "WHERE user_id = ? AND status = 'ACTIVE' "
                     + "AND locked_until <= ?" + statePredicate)) {
@@ -716,6 +824,8 @@ public final class GraphicalMatrixRepository {
                 + "totp_seed VARCHAR(255), "
                 + "totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED', "
                 + "totp_registered_at BIGINT NOT NULL DEFAULT 0, "
+                + "totp_registration_id VARCHAR(64), "
+                + "totp_registration_expires_at BIGINT NOT NULL DEFAULT 0, "
                 + "last_success_at BIGINT NOT NULL DEFAULT 0, "
                 + "force_sequence_change INT NOT NULL DEFAULT 0, "
                 + "state_version BIGINT NOT NULL DEFAULT 0, "
@@ -741,6 +851,14 @@ public final class GraphicalMatrixRepository {
             st.executeUpdate(
                 "ALTER TABLE graphicalmatrix_enrollment "
                 + "ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0"
+            );
+            st.executeUpdate(
+                "ALTER TABLE graphicalmatrix_enrollment "
+                + "ADD COLUMN IF NOT EXISTS totp_registration_id VARCHAR(64)"
+            );
+            st.executeUpdate(
+                "ALTER TABLE graphicalmatrix_enrollment "
+                + "ADD COLUMN IF NOT EXISTS totp_registration_expires_at BIGINT NOT NULL DEFAULT 0"
             );
             st.executeUpdate(
                 "ALTER TABLE graphicalmatrix_enrollment "

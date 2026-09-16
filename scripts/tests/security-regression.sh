@@ -186,6 +186,91 @@ EOF
     || fail "CSV preview displayed the plaintext current sequence: $output"
 }
 
+test_csv_sequence_is_not_forwarded_in_process_arguments() {
+  local home="$TMP/csv-stdin-idp"
+  local csv="$TMP/csv-stdin.csv"
+  local test_bin="$TMP/csv-stdin-bin"
+  local args_log="$TMP/csv-stdin-java.args"
+  local stdin_log="$TMP/csv-stdin-java.stdin"
+  local secret_sequence="img01,img02,img03,img04"
+  local h2_jar="$HOME/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
+  local real_java
+  real_java="$(PATH="/opt/homebrew/opt/openjdk/bin:$PATH" command -v java)"
+  [[ -n "$real_java" ]] || fail "Java is required for CSV argument isolation test"
+  [[ -f "$h2_jar" ]] || fail "H2 test jar is missing: $h2_jar"
+  mkdir -p "$home/conf/graphicalmatrix" "$home/credentials" "$test_bin"
+
+  cat > "$home/conf/graphicalmatrix/graphicalmatrix.properties" <<EOF
+graphicalmatrix.graphicals=img01-04
+graphicalmatrix.choice=4
+graphicalmatrix.sequence.storage=keyword
+graphicalmatrix.sequence.keyword=test-only-keyword
+EOF
+  cat > "$home/conf/graphicalmatrix/db.properties" <<EOF
+graphicalmatrix.db.driver=org.h2.Driver
+graphicalmatrix.db.url=jdbc:h2:file:$home/credentials/graphicalmatrix;MODE=PostgreSQL;DATABASE_TO_UPPER=false
+graphicalmatrix.db.user=sa
+graphicalmatrix.db.password=
+graphicalmatrix.db.autoInit=true
+EOF
+  cat > "$csv" <<EOF
+action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
+A,stdin-test,GraphicalMatrix,on,"$secret_sequence","$secret_sequence"
+EOF
+  cat > "$test_bin/java" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool encode-stdin "* ]]; then
+  {
+    builtin printf '%s\n' 'CALL'
+    builtin printf '%s\n' "$@"
+  } >> "$GM_JAVA_ARGS_LOG"
+  input="$(cat)"
+  builtin printf '%s\n' "$input" >> "$GM_JAVA_STDIN_LOG"
+  builtin printf '%s\n' 'kw1:test-only-encoded-value'
+  exit 0
+fi
+exec "$GM_REAL_JAVA" "$@"
+EOF
+  cat > "$test_bin/id" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-un" ]]; then
+  builtin printf '%s\n' jetty
+else
+  exec /usr/bin/id "$@"
+fi
+EOF
+  chmod 0755 "$test_bin/java"
+  chmod 0755 "$test_bin/id"
+
+  GRAPHICALMATRIX_HOME="$home" \
+  SEQUENCE_TOOL_CP="$ROOT/target/classes" \
+  H2_JAR="$h2_jar" \
+  GM_REAL_JAVA="$real_java" \
+  GM_JAVA_ARGS_LOG="$args_log" \
+  GM_JAVA_STDIN_LOG="$stdin_log" \
+  PATH="$test_bin:/opt/homebrew/opt/openjdk/bin:$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" --provisioning >/dev/null
+
+  GRAPHICALMATRIX_HOME="$home" \
+  SEQUENCE_TOOL_CP="$ROOT/target/classes" \
+  H2_JAR="$h2_jar" \
+  GM_REAL_JAVA="$real_java" \
+  GM_JAVA_ARGS_LOG="$args_log" \
+  GM_JAVA_STDIN_LOG="$stdin_log" \
+  PATH="$test_bin:/opt/homebrew/opt/openjdk/bin:$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" --provisioning --apply >/dev/null
+
+  [[ "$(grep -c '^CALL$' "$args_log")" == "2" ]] \
+    || fail "CSV sequence encoder was not invoked for both dry-run and apply"
+  grep -q '^encode-stdin$' "$args_log" \
+    || fail "CSV sequence encoder did not use the standard-input command"
+  ! grep -Fq "$secret_sequence" "$args_log" \
+    || fail "CSV plaintext sequence was exposed in Java process arguments"
+  [[ "$(grep -Fxc "$secret_sequence" "$stdin_log")" == "2" ]] \
+    || fail "CSV plaintext sequence was not delivered exclusively on standard input"
+}
+
 test_management_reset_restores_plaintext_initial_factor() {
   local home="$TMP/idp"
   local test_bin="$TMP/db-test-bin"
@@ -251,6 +336,86 @@ EOF
     bash "$ROOT/graphicalmatrix-db.sh" show alice)"
   grep -Eq 'alice[[:space:]]*\| GraphicalMatrix[[:space:]]*\| 1[[:space:]]*\| A,B,C,D[[:space:]]*\| kw1:' <<< "$list" \
     || fail "management output does not display the initial password and raw protected sequence: $list"
+}
+
+test_pending_totp_invalidation_requires_apply_and_clears_binding() {
+  local home="$TMP/pending-totp-idp"
+  local test_bin="$TMP/pending-totp-bin"
+  local h2_jar="$HOME/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
+  local db_url="jdbc:h2:file:$home/credentials/graphicalmatrix;MODE=PostgreSQL;DATABASE_TO_UPPER=false"
+  local real_id
+  real_id="$(command -v id)"
+  [[ -f "$h2_jar" ]] || fail "H2 test jar is missing: $h2_jar"
+  mkdir -p "$home/conf/graphicalmatrix" "$home/credentials" "$test_bin"
+  cat > "$test_bin/id" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "-un" ]]; then
+  echo jetty
+else
+  exec "$real_id" "\$@"
+fi
+EOF
+  chmod 0755 "$test_bin/id"
+  cat > "$home/conf/graphicalmatrix/db.properties" <<EOF
+graphicalmatrix.db.driver=org.h2.Driver
+graphicalmatrix.db.url=$db_url
+graphicalmatrix.db.user=sa
+graphicalmatrix.db.password=
+graphicalmatrix.db.autoInit=true
+EOF
+  cat > "$home/conf/graphicalmatrix/graphicalmatrix.properties" <<EOF
+graphicalmatrix.graphicals=img01-25
+graphicalmatrix.aliases=A:img01,B:img02,C:img03,D:img04
+graphicalmatrix.choice=4
+graphicalmatrix.sequence.storage=keyword
+graphicalmatrix.sequence.keyword=test-only-keyword
+EOF
+
+  local path cp dry_run row
+  path="/opt/homebrew/opt/openjdk/bin:$test_bin:$PATH"
+  cp="$ROOT/target/classes:$h2_jar"
+  GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" add pending-user img01,img02,img03,img04 >/dev/null
+  java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "UPDATE graphicalmatrix_enrollment SET mfa_method='TOTP', totp_status='PENDING', totp_seed='old-seed', totp_registration_id='old-binding', totp_registration_expires_at=12345 WHERE user_id='pending-user'" \
+    >/dev/null
+
+  GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" set-sequence pending-user img05,img06,img07,img08 >/dev/null
+  row="$(java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "SELECT totp_registration_id IS NULL, totp_registration_expires_at FROM graphicalmatrix_enrollment WHERE user_id='pending-user'")"
+  grep -Eq 'TRUE.*0' <<< "$row" \
+    || fail "H2 set-sequence did not invalidate the pending TOTP binding: $row"
+
+  java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "UPDATE graphicalmatrix_enrollment SET mfa_method='TOTP', totp_status='PENDING', totp_seed='old-seed', totp_registration_id='old-binding', totp_registration_expires_at=12345 WHERE user_id='pending-user'" \
+    >/dev/null
+
+  dry_run="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" invalidate-pending-totp)"
+  grep -Fxq "pending_recoverable=1" <<< "$dry_run" \
+    || fail "pending TOTP dry-run did not report the recoverable row"
+  row="$(java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "SELECT mfa_method, totp_status, totp_registration_id FROM graphicalmatrix_enrollment WHERE user_id='pending-user'")"
+  grep -Eq 'TOTP.*PENDING.*old-binding' <<< "$row" \
+    || fail "pending TOTP dry-run changed the database: $row"
+
+  GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" invalidate-pending-totp --apply >/dev/null
+  row="$(java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "SELECT mfa_method, totp_status, totp_seed IS NULL, totp_registration_id IS NULL, totp_registration_expires_at FROM graphicalmatrix_enrollment WHERE user_id='pending-user'")"
+  grep -Eq 'GraphicalMatrix.*UNREGISTERED.*TRUE.*TRUE.*0' <<< "$row" \
+    || fail "pending TOTP apply did not clear the stale registration binding: $row"
+
+  GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" add incompatible-user img01,img02,img03,img04 >/dev/null
+  java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "UPDATE graphicalmatrix_enrollment SET mfa_method='TOTP', totp_status='PENDING', sequence='hsp1:4:wrong-mode:value', totp_seed='old-seed', totp_registration_id='old-binding-2', totp_registration_expires_at=12345 WHERE user_id='incompatible-user'" \
+    >/dev/null
+  dry_run="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
+    bash "$ROOT/graphicalmatrix-db.sh" invalidate-pending-totp)"
+  grep -Fxq "pending_manual_recovery=1" <<< "$dry_run" \
+    || fail "pending TOTP dry-run did not isolate an incompatible sequence storage mode"
 }
 
 test_h2_password_is_not_forwarded_in_process_arguments() {
@@ -328,7 +493,9 @@ test_token_symlink_replacement
 test_csv_immutable_snapshot
 test_csv_rejects_symlink_source
 test_csv_preview_displays_initial_and_encoded_sequence
+test_csv_sequence_is_not_forwarded_in_process_arguments
 test_management_reset_restores_plaintext_initial_factor
+test_pending_totp_invalidation_requires_apply_and_clears_binding
 test_h2_password_is_not_forwarded_in_process_arguments
 test_migration_h2_password_is_not_forwarded
 test_api_curl_token_is_not_forwarded_in_arguments

@@ -20,10 +20,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.Properties;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +45,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         new GraphicalMatrixLdapLoginRateLimiter(10_000);
     private static final AtomicBoolean SCHEMA_INITIALIZED = new AtomicBoolean(false);
     private static final int MAX_JSON_BODY_BYTES = 64 * 1024;
+    private static final String WEBAUTHN_STORAGE_CONTEXT =
+        "net.shibboleth.idp.plugin.authn.webauthn";
 
     @Override
     protected void service(final HttpServletRequest request, final HttpServletResponse response)
@@ -285,6 +290,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             if ("unlock".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
                     "UPDATE graphicalmatrix_enrollment SET failed_count = 0, locked_until = 0, "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_UNLOCKED", "unlocked");
                 return;
@@ -292,6 +298,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             if ("enable".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
                     "UPDATE graphicalmatrix_enrollment SET status = 'ACTIVE', "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_ENABLED", "enabled");
                 return;
@@ -299,6 +306,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             if ("disable".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
                     "UPDATE graphicalmatrix_enrollment SET status = 'DISABLED', "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?"),
                     "API_DISABLED", "disabled");
                 return;
@@ -306,7 +314,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             if ("totp-reset".equals(action)) {
                 actionResult(request, response, user, updateSimple(user,
                     "UPDATE graphicalmatrix_enrollment SET totp_seed = NULL, totp_status = 'UNREGISTERED', "
-                    + "totp_registered_at = 0, state_version = state_version + 1, "
+                    + "totp_registered_at = 0, totp_registration_id = NULL, "
+                    + "totp_registration_expires_at = 0, state_version = state_version + 1, "
                     + "updated_at = ? WHERE user_id = ?"),
                     "API_TOTP_RESET", "totp_reset");
                 return;
@@ -392,7 +401,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                     try (PreparedStatement ps = c.prepareStatement(
                             "UPDATE graphicalmatrix_enrollment "
                             + "SET mfa_method = ?, force_sequence_change = ?, initial_sequence = ?, "
-                            + "sequence = ?, status = ?, state_version = state_version + 1, updated_at = ? "
+                            + "sequence = ?, status = ?, totp_registration_id = NULL, "
+                            + "totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = ? "
                             + "WHERE user_id = ?")) {
                         ps.setString(1, method);
                         ps.setInt(2, forceValue);
@@ -421,12 +431,15 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         if ("TOTP".equals(method)) {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'TOTP', totp_seed = NULL, "
                 + "totp_status = 'UNREGISTERED', totp_registered_at = 0, failed_count = 0, "
+                + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                 + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         } else if ("WebAuthn".equals(method)) {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'WebAuthn', failed_count = 0, "
+                + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                 + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         } else {
             sql = "UPDATE graphicalmatrix_enrollment SET mfa_method = 'GraphicalMatrix', failed_count = 0, "
+                + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                 + "locked_until = 0, state_version = state_version + 1, updated_at = ? WHERE user_id = ?";
         }
         return updateSimple(user, sql, now);
@@ -456,6 +469,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                     + "status = 'ACTIVE', "
                     + "failed_count = 0, locked_until = 0, totp_seed = NULL, "
                     + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
+                    + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "force_sequence_change = 1, state_version = state_version + 1, "
                     + "updated_at = ? WHERE user_id = ?")) {
                 ps.setString(1, resetSequence);
@@ -467,13 +481,137 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
     }
 
     private static boolean deleteUser(final String user) throws Exception {
+        requireSafeMissingEnrollmentPolicy(user);
+        final String method;
+        try (Connection c = db()) {
+            initDbIfEnabled(c);
+            c.setAutoCommit(false);
+            final DbUser row;
+            try {
+                row = findUser(c, user, true);
+                if (row == null) {
+                    c.rollback();
+                    return false;
+                }
+                method = normalizeMethod(row.mfaMethod);
+                try (PreparedStatement ps = c.prepareStatement(
+                        "UPDATE graphicalmatrix_enrollment SET status = 'DISABLED', "
+                        + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
+                        + "state_version = state_version + 1, updated_at = ? WHERE user_id = ?")) {
+                    ps.setLong(1, System.currentTimeMillis());
+                    ps.setString(2, user);
+                    if (ps.executeUpdate() != 1) {
+                        throw new IllegalStateException("Enrollment could not be disabled before delete");
+                    }
+                }
+                c.commit();
+            } catch (Exception ex) {
+                c.rollback();
+                throw ex;
+            }
+        }
+
+        deleteWebAuthnCredentials(user, method);
+
         try (Connection c = db()) {
             initDbIfEnabled(c);
             try (PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
+                    "DELETE FROM graphicalmatrix_enrollment WHERE user_id = ? AND status = 'DISABLED'")) {
                 ps.setString(1, user);
-                return ps.executeUpdate() == 1;
+                if (ps.executeUpdate() != 1) {
+                    throw new ApiException(409, "DELETE_STATE_CONFLICT", "API_USER_DELETE_FAILED",
+                        user, "CONFLICT", "enrollment_not_disabled_after_credential_cleanup");
+                }
+                return true;
             }
+        }
+    }
+
+    private static void requireSafeMissingEnrollmentPolicy(final String user) throws Exception {
+        final Path path = Path.of(GraphicalMatrixRuntime.idpHome(), "conf", "graphicalmatrix",
+            "mfa-policy.properties");
+        final Properties properties = new Properties();
+        if (Files.isRegularFile(path)) {
+            try (var input = Files.newInputStream(path)) {
+                properties.load(input);
+            }
+        }
+        final GraphicalMatrixMfaPolicy policy = GraphicalMatrixMfaPolicy.parse(properties);
+        if (policy.missingEnrollmentPolicy()
+                == GraphicalMatrixMfaPolicy.MissingEnrollmentPolicy.ALLOW_ON_BYPASS) {
+            throw new ApiException(409, "DELETE_UNSAFE", "API_USER_DELETE_UNSAFE",
+                user, "CONFLICT", "missing_enrollment_policy_allows_bypass");
+        }
+    }
+
+    private static void deleteWebAuthnCredentials(final String user, final String method) throws Exception {
+        try (Connection c = db()) {
+            final String product = c.getMetaData().getDatabaseProductName();
+            if (!"PostgreSQL".equalsIgnoreCase(product)) {
+                if ("WebAuthn".equals(method)) {
+                    throw new IllegalStateException(
+                        "Automatic WebAuthn credential cleanup requires PostgreSQL StorageRecords");
+                }
+                return;
+            }
+            if (!postgresqlStorageRecordsPresent(c)) {
+                if ("WebAuthn".equals(method)) {
+                    throw new IllegalStateException("WebAuthn StorageRecords table was not found");
+                }
+                return;
+            }
+
+            final String match = "(id = ? OR elem ->> 'username' = ? "
+                + "OR elem -> 'userIdentity' ->> 'name' = ? "
+                + "OR elem -> 'userIdentity' ->> 'id' = ?)";
+            final String sql = "WITH expanded AS ("
+                + "SELECT s.context, s.id, elem FROM storagerecords s "
+                + "CROSS JOIN LATERAL jsonb_array_elements(CASE "
+                + "WHEN jsonb_typeof(s.value::jsonb) = 'array' THEN s.value::jsonb ELSE '[]'::jsonb END) elem "
+                + "WHERE s.context = ?), "
+                + "target AS (SELECT context, id, COALESCE(jsonb_agg(elem) FILTER (WHERE NOT " + match
+                + "), '[]'::jsonb) AS new_value, count(*) FILTER (WHERE " + match
+                + ") AS removed_count FROM expanded GROUP BY context, id), "
+                + "deleted AS (DELETE FROM storagerecords s USING target "
+                + "WHERE s.context = target.context AND s.id = target.id AND target.removed_count > 0 "
+                + "AND (s.id = ? OR jsonb_array_length(target.new_value) = 0) RETURNING 1), "
+                + "updated AS (UPDATE storagerecords s SET value = target.new_value::text, "
+                + "version = s.version + 1 FROM target WHERE s.context = target.context "
+                + "AND s.id = target.id AND target.removed_count > 0 AND s.id <> ? "
+                + "AND jsonb_array_length(target.new_value) > 0 RETURNING 1) "
+                + "SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) FROM updated)";
+            try (PreparedStatement ps = c.prepareStatement(sql)) {
+                ps.setString(1, WEBAUTHN_STORAGE_CONTEXT);
+                for (int i = 2; i <= 11; i++) {
+                    ps.setString(i, user);
+                }
+                ps.executeQuery().close();
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT count(*) FROM storagerecords s "
+                    + "CROSS JOIN LATERAL jsonb_array_elements(CASE "
+                    + "WHEN jsonb_typeof(s.value::jsonb) = 'array' THEN s.value::jsonb ELSE '[]'::jsonb END) elem "
+                    + "WHERE s.context = ? AND (s.id = ? OR elem ->> 'username' = ? "
+                    + "OR elem -> 'userIdentity' ->> 'name' = ? "
+                    + "OR elem -> 'userIdentity' ->> 'id' = ?)")) {
+                ps.setString(1, WEBAUTHN_STORAGE_CONTEXT);
+                for (int i = 2; i <= 5; i++) {
+                    ps.setString(i, user);
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next() || rs.getLong(1) != 0L) {
+                        throw new IllegalStateException("WebAuthn credential cleanup verification failed");
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean postgresqlStorageRecordsPresent(final Connection c) throws Exception {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT to_regclass('storagerecords') IS NOT NULL");
+                ResultSet rs = ps.executeQuery()) {
+            return rs.next() && rs.getBoolean(1);
         }
     }
 
@@ -548,7 +686,9 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 + "status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', failed_count INT NOT NULL DEFAULT 0, "
                 + "locked_until BIGINT NOT NULL DEFAULT 0, mfa_method VARCHAR(32) NOT NULL DEFAULT 'GraphicalMatrix', "
                 + "totp_seed VARCHAR(255), totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED', "
-                    + "totp_registered_at BIGINT NOT NULL DEFAULT 0, last_success_at BIGINT NOT NULL DEFAULT 0, "
+                    + "totp_registered_at BIGINT NOT NULL DEFAULT 0, totp_registration_id VARCHAR(64), "
+                    + "totp_registration_expires_at BIGINT NOT NULL DEFAULT 0, "
+                    + "last_success_at BIGINT NOT NULL DEFAULT 0, "
                     + "force_sequence_change INT NOT NULL DEFAULT 0, state_version BIGINT NOT NULL DEFAULT 0, "
                     + "created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL)"
             );
@@ -558,6 +698,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_seed VARCHAR(255)");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED'");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_registered_at BIGINT NOT NULL DEFAULT 0");
+            st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_registration_id VARCHAR(64)");
+            st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS totp_registration_expires_at BIGINT NOT NULL DEFAULT 0");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS last_success_at BIGINT NOT NULL DEFAULT 0");
             st.executeUpdate("ALTER TABLE graphicalmatrix_enrollment ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0");
         }

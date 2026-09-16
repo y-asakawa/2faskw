@@ -195,17 +195,18 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh reset-failures USER
 # RESETは初期sequenceへ戻し、ロック解除後にsequence変更を要求する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh USER RESET
 
-# enrollment行を削除する。実行前にshowとDBバックアップを行う。
+# enrollment、GraphicalMatrix/TOTP情報、PostgreSQL StorageRecords内の関連WebAuthn credentialを物理削除する。
+# 最初にDISABLEDへ変更し、credential削除が失敗した場合は停止状態を保持する。実行前にshowとDBバックアップを行う。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh delete USER
 ```
 
 ### 3.3 CSV、TOTP、WebAuthn、保存方式移行
 
 ```bash
-# 標準CSVをdry-runする。DBは変更しない。D行はapply時に物理削除となる。
+# 標準CSVをdry-runする。DBは変更しない。D行は完全削除を保証できないため拒否される。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv users.csv
 
-# 上記CSVを反映する。D行は対象ユーザーのDB enrollmentを削除する。
+# 上記CSVを反映する。物理削除はCSVではなくdelete USERを使用する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv users.csv --apply
 
 # provisioning CSVをdry-runする。D行は無効化として扱う予定内容を表示する。
@@ -228,6 +229,13 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh clear-totp-seed USER
 
 # TOTP登録状態を未登録へ戻す。seedの扱いは実装済み保存方式に従う。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh reset-totp USER
+
+# v1.3.4以前から残ったPENDING TOTPの失効予定を表示する。seedは表示しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp
+
+# 画像登録を保持し、現在のsequence保存方式と互換な旧PENDING利用者をGraphicalMatrixへ戻す。
+# 旧seedと登録Bindingを消去する。MANUAL_RECOVERYは管理者が個別に復旧する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp --apply
 
 # 指定ユーザーの全WebAuthn credential削除予定を表示する。DBは変更しない。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-reset USER

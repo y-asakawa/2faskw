@@ -95,6 +95,8 @@ class GraphicalMatrixMfaPolicyTest {
     void missingOrderUsesTheDocumentedDefaultOrder() {
         final GraphicalMatrixMfaPolicy policy = parse();
 
+        assertEquals(GraphicalMatrixMfaPolicy.MissingEnrollmentPolicy.DENY,
+            policy.missingEnrollmentPolicy());
         assertEquals("forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default",
             policy.orderText());
         assertDecision(policy, NORMAL_SP, "203.0.113.10",
@@ -167,6 +169,17 @@ class GraphicalMatrixMfaPolicyTest {
             "graphicalmatrix.mfa.bypassSpCidrs", SENSITIVE_SP + "|not-a-cidr"));
         assertThrows(IllegalArgumentException.class, () -> parse(
             "graphicalmatrix.mfa.useForwardedFor", "yes"));
+        assertThrows(IllegalArgumentException.class, () -> parse(
+            "graphicalmatrix.mfa.missingEnrollmentPolicy", "allow"));
+    }
+
+    @Test
+    void acceptsExplicitMissingEnrollmentCompatibilityPolicy() {
+        final GraphicalMatrixMfaPolicy policy = parse(
+            "graphicalmatrix.mfa.missingEnrollmentPolicy", "allow-on-bypass");
+
+        assertEquals(GraphicalMatrixMfaPolicy.MissingEnrollmentPolicy.ALLOW_ON_BYPASS,
+            policy.missingEnrollmentPolicy());
     }
 
     @Test

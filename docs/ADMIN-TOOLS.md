@@ -1093,6 +1093,13 @@ actionの意味:
 - import時に、現在の `graphicalmatrix.sequence.storage` に従ってDB保存用の値へ変換される。
 - CSVファイルにはsequenceが含まれるため、秘密情報として扱う。
 
+v1.3.5以降、CSVの`sequence`は保存形式へ変換するJava processのコマンドライン引数へ渡さず、
+専用の標準入力から渡す。dry-runと`--apply`の両方に適用される内部保護であり、CSV形式とコマンドは
+変更されない。shellとJARは必ず同じ配布版へ更新し、旧JARへ合わせるためargv方式へ戻さない。
+
+この対策は子Java processのargv露出を防ぐものである。入力CSV自体と`initial_sequence`は従来どおり
+秘密情報として扱い、所有者限定の権限、処理済みファイルの保存期限、安全な削除を維持する。
+
 ### 7.3 実装済みプロビジョニング機能
 
 実装済みのCLI:
@@ -1200,3 +1207,28 @@ DB1の現在のPoC設定では、sequence保存方式がまだ `plaintext` の�
 graphicalmatrix.admin.productionMode = false
 graphicalmatrix.admin.rejectPlaintextSequence = false
 ```
+
+### 7.4 v1.3.5 TOTP登録Bindingの管理契約
+
+v1.3.5以降のPluginとAdmin Toolsは、`totp_registration_id`と
+`totp_registration_expires_at`を含む同じDB schemaを使用する。Admin Toolsだけを旧版のまま残すと、
+管理操作が進行中TOTP登録を確実に失効させないため、Plugin JAR、`graphicalmatrix-db.sh`、Admin Tools JARを
+同じ配布版へ更新する。
+
+`add`、CSV `A/M/D`、`set-method`、`set-totp-seed`、`reset-totp`、`disable`、`enable`など、利用者状態を
+変更する管理操作は、進行中登録を維持する専用操作を除き登録IDと期限を消去し、`state_version`を増加させる。
+これにより、管理操作前に開かれていたTOTP登録画面は確定・取消の両方で失効する。
+
+旧版の未完了登録を確認する場合は次を使用する。最初のコマンドはdry-runであり、seedを表示しない。
+
+```bash
+# v1.3.4以前から残ったPENDING登録の件数、利用者ID、復旧可否を確認する。
+sudo /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh invalidate-pending-totp
+
+# GraphicalMatrix sequenceを保持する復旧可能な利用者だけを安全な未登録状態へ戻す。
+sudo /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh invalidate-pending-totp --apply
+```
+
+`MANUAL_RECOVERY`は自動変更されない。DBバックアップ、第一認証による本人確認、割り当てるMFA方式を確認し、
+利用者ごとに`reset-user`または`set-method`を実行する。dry-runはsequenceの非空と保存方式の互換性を
+確認するが、暗号化済みpayloadの完全性までは検証しない。

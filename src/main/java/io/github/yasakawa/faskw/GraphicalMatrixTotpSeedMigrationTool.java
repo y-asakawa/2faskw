@@ -119,6 +119,8 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
                 + "totp_seed VARCHAR(255),"
                 + "totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED',"
                 + "totp_registered_at BIGINT NOT NULL DEFAULT 0,"
+                + "totp_registration_id VARCHAR(64),"
+                + "totp_registration_expires_at BIGINT NOT NULL DEFAULT 0,"
                 + "last_success_at BIGINT NOT NULL DEFAULT 0,"
                 + "force_sequence_change INT NOT NULL DEFAULT 0,"
                 + "state_version BIGINT NOT NULL DEFAULT 0,"
@@ -128,6 +130,8 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
             addColumnIfMissing(st, "totp_seed VARCHAR(255)");
             addColumnIfMissing(st, "totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED'");
             addColumnIfMissing(st, "totp_registered_at BIGINT NOT NULL DEFAULT 0");
+            addColumnIfMissing(st, "totp_registration_id VARCHAR(64)");
+            addColumnIfMissing(st, "totp_registration_expires_at BIGINT NOT NULL DEFAULT 0");
             addColumnIfMissing(st, "state_version BIGINT NOT NULL DEFAULT 0");
         }
     }
@@ -154,6 +158,7 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
             final List<Migration> migrations) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
                 "UPDATE graphicalmatrix_enrollment SET totp_seed = ?, "
+                + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                 + "state_version = state_version + 1, updated_at = ? "
                 + "WHERE user_id = ? AND state_version = ? AND totp_seed = ?")) {
             final long now = System.currentTimeMillis();

@@ -16,10 +16,14 @@
 
 package io.github.yasakawa.faskw;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public final class GraphicalMatrixSequenceTool {
+    private static final int MAX_STDIN_BYTES = 4096;
+
     private GraphicalMatrixSequenceTool() {
     }
 
@@ -53,7 +57,7 @@ public final class GraphicalMatrixSequenceTool {
                     usage();
                     System.exit(2);
                 }
-                final String input = new String(System.in.readAllBytes(), StandardCharsets.UTF_8).trim();
+                final String input = readSequenceInput(System.in);
                 final List<String> sequence = GraphicalMatrixSupport.csv(input);
                 final boolean ordered = Boolean.parseBoolean(args[2]);
                 final boolean duplicates = Boolean.parseBoolean(args[3]);
@@ -93,6 +97,14 @@ public final class GraphicalMatrixSequenceTool {
             System.err.println("ERROR: " + ex.getMessage());
             System.exit(1);
         }
+    }
+
+    static String readSequenceInput(final InputStream input) throws IOException {
+        final byte[] bytes = input.readNBytes(MAX_STDIN_BYTES + 1);
+        if (bytes.length > MAX_STDIN_BYTES) {
+            throw new IllegalArgumentException("stdin input is too large");
+        }
+        return new String(bytes, StandardCharsets.UTF_8).trim();
     }
 
     private static void usage() {

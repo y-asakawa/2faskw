@@ -50,6 +50,11 @@ final class GraphicalMatrixMfaPolicy {
         BYPASS
     }
 
+    enum MissingEnrollmentPolicy {
+        DENY,
+        ALLOW_ON_BYPASS
+    }
+
     record Decision(Outcome outcome, String rule) {
     }
 
@@ -66,6 +71,7 @@ final class GraphicalMatrixMfaPolicy {
     }
 
     private final String defaultPolicy;
+    private final MissingEnrollmentPolicy missingEnrollmentPolicy;
     private final List<String> order;
     private final Set<String> forceSPs;
     private final Set<String> bypassSPs;
@@ -74,11 +80,13 @@ final class GraphicalMatrixMfaPolicy {
     private final Set<String> bypassIPs;
     private final List<Ipv4Cidr> bypassCIDRs;
 
-    private GraphicalMatrixMfaPolicy(final String defaultPolicy, final List<String> order,
+    private GraphicalMatrixMfaPolicy(final String defaultPolicy,
+            final MissingEnrollmentPolicy missingEnrollmentPolicy, final List<String> order,
             final Set<String> forceSPs, final Set<String> bypassSPs,
             final List<SpCidrRule> bypassSpCidrs, final Set<String> requiredSPs,
             final Set<String> bypassIPs, final List<Ipv4Cidr> bypassCIDRs) {
         this.defaultPolicy = defaultPolicy;
+        this.missingEnrollmentPolicy = missingEnrollmentPolicy;
         this.order = List.copyOf(order);
         this.forceSPs = Set.copyOf(forceSPs);
         this.bypassSPs = Set.copyOf(bypassSPs);
@@ -96,6 +104,16 @@ final class GraphicalMatrixMfaPolicy {
             throw new IllegalArgumentException(
                 "graphicalmatrix.mfa.default must be require or bypass: " + defaultPolicy);
         }
+
+        final String missingPolicy = trim(source.getProperty(
+            "graphicalmatrix.mfa.missingEnrollmentPolicy", "deny")).toLowerCase(Locale.ROOT);
+        final MissingEnrollmentPolicy missingEnrollmentPolicy = switch (missingPolicy) {
+            case "deny" -> MissingEnrollmentPolicy.DENY;
+            case "allow-on-bypass" -> MissingEnrollmentPolicy.ALLOW_ON_BYPASS;
+            default -> throw new IllegalArgumentException(
+                "graphicalmatrix.mfa.missingEnrollmentPolicy must be deny or allow-on-bypass: "
+                    + missingPolicy);
+        };
 
         final List<String> order = parseOrder(
             source.getProperty("graphicalmatrix.mfa.policyOrder"));
@@ -116,7 +134,8 @@ final class GraphicalMatrixMfaPolicy {
             bypassCIDRs.add(parseCidr(cidr));
         }
 
-        return new GraphicalMatrixMfaPolicy(defaultPolicy, order, forceSPs, bypassSPs,
+        return new GraphicalMatrixMfaPolicy(defaultPolicy, missingEnrollmentPolicy,
+            order, forceSPs, bypassSPs,
             bypassSpCidrs, requiredSPs, bypassIPs, bypassCIDRs);
     }
 
@@ -152,6 +171,10 @@ final class GraphicalMatrixMfaPolicy {
 
     String defaultPolicy() {
         return defaultPolicy;
+    }
+
+    MissingEnrollmentPolicy missingEnrollmentPolicy() {
+        return missingEnrollmentPolicy;
     }
 
     Set<String> forceSPs() {
