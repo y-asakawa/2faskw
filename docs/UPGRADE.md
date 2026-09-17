@@ -107,53 +107,90 @@ sudo ls -l /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/2faskw-idp-plugin-*.jar
 
 ## バックアップ
 
-JARと設定ファイルをバックアップする。
+JAR、設定、credentialをIdPの稼働ディレクトリ外へバックアップする。
+
+Shibboleth IdP 5は`conf`配下の`*.properties`を自動検出する。したがって、
+`/opt/shibboleth-idp/conf/graphicalmatrix.bak.TIMESTAMP`や
+`/opt/shibboleth-idp/conf/authn.bak.TIMESTAMP`のようなディレクトリコピーを`conf`配下へ作成しては
+ならない。バックアップ内のpropertiesまで実設定として読み込まれ、`Duplicate properties were detected`
+警告や不定な設定値選択の原因になる。
+
+次の例では、1回の更新に必要なファイルをrootだけが参照できるディレクトリへまとめる。
 
 ```bash
-TS=$(date +%Y%m%d%H%M%S)
+TS="$(date +%Y%m%d%H%M%S)"
+BACKUP_ROOT="/var/backups/shibboleth-idp/2faskw-upgrade-${TS}"
 
-sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
-  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib.bak.$TS
+sudo install -d -m 0700 -o root -g root "$BACKUP_ROOT"
 
 sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix \
-  /opt/shibboleth-idp/conf/graphicalmatrix.bak.$TS
+  "$BACKUP_ROOT/graphicalmatrix"
 
-# 稼働中の画像IDと画像ファイルをロールバックできるように保管する。
-if sudo test -d /opt/shibboleth-idp/edit-webapp/graphicalmatrix; then
-  sudo cp -a /opt/shibboleth-idp/edit-webapp/graphicalmatrix \
-    /opt/shibboleth-idp/edit-webapp/graphicalmatrix.bak.$TS
-fi
-```
+sudo cp -a /opt/shibboleth-idp/conf/authn \
+  "$BACKUP_ROOT/authn"
 
-必要に応じて、以下もバックアップする。
-
-```bash
-sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml \
-  /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml.bak.$TS
+sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/lib \
+  "$BACKUP_ROOT/lib"
 
 sudo cp -a /opt/shibboleth-idp/credentials \
-  /opt/shibboleth-idp/credentials.bak.$TS
+  "$BACKUP_ROOT/credentials"
+
+sudo cp -a /opt/shibboleth-idp/edit-webapp/WEB-INF/web.xml \
+  "$BACKUP_ROOT/web.xml"
+
+sudo cp -a /opt/shibboleth-idp/conf/global.xml \
+  "$BACKUP_ROOT/global.xml"
 
 # Shibboleth IdP本体のLDAP認証・属性Resolver接続設定。
 if sudo test -f /opt/shibboleth-idp/conf/ldap.properties; then
   sudo cp -a /opt/shibboleth-idp/conf/ldap.properties \
-    /opt/shibboleth-idp/conf/ldap.properties.bak.$TS
+    "$BACKUP_ROOT/ldap.properties"
 fi
+
+# 稼働中の画像IDと画像ファイルをロールバックできるように保管する。
+if sudo test -d /opt/shibboleth-idp/edit-webapp/graphicalmatrix; then
+  sudo cp -a /opt/shibboleth-idp/edit-webapp/graphicalmatrix \
+    "$BACKUP_ROOT/edit-webapp-graphicalmatrix"
+fi
+
+# バックアップ取得時点と内容を後から検証できるようにする。
+sudo sh -c "printf '%s\n' '$TS' > '$BACKUP_ROOT/BACKUP_TIMESTAMP'"
+sudo sh -c "cd '$BACKUP_ROOT' && \
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+  xargs -0 sha256sum > SHA256SUMS"
+
+sudo test -s "$BACKUP_ROOT/SHA256SUMS"
+sudo ls -ld "$BACKUP_ROOT"
+echo "BACKUP_ROOT=$BACKUP_ROOT"
 ```
 
 `/opt/shibboleth-idp/conf/ldap.properties`はShibboleth IdP本体のLDAP設定、
 `/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties`は2FAS-KW enrollmentをLDAPへ
 保存する場合の設定であり、用途が異なる。前者は2FAS-KW Pluginの導入スクリプトでは更新しない。
 
-v1.2.0でWebAuthn設定を使う場合、またはv1.2.4でIdP自己管理フローを有効にする場合は、
-authn設定もバックアップする。
+`credentials`にはDataSealer、SAML署名・暗号化鍵、DB/LDAP password等が含まれ得るため、
+バックアップ先を共有ディレクトリへ置かず、root以外へ読取権限を与えない。別媒体へ複製する場合も
+暗号化して保管する。
+
+既に`conf/authn.bak.*`または`conf/graphicalmatrix.bak.*`を作成している場合は、IdP再起動前に
+`/var/backups/shibboleth-idp/`へ移動する。単一ファイルの`*.properties.bak.TIMESTAMP`は
+`.properties`で終わらないため自動検出対象ではないが、今後のバックアップは同じ`BACKUP_ROOT`へ
+集約する。
 
 ```bash
-sudo cp -a /opt/shibboleth-idp/conf/authn \
-  /opt/shibboleth-idp/conf/authn.bak.$TS
+# 旧手順でconf直下に作成されたディレクトリバックアップを、削除せず稼働ツリー外へ移動する。
+LEGACY_TS="$(date +%Y%m%d%H%M%S)"
+LEGACY_BACKUP_ROOT="/var/backups/shibboleth-idp/legacy-conf-backups-${LEGACY_TS}"
 
-sudo cp -a /opt/shibboleth-idp/conf/global.xml \
-  /opt/shibboleth-idp/conf/global.xml.bak.$TS
+sudo install -d -m 0700 -o root -g root "$LEGACY_BACKUP_ROOT"
+sudo find /opt/shibboleth-idp/conf \
+  -mindepth 1 -maxdepth 1 -type d \
+  \( -name 'authn.bak.*' -o -name 'graphicalmatrix.bak.*' \) \
+  -exec mv -t "$LEGACY_BACKUP_ROOT" -- {} +
+
+# 何も表示されないことを確認する。
+sudo find /opt/shibboleth-idp/conf \
+  -type f -name '*.properties' -path '*.bak.*' -print
 ```
 
 DBバックアップは、環境のPostgreSQLバックアップ手順に従って取得する。
@@ -335,13 +372,12 @@ fi
 
 ```bash
 # UPGRADE手順で作成した設定ディレクトリのバックアップを新しい順に表示する。
-sudo find /opt/shibboleth-idp/conf -maxdepth 1 -type d \
-  -name 'graphicalmatrix.bak.*' -printf '%T@ %p\n' | sort -nr
+sudo find /var/backups/shibboleth-idp -maxdepth 1 -type d \
+  -name '2faskw-upgrade-*' -printf '%T@ %p\n' | sort -nr
 
-# 個別に作成された設定ファイルのバックアップも確認する。
-sudo find /opt/shibboleth-idp/conf/graphicalmatrix -maxdepth 1 -type f \
-  \( -name '*.bak.*' -o -name '*.rpmsave' -o -name '*.rpmnew' \) \
-  -printf '%T@ %p\n' | sort -nr
+# 選択したバックアップのchecksumを検証する。
+BACKUP_ROOT='/var/backups/shibboleth-idp/2faskw-upgrade-TIMESTAMP'
+sudo sh -c "cd '$BACKUP_ROOT' && sha256sum -c SHA256SUMS"
 ```
 
 バックアップが見つかった場合も、ディレクトリ全体を無条件に上書きして戻さない。旧設定と
@@ -351,7 +387,7 @@ credentialや内部ホスト名が含まれる可能性があるため、出力�
 
 ```bash
 # BACKUP_DIRとPACKAGE_DIRは実在するパスへ置き換える。
-BACKUP_DIR='/opt/shibboleth-idp/conf/graphicalmatrix.bak.TIMESTAMP'
+BACKUP_DIR='/var/backups/shibboleth-idp/2faskw-upgrade-TIMESTAMP/graphicalmatrix'
 PACKAGE_DIR='/path/to/2faskw-idp-plugin-VERSION'
 
 # 内容を表示せず、変更の有無だけを確認する例。
@@ -1694,18 +1730,33 @@ v1.3.5では、`DISABLED`登録がSP/IPのBYPASSやWebAuthn成功で認証され
 結び付け、管理操作後の古い登録画面による確定・取消を拒否する。このためDB schemaまたはLDAP schemaの
 更新が必要であり、JARだけの更新では保護が完成しない。
 
-更新前に認証設定とMFA policyを退避する。
+文書冒頭の「バックアップ」を実行済みの場合、認証設定とMFA policyは同じ`BACKUP_ROOT`へ退避済みで
+あるため、ここで再度コピーする必要はない。このv1.3.5更新手順だけを単独で実行する場合は、次のように
+IdPの`conf`外へ退避する。
 
 ```bash
 STAMP="$(date +%Y%m%d%H%M%S)"
+BACKUP_ROOT="/var/backups/shibboleth-idp/2faskw-v1.3.5-upgrade-${STAMP}"
+
+sudo install -d -m 0700 -o root -g root \
+  "$BACKUP_ROOT/graphicalmatrix"
+
 sudo cp -a /opt/shibboleth-idp/conf/authn \
-  "/opt/shibboleth-idp/conf/authn.bak.${STAMP}"
+  "$BACKUP_ROOT/authn"
 sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties \
-  "/opt/shibboleth-idp/conf/graphicalmatrix/mfa-policy.properties.bak.${STAMP}"
+  "$BACKUP_ROOT/graphicalmatrix/mfa-policy.properties"
 sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties \
-  "/opt/shibboleth-idp/conf/graphicalmatrix/graphicalmatrix.properties.bak.${STAMP}"
-sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties \
-  "/opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties.bak.${STAMP}" 2>/dev/null || true
+  "$BACKUP_ROOT/graphicalmatrix/graphicalmatrix.properties"
+if sudo test -f /opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties; then
+  sudo cp -a /opt/shibboleth-idp/conf/graphicalmatrix/ldap.properties \
+    "$BACKUP_ROOT/graphicalmatrix/ldap.properties"
+fi
+
+sudo sh -c "cd '$BACKUP_ROOT' && \
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | \
+  xargs -0 sha256sum > SHA256SUMS"
+sudo test -s "$BACKUP_ROOT/SHA256SUMS"
+echo "BACKUP_ROOT=$BACKUP_ROOT"
 ```
 
 `mfa-policy.properties`へ未登録者の既定拒否を追加する。既に同名設定がある場合は重複させず値を確認する。
@@ -2015,13 +2066,17 @@ sudo rm -f \
 復元元のタイムスタンプを確認してから実行すること。
 
 ```bash
-# 実際のバックアップパスへ置き換える。
+# 実際のバックアップパスへ置き換え、復元前にchecksumを検証する。
+BACKUP_ROOT='/var/backups/shibboleth-idp/2faskw-upgrade-TIMESTAMP'
+
+sudo sh -c "cd '$BACKUP_ROOT' && sha256sum -c SHA256SUMS"
+
 sudo cp -a \
-  /opt/shibboleth-idp/edit-webapp/WEB-INF/lib.bak.TIMESTAMP/. \
+  "$BACKUP_ROOT/lib/." \
   /opt/shibboleth-idp/edit-webapp/WEB-INF/lib/
 
 sudo cp -a \
-  /opt/shibboleth-idp/conf/graphicalmatrix.bak.TIMESTAMP/. \
+  "$BACKUP_ROOT/graphicalmatrix/." \
   /opt/shibboleth-idp/conf/graphicalmatrix/
 ```
 
@@ -2030,12 +2085,22 @@ v1.2.0でWebAuthn設定を変更した場合、またはv1.2.4で自己管理フ
 
 ```bash
 sudo cp -a \
-  /opt/shibboleth-idp/conf/authn.bak.TIMESTAMP/. \
+  "$BACKUP_ROOT/authn/." \
   /opt/shibboleth-idp/conf/authn/
 
 sudo cp -a \
-  /opt/shibboleth-idp/conf/global.xml.bak.TIMESTAMP \
+  "$BACKUP_ROOT/global.xml" \
   /opt/shibboleth-idp/conf/global.xml
+
+if sudo test -f "$BACKUP_ROOT/ldap.properties"; then
+  sudo cp -a "$BACKUP_ROOT/ldap.properties" \
+    /opt/shibboleth-idp/conf/ldap.properties
+fi
+
+if sudo test -d "$BACKUP_ROOT/edit-webapp-graphicalmatrix"; then
+  sudo cp -a "$BACKUP_ROOT/edit-webapp-graphicalmatrix/." \
+    /opt/shibboleth-idp/edit-webapp/graphicalmatrix/
+fi
 ```
 
 WARを再構築してJettyを起動する。
