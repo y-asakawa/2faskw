@@ -1,7 +1,7 @@
 # GraphicalMatrix Configuration Reference
 
-この文書は、2FAS-KW Plugin / Admin Tools で利用する
-`*.properties` の設定項目リファレンスである。
+この文書は、2FAS-KW Plugin / Admin Toolsで利用する`*.properties`と、
+Shibboleth IdPへ統合する主要な認証Flow設定ファイルのリファレンスである。
 
 設定例だけでなく、各項目の意味、型、既定値または例、運用上の注意をまとめる。
 
@@ -30,6 +30,7 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.choice` | integer | `4` | ユーザーが選択する画像数。 | DBのsequence数、CSV列、画面表示と整合させる。 |
 | `graphicalmatrix.order` | integer | `1` | sequence照合方式。 | `1`: 順番通り、`2`: 順不同で一致可。 |
 | `graphicalmatrix.challenge.seconds` | integer seconds | `180` | challenge有効期限。 | 30-900秒を想定。長すぎる値は再利用リスクが上がる。 |
+| `graphicalmatrix.totp.registrationTtlSeconds` | integer seconds | `180` | TOTP自己登録の開始から確認・取消までの固定期限。 | 30-900秒。誤コード再試行では延長されない。通常ログイン時のTOTP windowには影響しない。 |
 | `graphicalmatrix.allow_duplicates` | integer/bool | `0` | 同じ画像の複数選択を許可するか。 | `1` の場合 `img01,img01,img01,img01` のようなsequenceを許可。 |
 | `graphicalmatrix.force_sequence_change` | integer/bool | `1` | 初回/RESET後の強制sequence変更。 | DB利用時に有効。変更完了後はユーザー行のforce値を解除する。 |
 | `graphicalmatrix.lockout.failureLimit` | integer | `5` | 通常ロックを開始する保存済み失敗回数。 | `1`から`100`。成功または管理者リセットで0へ戻る。 |
@@ -102,6 +103,7 @@ IdP runtime / Admin Tools がMFA DBへ接続するための設定。
 | `graphicalmatrix.db.driver` | class name | `org.postgresql.Driver` | JDBC driver class。 | PostgreSQL推奨。H2はPoC用途。 |
 | `graphicalmatrix.db.url` | JDBC URL | `jdbc:postgresql://127.0.0.1:5432/graphicalmatrix` | DB接続URL。 | 本番はDB VIP/FQDNとTLS設定を入れる。 |
 | `graphicalmatrix.db.user` | string | `graphicalmatrix_app` | DB接続ユーザー。 | IdP runtimeとAdmin Toolsはロール分離推奨。 |
+| `graphicalmatrix.db.password` | string | 空 | DBパスワードの直接指定。 | 互換用途。設定されている場合は`passwordFile`より優先される。配布物やGitへ保存しない。 |
 | `graphicalmatrix.db.passwordFile` | path | `/opt/shibboleth-idp/credentials/graphicalmatrix-db.password` | DBパスワードファイル。 | 配布ZIPへ同梱しない。権限は`0640`以下。 |
 | `graphicalmatrix.db.autoInit` | boolean | `false` | 起動時DDL自動実行。 | 本番はfalse。DDLは事前適用する。 |
 | `graphicalmatrix.db.pool.enabled` | boolean | `true` | HikariCP接続プール利用。 | IdP runtime/API/TOTP参照で利用。CLIは短命接続。 |
@@ -111,6 +113,10 @@ IdP runtime / Admin Tools がMFA DBへ接続するための設定。
 | `graphicalmatrix.db.pool.idleTimeoutMillis` | milliseconds | `600000` | idle接続の破棄時間。 | `minimumIdle`との関係に注意。 |
 | `graphicalmatrix.db.pool.maxLifetimeMillis` | milliseconds | `1800000` | 接続最大寿命。 | DB/LB側の接続寿命より短くする。 |
 | `graphicalmatrix.db.pool.validationTimeoutMillis` | milliseconds | `5000` | 接続検証タイムアウト。 | 短すぎると一時遅延で失敗しやすい。 |
+
+DB passwordは`graphicalmatrix.db.password`が非空ならその値を使用し、空の場合だけ
+`graphicalmatrix.db.passwordFile`を読み込む。運用環境では設定ファイルへ平文passwordを直接記録せず、
+runtime userだけが読めるpassword fileを使用することを推奨する。
 
 `graphicalmatrix-db.sh`のH2操作は、DB passwordをprocess argumentやcommand lineへ展開せず、専用Java
 bridgeの標準入力へ渡す。H2はPoC用途だが、`passwordFile`とOS上のprocess情報をどちらも保護する。
@@ -173,6 +179,7 @@ SP単位/IP単位でMFA要否を制御する。
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
 | `graphicalmatrix.mfa.default` | enum | `require` | 既定のMFA方針。 | `require` または `bypass`。 |
+| `graphicalmatrix.mfa.missingEnrollmentPolicy` | enum | `deny` | MFA登録行が存在しない利用者の扱い。 | `deny`を推奨。`allow-on-bypass`は移行時の互換設定で、BYPASS時だけ未登録を許可し、物理deleteを禁止する。 |
 | `graphicalmatrix.mfa.forceSPs` | list | empty | MFAを強制するSP entityID。 | `policyOrder`上の位置で優先度を決定する。カンマ区切り。 |
 | `graphicalmatrix.mfa.policyOrder` | ordered list | `forceSPs,bypassSPs,bypassSpCidrs,bypassNetwork,requiredSPs,default` | MFAルールの評価順序。 | 左から最初に結論を返したルールを採用する。6ルールを各1回含め、`default`を最後にする。 |
 | `graphicalmatrix.mfa.bypassSPs` | list | empty | MFAを回避するSP entityID。 | カンマ区切り。 |
@@ -209,6 +216,56 @@ IdPサーバ上のローカルSP管理CLIを制御する。管理APIやWeb UIは
 `policyOrder`はプロパティファイルの行順ではなく、この値に列挙した左から順に評価する。
 `bypassNetwork`は`bypassIPs`と`bypassCIDRs`を1つの評価単位として扱う。
 IdP自己管理フローはこの順序の対象外で、常にMFAを要求する。
+
+## authn.properties
+
+Shibboleth IdPの認証Flow選択と、2FAS-KWが使用する`authn/External`および`authn/MFA`の動作を設定する。
+実ファイルは`/opt/shibboleth-idp/conf/authn/authn.properties`である。既存IdPへ導入する場合は、
+既存の認証Flowを削除せず、必要な値だけを統合する。
+
+| Property | Type | Default / Example | Description | Notes |
+| --- | --- | --- | --- | --- |
+| `idp.authn.flows` | flow ID list | `MFA` | IdPが利用可能な認証Flow。 | 2FAS-KWでは`MFA`を含める。既存の`Password`、`RemoteUser`等を使用している場合は削除せずカンマ区切りで保持する。 |
+| `idp.authn.External.externalAuthnPath` | context-relative path | `contextRelative:/graphicalmatrix/start` | `authn/External`から2FAS-KW開始Servletへ遷移する。 | 別のExternal認証handlerと共有する場合は上書きせず、MFA設計を統合する。`/external.jsp`のままでは2FAS-KWを開始できない。 |
+| `idp.authn.External.nonBrowserSupported` | boolean | `false` | External Flowを非ブラウザ認証に使用できるか。 | 2FAS-KWはブラウザ操作を必要とするためfalse。 |
+| `idp.authn.External.passiveAuthenticationSupported` | boolean | `false` | 操作を伴わないpassive認証に対応するか。 | 画像選択が必要なためfalse。 |
+| `idp.authn.External.forcedAuthenticationSupported` | boolean | `true` | ForceAuthn要求時にもExternal Flowを実行できるか。 | 自己管理Flowの再認証で必要。trueにしても通常のSP認証を常に再認証へ変更するものではない。 |
+| `idp.authn.MFA.reuseCondition` | Predicate bean ID | `shibboleth.Conditions.FALSE` | 過去に成功した`authn/MFA`全体の結果をSSOで再利用する条件。 | Shibbolethの通常既定値は`shibboleth.Conditions.TRUE`。2FAS-KW v1.3.5以降は、毎回最新の登録状態を確認するためFALSEを必須とする。 |
+
+`idp.authn.MFA.reuseCondition=shibboleth.Conditions.FALSE`は、MFA全体の過去結果をそのまま再利用せず、
+要求ごとにMFAの遷移判定を実行する設定である。これにより、認証後に利用者を`DISABLED`へ変更した場合や、
+MFA方式を変更した場合も最新状態を確認できる。Password、TOTP、WebAuthn等の下位Flow結果は各Flowの
+reuse conditionに従って再利用できるため、この設定だけで利用者へ毎回すべての入力を要求するわけではない。
+
+## mfa-authn-config.xml
+
+実ファイルは`/opt/shibboleth-idp/conf/authn/mfa-authn-config.xml`である。2FAS-KW v1.3.5以降では、
+次の遷移とbeanが必要である。
+
+| Item | Required setting | Purpose |
+| --- | --- | --- |
+| Password完了後 | `GraphicalMatrixMfaDecisionStrategy` | 登録状態、MFA方式、SP/IP方針を確認して次のFlowを選択する。 |
+| `authn/External`完了後 | `GraphicalMatrixMfaCompletionStrategy` | GraphicalMatrix完了時に利用者と登録状態を再確認する。 |
+| `authn/TOTP`完了後 | `GraphicalMatrixMfaCompletionStrategy` | TOTP完了時に利用者と登録状態を再確認する。 |
+| `authn/WebAuthn`完了後 | `GraphicalMatrixMfaCompletionStrategy` | WebAuthn完了時に利用者と登録状態を再確認する。 |
+| Completion bean | `io.github.yasakawa.faskw.GraphicalMatrixMfaCompletionStrategy` | MFA開始後のdisable、方式変更、別利用者結果の混入を拒否する。 |
+
+既存IdPでは配布物の`examples/mfa-authn-config.xml`でファイル全体を上書きせず、既存のTransitionMapへ
+必要な遷移とbeanだけを統合する。ローカル自動インストーラーは検証環境用の標準構成を配置する。
+
+## authn-events-flow.xml
+
+実ファイルは`/opt/shibboleth-idp/conf/authn/authn-events-flow.xml`である。v1.3.5以降では、
+MFA状態検査の拒否理由をShibboleth WebFlowで処理するため、次のend-stateとglobal transitionが必要である。
+
+| Event | Meaning |
+| --- | --- |
+| `GraphicalMatrixAccessDenied` | 利用者が未登録、`DISABLED`、MFA方式不整合等のため認証を拒否した。 |
+| `GraphicalMatrixServiceUnavailable` | DB/LDAP参照失敗や設定異常のため、安全に状態を確認できず認証を拒否した。 |
+
+既存のcustom event、end-state、global transitionを削除してはならない。配布物の
+`examples/authn-events-flow.xml`を参照し、上記2イベントだけを既存ファイルへ統合する。
+`local-unattended-install.sh`は既存要素を保持し、不足する2イベントだけを自動マージする。
 
 ## admin.properties
 
@@ -290,23 +347,37 @@ Shibboleth WebAuthn Plugin 1.3.0以上が必要である。
 
 | Property | Type | Default / Example | Description | Notes |
 | --- | --- | --- | --- | --- |
-| `idp.authn.webauthn.admin.registration.forceAuthn` | boolean | `false` | 登録FlowでSSO済みでも再認証するか。 | セキュリティ重視ならtrueを検討。 |
 | `idp.authn.webauthn.allowUntrustedAttestation` | boolean | `true` | 未信頼attestationを許可するか。 | FIDO Metadata運用時はfalseも検討。 |
 | `idp.authn.webauthn.registration.collectUsername` | boolean | `true` | 登録前にユーザー名を入力させるか。 | IdP認証済み属性利用時は設計次第。 |
 | `idp.authn.webauthn.admin.registration.authenticate` | boolean | `true` | 登録画面で認証を要求する。 | 基本true。 |
 | `idp.authn.webauthn.admin.registration.accessPolicy` | bean/policy | `AccessByCurrentUser` | 登録Flowアクセス制御。 | 利用者本人登録ならCurrentUser。 |
+| `idp.authn.webauthn.admin.registration.forceAuthn` | boolean | `true`（2FAS-KW配布設定） | credential追加前に既存SSO結果のみで通過させず再認証する。 | 公式Plugin既定値はfalse。2FAS-KWはPasswordと既存WebAuthn credentialの再確認のためtrueを使用する。 |
 | `idp.authn.webauthn.registration.residentKey` | enum | `preferred` | discoverable credential/passkey要求。 | `discouraged`, `preferred`, `required`。 |
 | `idp.authn.webauthn.registration.userVerification` | enum | `discouraged` | 登録時User Verification要求。 | パスキー/生体認証運用では`preferred`以上を検討。 |
 | `idp.authn.webauthn.registration.attestationConveyancePreference` | enum | `none` | attestation要求。 | `none`, `indirect`, `direct`, `enterprise`。 |
 | `idp.authn.webauthn.registration.nicknameRequired` | boolean | `true` | credential nickname必須。 | 複数デバイス管理に有用。 |
+| `idp.authnwebauthn.registration.allowInline` | boolean | `false`（2FAS-KW配布設定） | `authn/WebAuthn`画面内の初回credential登録リンクを表示するか。 | 公式Plugin既定値は`true`。DBの`mfa_method`で第二要素を固定する標準構成では認証循環を避けるため`false`を維持する。property名は公式Plugin仕様どおり`authnwebauthn`の間に`.`を入れない。 |
 | `idp.authn.webauthn.admin.management.accessPolicy` | bean/policy | `AccessByAdmin` | 管理画面アクセス制御。 | 管理者用Flow。 |
 
 プロファイル内の`shibboleth.authn.WebAuthn.audit.AddKeyAuditSuccessHook`は、credential保存成功後に
 2FAS-KWのMFA方式を`WebAuthn`へ切り替えるための統合ポイントである。2FAS-KW Pluginが
 このbeanを提供する。独自hookを使う場合は上書きせず、2FAS-KW hookも必ず呼び出す複合hookとする。
 このhookが呼ばれない場合、credentialは保存されても2FAS-KWのMFA方式は登録前のままとなる。
+自己管理画面からの方式変更で既存credentialがある場合は、2FAS-KWが公式
+CredentialRepositoryの`getRegistrationsByUsername`で存在を確認し、新規登録Flowを開始せず方式を変更する。
+この検査は個別のJDBCテーブルやLDAPレイアウトを直接参照せず、現在のWebAuthn StorageServiceに従う。
+
+`allowInline=false`でも、2FAS-KW自己管理画面から公式登録Flowへ移る処理と、queryなしの
+`/idp/profile/admin/webauthn-registration`による追加登録は無効にならない。すでにWebAuthn方式の
+利用者が追加登録する場合は、WebAuthn認証画面の`Register a new credential`ではなく
+`Login with passkey or security key`を使い、現在のcredentialで登録Flowの本人認証を完了する。
+現在のcredentialを
+利用できない場合はinline登録を復旧手段にせず、管理者が本人確認後に一時的にGraphicalMatrixへ戻し、
+自己管理画面からWebAuthnを再登録する。
 
 詳細項目は配布ファイル `webauthn-registration.properties` のコメントを参照する。
+画面overrideは`/opt/shibboleth-idp/views/webauthn/webauthn-authn.vm`に配置する。配布版は
+登録Requesterの再認証画面で専用説明を表示し、再帰的な追加登録リンクを表示しない。
 
 ## webauthn-metadata.properties
 
@@ -355,12 +426,12 @@ GraphicalMatrix配布ZIPへは同梱しない。
 
 | Component | Version | Included | Required | Purpose | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Shibboleth IdP API | `5.2.2` | no | yes | IdP認証Flow、Profile、Admin API連携。 | IdP本体のバージョンと合わせる。 |
-| OpenSAML API | `5.2.2` | no | yes | Shibboleth IdPが利用するSAML/Profile API。 | IdP runtime側が提供する。 |
-| Shibboleth shared support | `9.2.2` | no | yes | Shibboleth共通サポートAPI。 | IdP runtime側が提供する。 |
-| Jakarta Servlet API | `6.0.0` | no | yes | Servlet実装用API。 | Jetty 12 / IdP runtime側が提供する。 |
-| SLF4J API | `2.0.13` | no | yes | ログAPI。 | runtime側のロギング構成と合わせる。 |
-| Shibboleth TOTP Plugin API/Impl | `2.3.1` | no | TOTP利用時 | TOTP認証方式との連携。 | TOTPを選択肢に入れる場合は別途導入する。 |
+| Shibboleth IdP API | `5.2.3` | no | yes | IdP認証Flow、Profile、Admin API連携。 | IdP本体のバージョンと合わせる。 |
+| OpenSAML API | `5.2.3` | no | yes | Shibboleth IdPが利用するSAML/Profile API。 | IdP runtime側が提供する。 |
+| Shibboleth shared support | `9.2.3` | no | yes | Shibboleth共通サポートAPI。 | IdP runtime側が提供する。 |
+| Jakarta Servlet API | `6.1.0` | no | yes | Servlet実装用API。 | Jetty 12 / IdP runtime側が提供する。 |
+| SLF4J API | `2.0.18` | no | yes | ログAPI。 | runtime側のロギング構成と合わせる。 |
+| Shibboleth TOTP Plugin API/Impl | `2.3.2` | no | TOTP利用時 | TOTP認証方式との連携。 | TOTPを選択肢に入れる場合は別途導入する。 |
 
 ### Bundled CLI / Shell Tools
 

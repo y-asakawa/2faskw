@@ -365,6 +365,7 @@ check_package() {
   need_file "$PACKAGE_DIR/conf/authn/webauthn.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/authn/webauthn-registration.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/authn/webauthn-metadata.properties.idpnew"
+  need_file "$PACKAGE_DIR/views/webauthn/webauthn-authn.vm.idpnew"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-db.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-sp.sh"
   need_file "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh"

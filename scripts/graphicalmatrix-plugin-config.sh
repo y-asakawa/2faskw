@@ -366,6 +366,9 @@ install_template "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.i
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/assets/graphicalmatrix.js"
 
+install_template "$PACKAGE_DIR/views/webauthn/webauthn-authn.vm.idpnew" \
+  "$IDP_HOME/views/webauthn/webauthn-authn.vm"
+
 run_sudo mkdir -p "$IDP_HOME/edit-webapp/graphicalmatrix/graphicals"
 for src in "$PACKAGE_DIR"/conf/graphicalmatrix/graphicals/*; do
   install_copy "$src" "$IDP_HOME/edit-webapp/graphicalmatrix/graphicals/$(basename "$src")"

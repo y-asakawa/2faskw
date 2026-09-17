@@ -18,14 +18,10 @@ package io.github.yasakawa.faskw;
 
 import java.io.FileInputStream;
 import java.util.Properties;
-import java.util.Set;
 import java.util.function.Function;
 
 import jakarta.servlet.http.HttpServletRequest;
-import net.shibboleth.idp.authn.AuthenticationResult;
-import net.shibboleth.idp.authn.context.AuthenticationContext;
 import net.shibboleth.idp.authn.context.MultiFactorAuthenticationContext;
-import net.shibboleth.idp.authn.principal.UsernamePrincipal;
 import net.shibboleth.profile.context.RelyingPartyContext;
 import net.shibboleth.shared.servlet.impl.HttpServletRequestResponseContext;
 import org.opensaml.profile.context.ProfileRequestContext;
@@ -34,6 +30,8 @@ import org.slf4j.LoggerFactory;
 
 public final class GraphicalMatrixMfaDecisionStrategy implements Function<ProfileRequestContext, String> {
     private static final Logger LOG = LoggerFactory.getLogger(GraphicalMatrixMfaDecisionStrategy.class);
+    public static final String ACCESS_DENIED_EVENT = "GraphicalMatrixAccessDenied";
+    public static final String SERVICE_UNAVAILABLE_EVENT = "GraphicalMatrixServiceUnavailable";
     private static final String EXTERNAL_FLOW = "authn/External";
     private static final String TOTP_FLOW = "authn/TOTP";
     private static final String WEBAUTHN_FLOW = "authn/WebAuthn";
@@ -50,97 +48,114 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         final String relyingPartyId = relyingPartyId(input);
         final String clientIp = clientIp(policy);
 
-        if (isSelfServiceProfile(input)) {
-            LOG.info("MFA required for 2FAS-KW self-service profile: ip={}", clientIp);
-            return selectFlow(input, GraphicalMatrixSelfServiceAuthentication.PROFILE_ID, clientIp);
-        }
-
         final GraphicalMatrixMfaPolicy mfaPolicy;
         try {
             mfaPolicy = GraphicalMatrixMfaPolicy.parse(policy);
         } catch (IllegalArgumentException ex) {
-            LOG.error("MFA policy is invalid; requiring MFA: sp={}, ip={}, error={}",
+            LOG.error("MFA policy is invalid; denying authentication: sp={}, ip={}, error={}",
                 relyingPartyId, clientIp, ex.getMessage());
-            return selectFlow(input, relyingPartyId, clientIp);
+            return deny(input, SERVICE_UNAVAILABLE_EVENT);
         }
 
-        final GraphicalMatrixMfaPolicy.Decision decision = mfaPolicy.evaluate(relyingPartyId, clientIp);
+        final GraphicalMatrixMfaPolicy.Decision decision;
+        if (isSelfServiceProfile(input)) {
+            LOG.info("MFA required for 2FAS-KW self-service profile: ip={}", clientIp);
+            decision = new GraphicalMatrixMfaPolicy.Decision(
+                GraphicalMatrixMfaPolicy.Outcome.REQUIRE, "selfService");
+        } else {
+            decision = mfaPolicy.evaluate(relyingPartyId, clientIp);
+        }
         LOG.info("MFA policy decision: rule={}, result={}, sp={}, ip={}",
             decision.rule(), decision.outcome().name().toLowerCase(), relyingPartyId, clientIp);
-        return decision.outcome() == GraphicalMatrixMfaPolicy.Outcome.REQUIRE
-            ? selectFlow(input, relyingPartyId, clientIp) : null;
+        return selectFlow(input, relyingPartyId, clientIp, decision, mfaPolicy);
     }
 
     private static String selectFlow(final ProfileRequestContext input, final String relyingPartyId,
-            final String clientIp) {
-        final String user = passwordUsername(input);
+            final String clientIp, final GraphicalMatrixMfaPolicy.Decision decision,
+            final GraphicalMatrixMfaPolicy policy) {
+        final String user = GraphicalMatrixMfaSubjectSupport.passwordUsername(input);
         if (user.isEmpty()) {
-            LOG.warn("MFA method could not be resolved because password username was unavailable; using GraphicalMatrix");
-            return EXTERNAL_FLOW;
+            LOG.warn("MFA enrollment could not be resolved because the password subject was not unique");
+            return deny(input, ACCESS_DENIED_EVENT);
         }
 
         final GraphicalMatrixMfaSettings settings;
         try {
             settings = GraphicalMatrixRuntime.repository().findMfaSettings(user);
         } catch (Exception ex) {
-            LOG.warn("MFA method DB lookup failed for user={}, using GraphicalMatrix: {}", user, ex.toString());
-            return EXTERNAL_FLOW;
+            LOG.warn("MFA enrollment lookup failed for user={}: {}", user, ex.toString());
+            return deny(input, SERVICE_UNAVAILABLE_EVENT);
         }
 
-        final String method = settings != null ? settings.getMethod() : null;
-        final String normalized = normalizeMethod(method);
+        if (settings == null) {
+            if (decision.outcome() == GraphicalMatrixMfaPolicy.Outcome.BYPASS
+                    && policy.missingEnrollmentPolicy()
+                        == GraphicalMatrixMfaPolicy.MissingEnrollmentPolicy.ALLOW_ON_BYPASS) {
+                LOG.warn("MFA bypass compatibility allowed a missing enrollment: user={}, sp={}, ip={}, rule={}",
+                    user, relyingPartyId, clientIp, decision.rule());
+                return null;
+            }
+            LOG.warn("MFA access denied because enrollment is missing: user={}, sp={}, ip={}, rule={}",
+                user, relyingPartyId, clientIp, decision.rule());
+            return deny(input, ACCESS_DENIED_EVENT);
+        }
+        if (!settings.hasValidStatus() || !settings.isActive()) {
+            LOG.warn("MFA access denied because enrollment is not active: user={}, sp={}, ip={}, status={}",
+                user, relyingPartyId, clientIp, settings.getStatus());
+            return deny(input, ACCESS_DENIED_EVENT);
+        }
+
+        final String method = settings.getMethod();
+        final String normalized = GraphicalMatrixMfaCompletionStrategy.normalizeMethod(method);
+        if (!"TOTP".equals(normalized) && !"GRAPHICALMATRIX".equals(normalized)
+                && !"WEBAUTHN".equals(normalized)) {
+            LOG.warn("MFA access denied because method is missing or unsupported: user={}, method='{}'",
+                user, trim(method));
+            return deny(input, ACCESS_DENIED_EVENT);
+        }
+        if (decision.outcome() == GraphicalMatrixMfaPolicy.Outcome.BYPASS) {
+            LOG.info("MFA bypass accepted after active enrollment check: user={}, sp={}, ip={}, rule={}",
+                user, relyingPartyId, clientIp, decision.rule());
+            return null;
+        }
+
+        final String flow;
         if ("TOTP".equals(normalized)) {
             if (!settings.isTotpActive()) {
-                LOG.info("MFA method decision: user={}, sp={}, ip={}, method=TOTP, status={}, seedSet={}, flow={}",
+                LOG.warn("MFA access denied because TOTP is not active: user={}, sp={}, ip={}, status={}, seedSet={}",
                     user, relyingPartyId, clientIp, settings.getTotpStatus(),
-                    settings.isTotpSeedSet(), EXTERNAL_FLOW);
-                return EXTERNAL_FLOW;
+                    settings.isTotpSeedSet());
+                return deny(input, ACCESS_DENIED_EVENT);
             }
-            LOG.info("MFA method decision: user={}, sp={}, ip={}, method=TOTP, flow={}",
-                user, relyingPartyId, clientIp, TOTP_FLOW);
-            return TOTP_FLOW;
+            flow = TOTP_FLOW;
+        } else if ("GRAPHICALMATRIX".equals(normalized)) {
+            if (!settings.isSequenceSet()) {
+                LOG.warn("MFA access denied because GraphicalMatrix sequence is missing: user={}, sp={}, ip={}",
+                    user, relyingPartyId, clientIp);
+                return deny(input, ACCESS_DENIED_EVENT);
+            }
+            flow = EXTERNAL_FLOW;
+        } else {
+            flow = WEBAUTHN_FLOW;
         }
 
-        if ("GRAPHICALMATRIX".equals(normalized)) {
-            LOG.info("MFA method decision: user={}, sp={}, ip={}, method=GraphicalMatrix, flow={}",
-                user, relyingPartyId, clientIp, EXTERNAL_FLOW);
-            return EXTERNAL_FLOW;
+        final MultiFactorAuthenticationContext mfaCtx = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
+        if (mfaCtx == null) {
+            return deny(input, SERVICE_UNAVAILABLE_EVENT);
         }
-
-        if ("WEBAUTHN".equals(normalized)) {
-            LOG.info("MFA method decision: user={}, sp={}, ip={}, method={}, flow={}",
-                user, relyingPartyId, clientIp, normalized, WEBAUTHN_FLOW);
-            return WEBAUTHN_FLOW;
-        }
-
-        LOG.warn("MFA method is missing or unsupported for user={}, method='{}'; using GraphicalMatrix",
-            user, trim(method));
-        return EXTERNAL_FLOW;
+        mfaCtx.addSubcontext(new GraphicalMatrixMfaGuardContext(
+            user, flow, normalized, settings.getStateVersion()), true);
+        LOG.info("MFA method decision: user={}, sp={}, ip={}, method={}, flow={}, stateVersion={}",
+            user, relyingPartyId, clientIp, normalized, flow, settings.getStateVersion());
+        return flow;
     }
 
-    private static String passwordUsername(final ProfileRequestContext input) {
-        final AuthenticationContext authnCtx =
-            input != null ? input.getSubcontext(AuthenticationContext.class) : null;
-        final MultiFactorAuthenticationContext mfaCtx =
-            authnCtx != null ? authnCtx.getSubcontext(MultiFactorAuthenticationContext.class) : null;
-        final AuthenticationResult pwResult =
-            mfaCtx != null ? mfaCtx.getActiveResults().get("authn/Password") : null;
-        if (pwResult != null && pwResult.getSubject() != null) {
-            final Set<UsernamePrincipal> usernames =
-                pwResult.getSubject().getPrincipals(UsernamePrincipal.class);
-            if (!usernames.isEmpty()) {
-                return trim(usernames.iterator().next().getName());
-            }
+    private static String deny(final ProfileRequestContext input, final String event) {
+        final MultiFactorAuthenticationContext mfaCtx = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
+        if (mfaCtx != null) {
+            mfaCtx.setEvent(event);
         }
-        return "";
-    }
-
-    private static String normalizeMethod(final String method) {
-        String value = trim(method);
-        if (value.regionMatches(true, 0, "MFA:", 0, 4)) {
-            value = value.substring(4).trim();
-        }
-        return value.toUpperCase();
+        return null;
     }
 
     private static Properties loadPolicy() {

@@ -1854,12 +1854,14 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-delete USER --creden
 # 特定credentialだけ削除する
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-delete USER --credential-id CREDENTIAL_ID --apply
 
-# GraphicalMatrix管理ユーザー削除時にWebAuthn credentialも削除する場合
-sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh delete USER --with-webauthn --apply
+# enrollmentと関連WebAuthn credentialを物理削除する
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh delete USER
 ```
 
-既存の`delete USER`は、初期状態では`graphicalmatrix_enrollment`だけを削除する。
-WebAuthn credentialまで消す場合は、事故防止のため`--with-webauthn --apply`を要求する。
+v1.3.5以降の`delete USER`は、先にenrollmentを`DISABLED`へ変更し、PostgreSQL
+StorageRecords内の関連WebAuthn credentialを削除した後でenrollment行を物理削除する。
+credential削除に失敗した場合はDISABLED行を残す。旧`--with-webauthn --apply`は互換入力として
+受け付けるが非推奨である。Provisioning CSVの`D`は物理削除ではなくDISABLEDへの変更を維持する。
 
 
 ## 16. テスト用SP連携確認

@@ -105,14 +105,20 @@ incorrect at threshold
 
 ```text
 select TOTP in self-service
-  -> Repository.prepareTotpRegistration()
-  -> generate seed
-  -> protected seed + PENDING state
+  -> Repository.beginTotpRegistration(user, verifiedStateVersion, now, fixedTtl)
+  -> atomically store protected seed + registration ID + fixed expiry + PENDING state
+  -> bind user, registration ID, post-begin state version and expiry to HTTP session
   -> render QR/otpauth information
   -> user enters current code
-  -> Repository.verifyAndActivateTotp()
-  -> ACTIVE state
+  -> Repository.verifyTotpRegistration(binding, code, now)
+  -> activate only when the complete binding still matches
+  -> ACTIVE state and clear registration ID/expiry
 ```
+
+誤code時は同じBindingで確認したseedだけを再表示し、登録期限は延長しません。登録中に管理者が
+方式変更、reset、disable等を行った場合は、管理操作が登録IDを消去して`state_version`を増加させるため、
+古い登録画面からの確認・取消はSTALEとして拒否されます。取消も
+`cancelTotpRegistration(binding, config, now)`による条件付き更新です。
 
 登録確認が成功した後の通常loginは`authn/TOTP`へ進みます。通常認証のcode検証、window、
 authentication result lifetimeなどはShibboleth TOTP Pluginの責務です。2FAS-KWは
@@ -220,4 +226,3 @@ access判定用に承認した属性は、属性release profileへ追加しな�
 - `GraphicalMatrixWebAuthnRegistrationSessionTest`
 - `GraphicalMatrixLdapLoginRateLimiterTest`
 - `GraphicalMatrixSpAccessPolicyTest`
-

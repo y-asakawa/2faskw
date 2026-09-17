@@ -253,6 +253,10 @@ if [[ "$MAVEN_ARTIFACT_ID" != "$ARTIFACT_ID" ]]; then
   exit 1
 fi
 
+"$PYTHON" "$ROOT_DIR/scripts/check-jar-manifest-version.py" \
+  "$ROOT_DIR/target/${ARTIFACT_ID}-${VERSION}.jar" \
+  "$VERSION"
+
 MVN="$MVN" \
 PYTHON="$PYTHON" \
 VERSION_CONFIG="$VERSION_CONFIG" \
@@ -304,6 +308,7 @@ mkdir -p \
   "$DIST_DIR/webapp/WEB-INF/lib" \
   "$DIST_DIR/bootstrap" \
   "$DIST_DIR/conf/authn" \
+  "$DIST_DIR/views/webauthn" \
   "$DIST_DIR/conf/graphicalmatrix/assets" \
   "$DIST_DIR/conf/graphicalmatrix/views" \
   "$DIST_DIR/conf/graphicalmatrix/graphicals" \
@@ -339,6 +344,8 @@ cp postgresql-schema.sql "$DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
 cp webauthn.properties "$DIST_DIR/conf/authn/webauthn.properties.idpnew"
 cp webauthn-registration.properties "$DIST_DIR/conf/authn/webauthn-registration.properties.idpnew"
 cp webauthn-metadata.properties "$DIST_DIR/conf/authn/webauthn-metadata.properties.idpnew"
+cp views/webauthn/webauthn-authn.vm \
+  "$DIST_DIR/views/webauthn/webauthn-authn.vm.idpnew"
 cp assets/graphicalmatrix.css "$DIST_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
 cp assets/graphicalmatrix.js "$DIST_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew"
 cp views/*.html "$DIST_DIR/conf/graphicalmatrix/views/"
@@ -371,6 +378,7 @@ chmod 0755 \
 
 cp web.xml "$DIST_DIR/examples/web.xml.current-poc.xml"
 cp mfa-authn-config.xml "$DIST_DIR/examples/mfa-authn-config.xml"
+cp examples/authn-events-flow.xml "$DIST_DIR/examples/authn-events-flow.xml"
 cp totp-authn-config.xml "$DIST_DIR/examples/totp-authn-config.xml"
 cp webauthn-management-config.xml "$DIST_DIR/examples/webauthn-management-config.xml"
 cp webauthn-registration-config.xml "$DIST_DIR/examples/webauthn-registration-config.xml"

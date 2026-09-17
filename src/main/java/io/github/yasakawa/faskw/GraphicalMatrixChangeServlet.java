@@ -728,6 +728,47 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             return;
         }
 
+        if ("TOTP".equals(method)) {
+            try {
+                final GraphicalMatrixTotpEnrollmentResult result =
+                    repository.beginTotpRegistration(user, expectedStateVersion.longValue(), now,
+                        config.getTotpRegistrationTtlMillis());
+                audit.log("TOTP_REGISTER_START", user, result.getAuditResult(), null,
+                    result.getAuditDetail(), request);
+                if (result.getStatus() == GraphicalMatrixTotpEnrollmentResult.Status.LOCKED) {
+                    clearChange(session);
+                    GraphicalMatrixStartServlet.renderLocked(request, response,
+                        result.getLockedUntil());
+                    return;
+                }
+                if (result.getStatus() != GraphicalMatrixTotpEnrollmentResult.Status.STARTED) {
+                    clearChange(session);
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                        "TOTP登録を開始できません。",
+                        "登録状態が変更されました。最初からやり直してください。");
+                    return;
+                }
+                final String enrollmentKey = GraphicalMatrixSupport.token();
+                final String enrollmentCsrf = GraphicalMatrixSupport.token();
+                clearChange(session);
+                GraphicalMatrixTotpEnrollmentSession.initialize(session,
+                    result.getBinding(), enrollmentKey, enrollmentCsrf);
+                GraphicalMatrixStartServlet.renderTotpRegistration(request, response,
+                    enrollmentKey, user, result.getSeed(), enrollmentCsrf, null);
+                return;
+            } catch (Exception ex) {
+                clearChange(session);
+                audit.log("TOTP_REGISTER_START", user, "DB_ERROR", null,
+                    ex.getClass().getSimpleName(), request);
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "TOTP登録を開始できません。",
+                    "時間をおいて再度試すか、管理者に連絡してください。");
+                return;
+            }
+        }
+
         try {
             if (!repository.updateMfaMethodIfCurrent(user, method, now, expectedStateVersion.longValue())) {
                 audit.log("CHANGE_METHOD_SAVE", user, "ENROLL_REQUIRED", null,
@@ -747,43 +788,6 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         audit.log("CHANGE_METHOD_SAVE", user, "OK", null, "mfa_method=" + method, request);
-        if ("TOTP".equals(method)) {
-            try {
-                final String seed = repository.prepareTotpRegistration(user, now);
-                if (seed == null || seed.isEmpty()) {
-                    clearChange(session);
-                    audit.log("TOTP_REGISTER_START", user, "ENROLL_REQUIRED", null,
-                        "totp_registration_unavailable", request);
-                    GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                        "TOTP登録を開始できません。",
-                        "登録状態が変更されました。最初からやり直してください。");
-                    return;
-                }
-                final String enrollmentKey = GraphicalMatrixSupport.token();
-                final String enrollmentCsrf = GraphicalMatrixSupport.token();
-                clearChange(session);
-                session.setAttribute("totpEnroll.key", enrollmentKey);
-                session.setAttribute("totpEnroll.user", user);
-                session.setAttribute("totpEnroll.csrfToken", enrollmentCsrf);
-                session.setAttribute("totpEnroll.expiresAt",
-                    Long.valueOf(now + config.getChallengeMillis()));
-                session.setAttribute("totpEnroll.used", Boolean.FALSE);
-                session.setAttribute("totpEnroll.selfServiceAuthorized", Boolean.TRUE);
-                audit.log("TOTP_REGISTER_START", user, "OK", null,
-                    "authorization=self_service", request);
-                GraphicalMatrixStartServlet.renderTotpRegistration(request, response,
-                    enrollmentKey, user, seed, enrollmentCsrf, null);
-                return;
-            } catch (Exception ex) {
-                clearChange(session);
-                audit.log("TOTP_REGISTER_START", user, "DB_ERROR", null,
-                    ex.getClass().getSimpleName(), request);
-                GraphicalMatrixStartServlet.renderUnavailable(request, response,
-                    "TOTP登録を開始できません。",
-                    "時間をおいて再度試すか、管理者に連絡してください。");
-                return;
-            }
-        }
         clearChange(session);
         renderComplete(request, response, config, user,
             "MFA方式をGraphicalMatrixに変更しました。次回ログインからGraphicalMatrixを利用します。");
@@ -818,12 +822,45 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         final String expectedMethod = enrollment.getMfaMethod();
+        final GraphicalMatrixWebAuthnCredentialLookup.Result credentialLookup =
+            GraphicalMatrixWebAuthnCredentialLookup.lookup(request.getServletContext(), user);
+        if (credentialLookup == GraphicalMatrixWebAuthnCredentialLookup.Result.PRESENT) {
+            try {
+                if (!repository.updateMfaMethodIfCurrent(
+                        user, "WebAuthn", now, expectedStateVersion)) {
+                    audit.log("WEBAUTHN_REGISTER_ACTIVATE", user, "ENROLL_REQUIRED", null,
+                        "existing_credential,enrollment_or_method_changed", request);
+                    clearChange(session);
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                        "MFA方式をWebAuthnに変更できません。",
+                        "登録状態が変更されました。最初からやり直してください。");
+                    return;
+                }
+                audit.log("WEBAUTHN_REGISTER_ACTIVATE", user, "OK", null,
+                    "existing_credential,mfa_method=WebAuthn", request);
+                clearChange(session);
+                renderComplete(request, response, config, user,
+                    "登録済みcredentialを使用し、MFA方式をWebAuthnに変更しました。"
+                        + "次回ログインからWebAuthnを利用します。");
+                return;
+            } catch (Exception ex) {
+                audit.log("WEBAUTHN_REGISTER_ACTIVATE", user, "DB_ERROR", null,
+                    "existing_credential," + ex.getClass().getSimpleName(), request);
+                GraphicalMatrixStartServlet.renderUnavailable(request, response,
+                    "MFA方式をWebAuthnに変更できません。",
+                    "時間をおいて再度試すか、管理者に連絡してください。");
+                return;
+            }
+        }
+
         clearChange(session);
         GraphicalMatrixWebAuthnRegistrationSession.initialize(session, user, expectedMethod,
             now + config.getSelfServiceTransactionMillis());
         audit.log("WEBAUTHN_REGISTER_START", user, "OK", null,
             "authorization=verified_change_session,current_method="
-                + normalizeMethod(expectedMethod), request);
+                + normalizeMethod(expectedMethod) + ",credential_lookup="
+                + credentialLookup.name().toLowerCase(Locale.ROOT), request);
         response.sendRedirect(response.encodeRedirectURL(request.getContextPath()
             + GraphicalMatrixWebAuthnRegistrationSession.REGISTRATION_PATH));
     }

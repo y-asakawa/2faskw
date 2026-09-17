@@ -188,6 +188,9 @@ TOTPを利用する場合は、Shibboleth TOTP Pluginとの連携確認が必要
 - [ ] `mfa_method = TOTP` のユーザーだけTOTPへ分岐する
 - [ ] 初回ログインでQR登録画面が表示される
 - [ ] QR登録後にTOTP認証が成功する
+- [ ] `graphicalmatrix.totp.registrationTtlSeconds`が30〜900秒で、誤コード再試行により期限が延長されない
+- [ ] 管理者による方式変更・reset・disable後、変更前のTOTP登録画面から確認・取消できない
+- [ ] v1.3.4以前の`PENDING`を`invalidate-pending-totp`で確認し、必要な失効・個別復旧を完了した
 - [ ] `reset-totp USER` またはAPI `totp-reset` で再登録状態に戻せる
 - [ ] TOTP seedをログに出していない
 - [ ] TOTP seedの保存先と保護方式を確認した
@@ -216,8 +219,8 @@ Plugin更新、設定変更、DB変更を行う前に確認してください。
 
 - [ ] 作業日時と作業者を記録した
 - [ ] 作業対象ノードを記録した
-- [ ] IdP設定バックアップを取得した
-- [ ] DBバックアップを取得した
+- [ ] [BACKUP-RESTORE.md](./BACKUP-RESTORE.md)に従ってIdP設定バックアップを取得した
+- [ ] DB/LDAPとstorage-format secretを同一世代としてバックアップした
 - [ ] 現在のPlugin ZIPを退避した
 - [ ] 新しいPlugin ZIPの `PACKAGE-MANIFEST.sha256` を確認した
 - [ ] 現在の `graphicalmatrix.properties` を退避した
@@ -225,7 +228,7 @@ Plugin更新、設定変更、DB変更を行う前に確認してください。
 - [ ] 現在の `api.properties` を退避した
 - [ ] 現在の `web.xml` を退避した
 - [ ] DB移行を伴う場合は `DB-MIGRATION.md` の作業記録テンプレートを準備した
-- [ ] rollback手順を確認した
+- [ ] 隔離環境へのrestore確認とrollback手順を確認した
 - [ ] メンテナンス通知の要否を確認した
 
 ## 8. 変更作業後チェック
@@ -244,6 +247,9 @@ Plugin更新、設定変更、DB変更を行う前に確認してください。
 - [ ] `graphicalmatrix.securityHeaders.enabled=true`かつ`cspMode=enforce`である
 - [ ] 2FAS-KW HTML応答にCSP、`X-Frame-Options: DENY`、`nosniff`、`no-referrer`、`no-store`が1値ずつ付く
 - [ ] 管理API応答に`nosniff`と`no-store`が付き、CSS・JavaScript・画像の個別cache方針は維持される
+- [ ] DashboardのVIEWER／OPERATORでは`API_`および未分類イベントが汎用検索・正規表現・集計に現れない
+- [ ] DashboardのVIEWER／OPERATORでは現在ロック状態が利用不可表示となり、AUDITOR以上では確認できる
+- [ ] CSV provisioningのdry-runとapplyで画像sequenceが子Java processのargvに含まれない
 - [ ] 独自templateにinline script、inline style、event属性、`javascript:` URLがない
 - [ ] Shibboleth標準SAML POSTとSimpleSAMLphp標準画面に2FAS-KW固有CSPを誤適用していない
 - [ ] 誤ったGraphicalMatrix選択でリトライできる

@@ -116,6 +116,8 @@ public final class GraphicalMatrixConfigCheckTool {
             + " allow_duplicates=" + config.isDuplicateSelectionsAllowed());
         ok("aliases valid: count=" + config.getAliases().size());
         ok("challenge valid: seconds=" + config.getChallengeSeconds());
+        ok("TOTP registration valid: ttl_seconds="
+            + config.getTotpRegistrationTtlSeconds());
         checkLockout(config);
         checkLdapRateLimit(config);
         ok("self-service valid: enabled=" + config.isSelfServiceEnabled()
@@ -129,6 +131,7 @@ public final class GraphicalMatrixConfigCheckTool {
         checkSaveData(idpHome, properties);
         checkStorage(idpHome, config, properties);
         checkMfaPolicy(idpHome);
+        checkMfaFlowGuards(idpHome);
         checkSpManagement(idpHome);
 
         summary();
@@ -407,13 +410,68 @@ public final class GraphicalMatrixConfigCheckTool {
             return;
         }
 
-        ok("MFA policy valid: default=" + policy.defaultPolicy() + " order=" + policy.orderText());
+        ok("MFA policy valid: default=" + policy.defaultPolicy() + " order=" + policy.orderText()
+            + " missing_enrollment=" + policy.missingEnrollmentPolicy().name().toLowerCase(Locale.ROOT));
+        if (policy.missingEnrollmentPolicy()
+                == GraphicalMatrixMfaPolicy.MissingEnrollmentPolicy.ALLOW_ON_BYPASS) {
+            warn("missing MFA enrollments are allowed by bypass rules; physical delete is disabled");
+        }
         warnMfaPolicyOverlap("forceSPs and bypassSPs",
             intersection(policy.forceSPs(), policy.bypassSPs()));
         warnMfaPolicyOverlap("forceSPs and bypassSpCidrs",
             intersection(policy.forceSPs(), policy.bypassSpEntityIds()));
         warnMfaPolicyOverlap("bypassSPs and requiredSPs",
             intersection(policy.bypassSPs(), policy.requiredSPs()));
+    }
+
+    private void checkMfaFlowGuards(final String idpHome) {
+        final Path mfaConfig = Path.of(idpHome, "conf", "authn", "mfa-authn-config.xml");
+        checkContains(mfaConfig, "MFA completion guard", List.of(
+            "GraphicalMatrixMfaCompletionStrategy",
+            "key=\"authn/External\"",
+            "key=\"authn/TOTP\"",
+            "key=\"authn/WebAuthn\""));
+
+        final Path events = Path.of(idpHome, "conf", "authn", "authn-events-flow.xml");
+        checkContains(events, "MFA failure events", List.of(
+            "id=\"GraphicalMatrixAccessDenied\"",
+            "id=\"GraphicalMatrixServiceUnavailable\""));
+
+        final Path authnProperties = Path.of(idpHome, "conf", "authn", "authn.properties");
+        if (!Files.isRegularFile(authnProperties) || !Files.isReadable(authnProperties)) {
+            fail("MFA reuse condition cannot be verified; file missing or unreadable: " + authnProperties);
+            return;
+        }
+        final Properties properties = new Properties();
+        try (InputStream in = Files.newInputStream(authnProperties)) {
+            properties.load(in);
+            final String value = properties.getProperty("idp.authn.MFA.reuseCondition", "").trim();
+            if (!"shibboleth.Conditions.FALSE".equals(value)) {
+                fail("idp.authn.MFA.reuseCondition must be shibboleth.Conditions.FALSE");
+            } else {
+                ok("MFA result reuse disabled for current-state enforcement");
+            }
+        } catch (Exception ex) {
+            fail("MFA reuse condition inspection failed: " + rootMessage(ex));
+        }
+    }
+
+    private void checkContains(final Path path, final String label, final List<String> required) {
+        if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
+            fail(label + " config missing or unreadable: " + path);
+            return;
+        }
+        try {
+            final String text = Files.readString(path);
+            final List<String> missing = required.stream().filter(value -> !text.contains(value)).toList();
+            if (missing.isEmpty()) {
+                ok(label + " configured");
+            } else {
+                fail(label + " config is incomplete: " + path + " missing=" + String.join(",", missing));
+            }
+        } catch (IOException ex) {
+            fail(label + " inspection failed: " + rootMessage(ex));
+        }
     }
 
     private void checkSpManagement(final String idpHome) {

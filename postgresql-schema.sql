@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
   totp_seed VARCHAR(255),
   totp_status VARCHAR(32) NOT NULL DEFAULT 'UNREGISTERED',
   totp_registered_at BIGINT NOT NULL DEFAULT 0,
+  totp_registration_id VARCHAR(64),
+  totp_registration_expires_at BIGINT NOT NULL DEFAULT 0,
   last_success_at BIGINT NOT NULL DEFAULT 0,
   force_sequence_change INTEGER NOT NULL DEFAULT 0,
   state_version BIGINT NOT NULL DEFAULT 0,
@@ -18,6 +20,10 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 
 ALTER TABLE graphicalmatrix_enrollment
   ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS totp_registration_id VARCHAR(64);
+ALTER TABLE graphicalmatrix_enrollment
+  ADD COLUMN IF NOT EXISTS totp_registration_expires_at BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_graphicalmatrix_enrollment_status
   ON graphicalmatrix_enrollment (status);

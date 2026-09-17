@@ -17,14 +17,26 @@
 package io.github.yasakawa.faskw;
 
 public final class GraphicalMatrixMfaSettings {
+    private final String status;
     private final String method;
     private final String totpStatus;
     private final boolean totpSeedSet;
+    private final boolean sequenceSet;
+    private final long stateVersion;
 
-    public GraphicalMatrixMfaSettings(final String method, final String totpStatus, final boolean totpSeedSet) {
+    public GraphicalMatrixMfaSettings(final String status, final String method,
+            final String totpStatus, final boolean totpSeedSet,
+            final boolean sequenceSet, final long stateVersion) {
+        this.status = status;
         this.method = method;
         this.totpStatus = totpStatus;
         this.totpSeedSet = totpSeedSet;
+        this.sequenceSet = sequenceSet;
+        this.stateVersion = stateVersion;
+    }
+
+    public String getStatus() {
+        return status;
     }
 
     public String getMethod() {
@@ -37,6 +49,26 @@ public final class GraphicalMatrixMfaSettings {
 
     public boolean isTotpSeedSet() {
         return totpSeedSet;
+    }
+
+    public boolean isSequenceSet() {
+        return sequenceSet;
+    }
+
+    public long getStateVersion() {
+        return stateVersion;
+    }
+
+    public boolean isActive() {
+        return "ACTIVE".equals(status);
+    }
+
+    public boolean isDisabled() {
+        return "DISABLED".equals(status);
+    }
+
+    public boolean hasValidStatus() {
+        return isActive() || isDisabled();
     }
 
     public boolean isTotpActive() {

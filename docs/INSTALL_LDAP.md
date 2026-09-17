@@ -149,6 +149,8 @@ LDAP保存では、DBの `graphicalmatrix_enrollment` 相当をユーザーエ�
 | totp_seed | `ldap_totp_seed` | TOTP seed。復号が必要なため `aes-gcm` 推奨。 |
 | totp_status | `ldap_totp_status` | `UNREGISTERED` / `PENDING` / `ACTIVE`。 |
 | totp_registered_at | `ldap_totp_registered_at` | TOTP登録時刻。epoch milliseconds。 |
+| totp_registration_id | `ldap_totp_registration_id` | 進行中TOTP登録を識別する一意ID。登録完了または失効操作で消去する。 |
+| totp_registration_expires_at | `ldap_totp_registration_expires_at` | 進行中TOTP登録の固定期限。epoch milliseconds。 |
 | last_success_at | `ldap_last_success_at` | 最終成功時刻。 |
 | force_sequence_change | `ldap_force_sequence_change` | 初回または強制変更フラグ。 |
 | state_version | `ldap_state_version` | 楽観ロック用version。 |
@@ -205,8 +207,14 @@ attributeTypes: ( 1.3.6.1.4.1.55555.1200.13 NAME 'ldap_created_at' DESC '2FAS-KW
 add: attributeTypes
 attributeTypes: ( 1.3.6.1.4.1.55555.1200.14 NAME 'ldap_updated_at' DESC '2FAS-KW updated at' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
 -
+add: attributeTypes
+attributeTypes: ( 1.3.6.1.4.1.55555.1200.15 NAME 'ldap_totp_registration_id' DESC '2FAS-KW TOTP registration ID' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
+add: attributeTypes
+attributeTypes: ( 1.3.6.1.4.1.55555.1200.16 NAME 'ldap_totp_registration_expires_at' DESC '2FAS-KW TOTP registration expiry' EQUALITY caseExactMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+-
 add: objectClasses
-objectClasses: ( 1.3.6.1.4.1.55555.1200.100 NAME 'graphicalMatrixEnrollment' DESC '2FAS-KW enrollment attributes' SUP top AUXILIARY MAY ( ldap_sequence $ ldap_initial_sequence $ ldap_status $ ldap_failed_count $ ldap_locked_until $ ldap_mfa_method $ ldap_totp_seed $ ldap_totp_status $ ldap_totp_registered_at $ ldap_last_success_at $ ldap_force_sequence_change $ ldap_state_version $ ldap_created_at $ ldap_updated_at ) )
+objectClasses: ( 1.3.6.1.4.1.55555.1200.100 NAME 'graphicalMatrixEnrollment' DESC '2FAS-KW enrollment attributes' SUP top AUXILIARY MAY ( ldap_sequence $ ldap_initial_sequence $ ldap_status $ ldap_failed_count $ ldap_locked_until $ ldap_mfa_method $ ldap_totp_seed $ ldap_totp_status $ ldap_totp_registered_at $ ldap_totp_registration_id $ ldap_totp_registration_expires_at $ ldap_last_success_at $ ldap_force_sequence_change $ ldap_state_version $ ldap_created_at $ ldap_updated_at ) )
 ```
 
 投入例:
@@ -400,10 +408,27 @@ service accountには、ユーザー検索と2FAS-KW属性の読み書きだけ�
 dn: ou=People,dc=example,dc=test
 changetype: modify
 add: aci
-aci: (targetattr="uid || cn || ldap_sequence || ldap_initial_sequence || ldap_status || ldap_failed_count || ldap_locked_until || ldap_mfa_method || ldap_totp_seed || ldap_totp_status || ldap_totp_registered_at || ldap_last_success_at || ldap_force_sequence_change || ldap_state_version || ldap_created_at || ldap_updated_at")(version 3.0; acl "Allow 2FAS-KW LDAP enrollment writer"; allow (read, search, compare, write)(userdn="ldap:///cn=graphicalmatrix-writer,dc=example,dc=test");)
+aci: (targetattr="uid || cn || ldap_sequence || ldap_initial_sequence || ldap_status || ldap_failed_count || ldap_locked_until || ldap_mfa_method || ldap_totp_seed || ldap_totp_status || ldap_totp_registered_at || ldap_totp_registration_id || ldap_totp_registration_expires_at || ldap_last_success_at || ldap_force_sequence_change || ldap_state_version || ldap_created_at || ldap_updated_at")(version 3.0; acl "Allow 2FAS-KW LDAP enrollment writer"; allow (read, search, compare, write)(userdn="ldap:///cn=graphicalmatrix-writer,dc=example,dc=test");)
 ```
 
 `ldap_totp_seed` は認証秘密情報です。一般ユーザー、不要な管理者、汎用LDAP連携アプリから読めないようにしてください。
+
+### TOTP登録の原子的更新要件
+
+v1.3.5以降は、TOTP登録の開始、確認、取消でRFC 4528 LDAP Assertion Control
+（OID `1.3.6.1.1.12`）を`critical=true`で使用する。LDAPサーバーがこのControlを提供しない場合、
+またはbind DNに比較・更新権限がない場合は、登録処理を継続せず利用不可として拒否する。
+read、compare、modifyを別々に成功させるだけでは、管理者の方式変更と古い登録画面の競合を防げない。
+
+本番適用前に、検証利用者で次を確認する。
+
+1. TOTP登録を開始し、正しい確認コードで`ACTIVE`へ移行できる。
+2. TOTP登録開始後に管理者が`set-method USER GraphicalMatrix`を実行すると、開いたままの旧画面による確認と取消が拒否される。
+3. 誤った確認コードを入力しても、登録ID、`state_version`、固定期限が変化しない。
+4. LDAPサーバー側のaccess logでAssertion Control付きModifyが成功または条件不一致で拒否されている。
+
+LDAP製品ごとのControl対応とaccess log形式は製品マニュアルで確認する。RFC 4528未対応のLDAPを
+`graphicalmatrix.savedata=ldap`で使用する場合、v1.3.5のTOTP自己登録は利用できない。
 
 ### WebAuthn LDAP subtree属性
 
@@ -608,6 +633,8 @@ graphicalmatrix.ldap.attr.mfa_method = ldap_mfa_method
 graphicalmatrix.ldap.attr.totp_seed = ldap_totp_seed
 graphicalmatrix.ldap.attr.totp_status = ldap_totp_status
 graphicalmatrix.ldap.attr.totp_registered_at = ldap_totp_registered_at
+graphicalmatrix.ldap.attr.totp_registration_id = ldap_totp_registration_id
+graphicalmatrix.ldap.attr.totp_registration_expires_at = ldap_totp_registration_expires_at
 graphicalmatrix.ldap.attr.last_success_at = ldap_last_success_at
 graphicalmatrix.ldap.attr.force_sequence_change = ldap_force_sequence_change
 graphicalmatrix.ldap.attr.state_version = ldap_state_version

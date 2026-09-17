@@ -992,22 +992,205 @@ sudo systemctl restart jetty-idp.service
 
 ## WebAuthnへMFA方式を変更するとき、登録の途中で失敗したらどうなるか
 
-自己管理画面でWebAuthnを選択しても、2FAS-KWはその時点でMFA方式を変更しない。
-現在のMFA方式を保持したまま、Shibboleth WebAuthn Pluginの公式登録flowを開始する。
+自己管理画面でWebAuthnを選択すると、2FAS-KWはShibboleth WebAuthn Pluginの
+CredentialRepositoryへ対象利用者のcredentialを問い合わせる。既存credentialが1件以上あれば、
+自己管理Flowでの本人確認とstate versionを再確認し、MFA方式を直接`WebAuthn`へ変更する。
+この場合は新しいcredentialを登録する必要がなく、公式登録画面へは進まない。
 
-公式Pluginがcredentialの保存に成功し、登録成功hookで同一利用者の一回限り要求を
-確認できた場合だけ、2FAS-KWのMFA方式を`WebAuthn`へ切り替える。次の場合は元の
-MFA方式が維持される。
+credentialが0件、または任意のWebAuthn Pluginが導入されておらずRepositoryを確認できない場合は、
+現在のMFA方式を保持したまま公式登録Flowを開始する。公式Pluginがcredentialの保存に成功し、
+登録成功hookで同一利用者の一回限り要求を確認できた場合だけ、MFA方式を`WebAuthn`へ切り替える。
+次の場合は元のMFA方式が維持される。
 
 - 利用者が登録画面を閉じた。
+- 利用者が「Add new security key」を実行せず、「Finish」だけを押した。
 - authenticator登録が失敗した。
 - 一回限りの登録要求が期限切れになった。
 - 登録中に管理者または別の操作がMFA方式を変更した。
 
 この連携にはShibboleth WebAuthn Plugin 1.3.0以上が必要である。管理CLIの
 `set-method USER WebAuthn`はcredentialの存在を検査しない強制操作のため、通常の利用者登録には
-使用しない。動作確認では、監査ログの`WEBAUTHN_REGISTER_START result=OK`と
-`WEBAUTHN_REGISTER_ACTIVATE result=OK`を確認する。
+使用しない。動作確認では、既存credentialの利用時は監査ログの
+`WEBAUTHN_REGISTER_ACTIVATE result=OK detail=existing_credential`を確認する。新規登録時は
+`WEBAUTHN_REGISTER_START result=OK`に続いて`WEBAUTHN_REGISTER_ACTIVATE result=OK`が記録される。
+
+公式登録画面の「Your session has ended」は、登録Flowが終了したことを示す画面であり、
+credential登録成功やMFA方式変更成功を意味しない。新しいcredentialが保存された場合は
+`WEBAUTHN_REGISTER_ACTIVATE result=OK`が記録され、`show USER`の`mfa_method`が`WebAuthn`に変わる。
+
+旧版では、すでにcredentialが残っている利用者が「Finish」だけを押しても方式が変更されない。
+修正版を導入するまでの復旧では、既存credentialの存在と本人確認を管理者が確認したうえで、
+次の順で変更する。
+
+```bash
+# 現在のMFA方式と、対象利用者に登録済みcredentialがあることを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
+
+# 対象利用者を既存WebAuthn credentialを使用する方式へ戻す。DBを直ちに変更する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method USER WebAuthn
+
+# 変更後の方式を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+```
+
+`webauthn-list USER`が0件の場合は`set-method USER WebAuthn`を実行しない。
+次回ログインで使えるcredentialがなくなり、管理者による復旧が必要になる。
+
+## WebAuthn認証画面のRegister a new credentialで追加登録できない
+
+2FAS-KWの標準MFA Flowは、Password成功後にDBの`mfa_method`を読み、WebAuthn利用者を
+`authn/WebAuthn`へ送る。WebAuthn認証画面から公式Pluginのinline registration
+（`/idp/profile/admin/webauthn-registration?reg=inline`）へ進むと、登録Flowの本人認証でも
+同じ`authn/WebAuthn`が選ばれる。そこで再び登録リンクを押すと登録Flowへ入り直すため、
+credential保存処理へ到達しない。IdPログでは登録用Requesterに対する次の判定が繰り返される。
+
+```text
+sp=http://shibboleth.net/ns/profiles/admin/webauthn/register-credential
+method=WEBAUTHN
+flow=authn/WebAuthn
+```
+
+このリンクはcredentialを失ったWebAuthn利用者の復旧手段ではない。2FAS-KW配布設定では、誤った
+循環導線を表示しないよう次を設定する。
+
+```properties
+idp.authnwebauthn.registration.allowInline = false
+```
+
+すでに利用可能なcredentialがあり、PC、スマートフォン、セキュリティキーなどを追加する場合は、
+queryを付けない次の登録URLを開く。Passwordと現在のWebAuthn credentialで本人認証を完了した後、
+登録画面から新しいcredentialを追加する。
+
+```text
+https://idp.example.com/idp/profile/admin/webauthn-registration
+```
+
+画面操作の順序は次のとおりである。
+
+1. queryなしの登録URLを開く。
+2. Passwordによる第一認証を完了する。
+3. WebAuthn認証画面で`Register a new credential`は押さず、
+   `Login with passkey or security key`を押して既存credentialで認証する。
+4. 本人認証の完了後に表示される登録画面で新しいcredentialを追加する。
+5. `Finish`で登録Flowを終了し、`webauthn-list USER`で件数を確認する。
+
+手順3で`Register a new credential`を再度押すと、登録プロファイルの本人認証を
+新しい登録プロファイルで再開し、同じ画面へ戻る。IdPログで登録用Requesterの
+Password成功と`method=WEBAUTHN`が繰り返される場合はこの操作に該当する。
+
+WebAuthn Plugin 1.4.2の標準Velocity templateでは、`allowInline=false`を設定しても
+環境によってリンクが表示されたままになることがある。2FAS-KW配布物は
+`views/webauthn/webauthn-authn.vm.idpnew`にoverride templateを含む。このtemplateは登録Requesterを
+識別して「既存キーで本人確認してください。」と表示し、
+再認証画面から追加登録リンクを除去する。通常のWebAuthn認証画面に表示する追加リンクは
+`?reg=inline`ではなくqueryなしURLを使用する。
+
+新規導入では次のパスへ配置される。
+
+```text
+/opt/shibboleth-idp/views/webauthn/webauthn-authn.vm
+```
+
+既存ファイルがある更新環境では自動上書きせず、
+`webauthn-authn.vm.idpnew.TIMESTAMP`として保留する。差分を確認してoverride templateを統合し、
+Jettyを再起動する。WAR再構築はVelocity templateだけの変更には通常不要である。
+
+登録済みキーで本人確認した後に「アクセス拒否」と表示された場合、Velocity templateではなく
+WebAuthn登録Flowの`AccessByCurrentUser`が要求を拒否している。標準の
+`idp.authn.webauthn.registration.collectUsername=true`では、登録開始時に入力したユーザー名を
+Subject Canonicalizationへ通した結果と、認証後のprincipalを比較する。両者が一致しない場合や、
+`AccessByCurrentUser` policyが正しく定義されていない場合は登録画面へ進めない。
+
+最初に、登録画面とPassword認証で同じ利用者IDを入力したこと、大小文字、前後空白、scopeまたは
+ドメイン部分の有無を確認する。次に設定とpolicy定義を確認する。
+
+```bash
+# 登録Flowの本人認証とアクセス制御設定を確認する。
+sudo grep -nE \
+  '^(idp\.authn\.webauthn\.admin\.registration\.(forceAuthn|authenticate|accessPolicy)|idp\.authn\.webauthn\.registration\.(collectUsername|username\.))' \
+  /opt/shibboleth-idp/conf/authn/webauthn-registration.properties
+
+# AccessByCurrentUser policyがIdPへ定義されていることを確認する。
+sudo grep -n -A10 -B3 'AccessByCurrentUser' \
+  /opt/shibboleth-idp/conf/access-control.xml
+
+# 該当時刻の登録Flow、アクセス制御、principal関連ログを確認する。
+sudo grep -E \
+  'AllowCurrentUserAccessPredicate|AccessByCurrentUser|WebAuthnCredentialRegistration|register-credential|AccessDenied' \
+  /opt/shibboleth-idp/logs/idp-process.log | tail -n 100
+```
+
+短縮IDとscope付きIDなど、同一利用者が異なる形式へcanonicalizeされる環境では、公式Pluginの
+username transformation、Subject Canonicalization、または`AccessByCurrentUser`の比較Predicateを
+IdPのID設計に合わせる。原因確認なしに`AccessByCurrentUser`を無効化して回避してはならない。
+
+現在のcredentialを利用できない場合は、管理者が本人確認後にMFA方式を一時的にGraphicalMatrixへ戻す。
+既存WebAuthn credentialはこの操作だけでは削除されない。その後、利用者はPasswordとGraphicalMatrixで
+ログインし、`/idp/profile/2faskw/self-service`からWebAuthnを選んで新しいcredentialを登録する。
+
+```bash
+# 現在の方式、画像sequence、credentialを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
+
+# 本人確認後、復旧用にMFA方式をGraphicalMatrixへ変更する。DBを直ちに変更する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-method USER GraphicalMatrix
+
+# 再登録後に方式とcredential件数を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
+```
+
+`webauthn-reset USER --apply`は全credentialを削除するため、追加登録や通常の復旧では実行しない。
+不要な旧credentialは、新しいcredentialでの認証成功を確認した後に`webauthn-delete`で個別削除する。
+
+## MFA認証FlowのXMLは実運用開始後も編集する必要があるか
+
+標準のGraphicalMatrix、TOTP、WebAuthn構成が完成した後は、通常ほとんど編集しない。
+対象となる主なファイルは次の2つである。
+
+```text
+/opt/shibboleth-idp/conf/authn/mfa-authn-config.xml
+/opt/shibboleth-idp/conf/authn/authn-events-flow.xml
+```
+
+これらは日常運用の設定ではなく、MFAの認証経路、完了時検査、WebFlowイベント等の構造を定義する。
+編集が必要になる代表例は次のとおりである。
+
+- 既存IdPへ2FAS-KWを初めて統合する。
+- v1.3.4以前からv1.3.5以降へ更新し、状態guardと拒否イベントを追加する。
+- GraphicalMatrix、TOTP、WebAuthn以外の新しい認証方式を追加する。
+- 既存の独自MFA Flowや独自エラーイベントと2FAS-KWを統合する。
+- Shibboleth IdPまたは認証Pluginの大型更新で、Flow定義の互換性を調整する。
+
+一方、次の日常操作ではXMLを編集しない。
+
+- SPの追加、更新、無効化および削除
+- `set-mfa`によるSP単位MFA方針の変更
+- `mfa global set`によるIdP全体のMFA方針や送信元IP例外の変更
+- 利用者のMFA方式変更、`disable`、`enable`および`delete`
+- 属性profileやSP別LDAP属性アクセス制御の変更
+
+これらは`graphicalmatrix-sp.sh`、`graphicalmatrix-db.sh`または対応するpropertiesで管理する。
+新規標準構成と`local-unattended-install.sh`によるローカル検証環境では必要なXMLが自動設定されるため、
+手作業は不要である。既存IdPへ統合する場合は、配布例でファイル全体を上書きせず、既存の遷移と
+custom eventを保持したまま必要な要素だけを追加する。
+
+XMLを変更した場合は、設定検査後にWARを再構築してJettyを再起動する。
+
+```bash
+# XMLと認証設定の必須要素を検査する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp \
+  --config-only
+
+# 検査成功後にIdPへ反映する。
+sudo /opt/shibboleth-idp/bin/build.sh
+sudo systemctl restart jetty-idp.service
+```
+
+設定項目と必須遷移の詳細は[CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)を参照する。
 
 ## Jettyの再起動が必要になるのはどのような場合か
 
@@ -1149,6 +1332,37 @@ TOTPを使用しない環境では、TOTP保存方式に関するWARNを許容�
 ```
 
 この検査はDB内の既存 `sequence` と `graphicalmatrix.choice` の整合性までは確認しない。
+
+## TOTP自己登録画面の有効期限と、途中で管理者が設定を変更した場合
+
+v1.3.5以降のTOTP自己登録は、登録開始時に発行した一意な登録ID、開始後の`state_version`、固定期限を
+HTTP sessionとDBまたはLDAPの両方へ保持する。確認コードの確定と登録取消は、この組合せがすべて一致する
+場合だけ成功する。
+
+登録期限は`graphicalmatrix.totp.registrationTtlSeconds`で設定し、既定値は180秒、範囲は30〜900秒である。
+誤った確認コードを入力して再表示しても期限は延長されない。期限と同時刻または期限後は登録を終了し、
+自己管理画面から最初からやり直す。
+
+登録画面を開いた後に管理者が`set-method`、`reset-totp`、`disable`などを実行した場合、その管理操作が
+登録IDを消去して`state_version`を増加させる。開いたままの旧画面から確認または取消を送信しても、現在の
+MFA方式や新しいTOTP seedを上書きせず拒否される。利用者には登録状態が変更された旨を表示し、再認証を求める。
+
+v1.3.4以前から`totp_status=PENDING`のまま残ったDB利用者には新しい登録IDがないため、その登録画面は
+引き継がない。アップグレード後に次のdry-runで対象を確認し、画像sequenceが有効な利用者だけを
+GraphicalMatrixへ戻して再登録させる。
+
+```bash
+# 旧PENDING登録と、自動復旧できる利用者を確認する。DBは変更しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp
+
+# RECOVERABLEと表示された利用者だけをGraphicalMatrixへ戻して旧seedを消去する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh invalidate-pending-totp --apply
+```
+
+`MANUAL_RECOVERY`と表示された利用者はGraphicalMatrix sequenceが空、初期sequenceが空、または現在の
+保存方式と互換でないため、自動変更しない。管理者が本人確認後に`reset-user`でGraphicalMatrixを
+再設定するか、別のMFA方式を割り当てる。暗号化済みpayloadの完全性まではdry-runのSQLで検証しないため、
+適用前バックアップと対象利用者でのログイン試験を必ず行う。
 
 ## 他システムからTOTPまたはWebAuthnを移行できるか
 
@@ -1624,7 +1838,7 @@ graphicalmatrix.selfservice.transactionTtlSeconds = 600
 graphicalmatrix.change.legacyLdapLoginEnabled = false
 ```
 
-現行v1.3.4コードでは、`selfservice.enabled`と`legacyLdapLoginEnabled`の両方を`false`にすると設定検査で
+現行v1.3.5コードでは、`selfservice.enabled`と`legacyLdapLoginEnabled`の両方を`false`にすると設定検査で
 失敗する。従って、IdP自己管理flowを未導入の環境では`legacyLdapLoginEnabled`だけを先に変更せず、
 [INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md)の設定と受入試験を先に完了する。
 
@@ -1657,6 +1871,73 @@ sudo systemctl restart jetty-idp.service
 既存環境の移行試験で従来経路を一時的に残す場合は、`/opt/shibboleth-idp/conf/ldap.properties`の接続が
 証明書・ホスト名検証付きTLSで保護されていることを確認する。受入試験後は`false`へ変更し、
 平文`ldap://`を使用する従来経路へrollbackしない。
+
+## 初回のGraphicalMatrix強制変更後に`GraphicalMatrixAccessDenied`となるのはなぜか
+
+v1.3.5の初期成果物では、認証中の登録状態変更を検出するMFA完了guardと、初回ログイン時の
+GraphicalMatrix強制変更が競合する場合がある。新しい画像列の保存は正常に
+`force_sequence_change=0`へ更新し、同時に`state_version`を1増やす。一方、旧実装の完了guardは
+認証開始時のversionを要求し続けるため、正規の強制変更を外部変更と誤認して
+`GraphicalMatrixAccessDenied`を返す。
+
+修正版は、利用者、`authn/External`、GraphicalMatrix方式、変更前versionがすべて一致する強制変更に限り、
+完了guardの期待versionも正確に1増やす。管理CLIや別sessionによる変更を許容するものではない。
+
+発生後は登録状態を確認する。
+
+```bash
+# force_sequence_changeと現在の登録状態を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+
+# 強制変更の保存成功と、その後の完了guard拒否を確認する。
+sudo grep -E \
+  'FORCE_SEQUENCE_CHANGE_SAVE|MFA completion|GraphicalMatrixAccessDenied' \
+  /opt/shibboleth-idp/logs/idp-process.log \
+  /opt/shibboleth-idp/logs/graphicalmatrix-audit.log | tail -n 50
+```
+
+`force_sequence_change=0`であれば新しい画像列は保存済みである。旧成果物を使用中の一時回避として、
+新しいbrowser sessionから新しい画像列でログインし直せる。恒久対応は修正版Pluginへ更新し、WAR再構築と
+Jetty再起動後に未使用のテスト利用者で初回強制変更からSP復帰までを再試験する。
+
+## MFA利用者を一時停止または物理削除するにはどうすればよいか
+
+一時停止には`disable`を使用する。GraphicalMatrix、TOTP、WebAuthnのcredentialは保持されるが、
+v1.3.5以降はSP・IPのMFA BYPASS設定より`DISABLED`が優先されるため認証を完了できない。再開は`enable`を使う。
+
+```bash
+# 対象利用者を一時停止する。credentialは削除しない。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh disable USER
+
+# 停止状態とMFA方式を確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+
+# 同じcredentialを保持したまま再開する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh enable USER
+```
+
+恒久削除には`delete USER`を使用する。この操作はDB enrollmentに含まれるGraphicalMatrix/TOTP情報と、
+PostgreSQL StorageRecords内で対象利用者に結び付くWebAuthn credentialを削除する。先にstatusを
+`DISABLED`へcommitするため、credential削除が失敗した場合は停止状態が残る。バックアップと第一認証側の
+停止を確認してから実行する。
+
+```bash
+# 削除前の状態とWebAuthn credentialを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
+
+# enrollmentと関連credentialを物理削除する。DBを直ちに変更する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh delete USER
+
+# enrollmentが存在しないことを確認する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
+```
+
+`graphicalmatrix.mfa.missingEnrollmentPolicy=allow-on-bypass`では、削除後の未登録利用者がBYPASS対象になる
+可能性があるため、CLIと管理APIは物理削除を拒否する。通常は`deny`を設定する。Provisioning CSVの`D`は
+従来どおり物理削除ではなく`DISABLED`への変更である。標準CSVの`D`はv1.3.5から拒否されるため、物理削除は
+1利用者ずつ`delete USER`で実行する。
 
 ## 関連文書
 

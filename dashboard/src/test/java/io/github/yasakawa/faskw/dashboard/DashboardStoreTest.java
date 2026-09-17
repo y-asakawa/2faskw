@@ -26,7 +26,6 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class DashboardStoreTest {
@@ -85,6 +84,7 @@ class DashboardStoreTest {
             assertEquals(3, first.accepted());
             assertEquals(3, second.duplicates());
             final Map<String, Object> summary = store.summary(
+                    allScope(),
                     now.minusSeconds(3600), now.plusSeconds(3600));
             assertEquals(1L, summary.get("graphicalMatrixSuccess"));
             assertEquals(1L, summary.get("graphicalMatrixFailure"));
@@ -110,15 +110,15 @@ class DashboardStoreTest {
                     "test");
 
             final Map<String, Object> summary =
-                    store.summary(from, from.plusSeconds(3 * 3600));
+                    store.summary(allScope(), from, from.plusSeconds(3 * 3600));
             assertEquals(3L, summary.get("graphicalMatrixSuccess"));
             assertEquals(0L, summary.get("graphicalMatrixFailure"));
 
             final List<Map<String, Object>> category = store.categoryEvents(
+                    allScope(),
+                    DashboardEventPolicy.RouteCategory.SELF_SERVICE,
                     from,
                     from.plusSeconds(3 * 3600),
-                    Set.of("SELF_SERVICE_AUTH"),
-                    null,
                     null,
                     null,
                     null,
@@ -146,7 +146,7 @@ class DashboardStoreTest {
                     event("e".repeat(64), to, "VERIFY", "OK")),
                     "test");
 
-            final Map<String, Object> summary = store.summary(from, to);
+            final Map<String, Object> summary = store.summary(allScope(), from, to);
 
             assertEquals(3L, summary.get("graphicalMatrixSuccess"));
             assertEquals(from, summary.get("from"));
@@ -165,10 +165,12 @@ class DashboardStoreTest {
                     event("c".repeat(64), now, "VERIFY", "OK")), "test");
 
             final List<Map<String, Object>> first = store.eventPage(
+                    allScope(),
                     now.minusSeconds(1), now.plusSeconds(1),
                     null, null, null, null, null, 2, null);
             final Map<String, Object> last = first.getLast();
             final List<Map<String, Object>> second = store.eventPage(
+                    allScope(),
                     now.minusSeconds(1), now.plusSeconds(1),
                     null, null, null, null, null, 2,
                     new DashboardStore.EventCursor(
@@ -192,9 +194,11 @@ class DashboardStoreTest {
                     event("b".repeat(64), now, "VERIFY", "FAIL", "user002")), "test");
 
             final List<Map<String, Object>> matching = store.eventPage(
+                    allScope(),
                     now.minusSeconds(1), now.plusSeconds(1),
                     null, null, null, null, "User_001", 100, null);
             final List<Map<String, Object>> wrongCase = store.eventPage(
+                    allScope(),
                     now.minusSeconds(1), now.plusSeconds(1),
                     null, null, null, null, "user_001", 100, null);
 
@@ -234,7 +238,7 @@ class DashboardStoreTest {
                     "test");
 
             final Map<String, Object> summary =
-                    store.summary(from, from.plusSeconds(3600), 3, 1);
+                    store.summary(allScope(), from, from.plusSeconds(3600), 3, 1);
             @SuppressWarnings("unchecked")
             final List<Map<String, Object>> top =
                     (List<Map<String, Object>>) summary.get("topSourceNetworks");
@@ -253,6 +257,7 @@ class DashboardStoreTest {
             assertEquals(2L, mismatchTop.getFirst().get("count"));
 
             final List<Map<String, Object>> exact = store.eventPage(
+                    allScope(),
                     from, from.plusSeconds(3600),
                     null, null, null, null, null, "198.51.100.20",
                     100, null, null);
@@ -261,6 +266,7 @@ class DashboardStoreTest {
             final EventRegexFilter regex = EventRegexFilter.compile(
                     null, null, null, null, null, "^192\\.0\\.2\\.");
             final List<Map<String, Object>> matching = store.eventPage(
+                    allScope(),
                     from, from.plusSeconds(3600),
                     null, null, null, null, null, 100, null, regex);
             assertEquals(3, matching.size());
@@ -288,9 +294,9 @@ class DashboardStoreTest {
                     "test");
 
             final Map<String, Object> summary =
-                    store.summary(from, from.plusSeconds(3600), asOf);
+                    store.summary(allScope(), from, from.plusSeconds(3600), asOf);
             final Map<String, Object> limited =
-                    store.summary(from, from.plusSeconds(3600), asOf, 1);
+                    store.summary(allScope(), from, from.plusSeconds(3600), asOf, 1);
             @SuppressWarnings("unchecked")
             final List<Map<String, Object>> top =
                     (List<Map<String, Object>>) summary.get("topMismatchUsers");
@@ -330,11 +336,129 @@ class DashboardStoreTest {
             final EventRegexFilter filter = EventRegexFilter.compile(
                     "^node-", "^VER", "FAIL|LOCKED", null, "^loadtest[0-9]{4}$");
             final List<Map<String, Object>> matching = store.eventPage(
+                    allScope(),
                     now.minusSeconds(10), now.plusSeconds(10),
                     null, null, null, null, null, 100, null, filter);
 
             assertEquals(1, matching.size());
             assertEquals("loadtest0001", matching.getFirst().get("userRef"));
+        }
+    }
+
+    @Test
+    void appliesPrincipalEventScopeBeforeFiltersPagingSummaryAndLockProjection()
+            throws Exception {
+        try (DashboardStore store = new DashboardStore(
+                "jdbc:h2:mem:dashboard-event-scope;DB_CLOSE_DELAY=-1")) {
+            final Instant from = Instant.parse("2026-09-15T00:00:00Z");
+            final Instant to = from.plusSeconds(3600);
+            store.ingest(List.of(
+                    event("1".repeat(64), from.plusSeconds(10), "VERIFY", "OK"),
+                    event("2".repeat(64), from.plusSeconds(20), "CHANGE_SAVE", "OK"),
+                    event("3".repeat(64), from.plusSeconds(30), "API_USER_UPDATED", "OK"),
+                    event("4".repeat(64), from.plusSeconds(40), "UNKNOWN_EVENT", "OK"),
+                    event("5".repeat(64), from.plusSeconds(50), "APIX_UPDATED", "OK"),
+                    event(
+                            "6".repeat(64),
+                            from.plusSeconds(60),
+                            "VERIFY",
+                            "LOCKED",
+                            "locked-user",
+                            to.plusSeconds(900).toEpochMilli())),
+                    "test");
+
+            final DashboardEventScope operational = operationalScope();
+            final List<Map<String, Object>> firstOperational = store.eventPage(
+                    operational,
+                    from,
+                    to,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    1,
+                    null);
+            assertEquals(1, firstOperational.size());
+            assertEquals("VERIFY", firstOperational.getFirst().get("event"));
+            assertEquals("6".repeat(64), firstOperational.getFirst().get("eventId"));
+
+            final EventRegexFilter allRegex = EventRegexFilter.compile(
+                    null, ".*", null, null, null);
+            final List<Map<String, Object>> operationalRegex = store.eventPage(
+                    operational,
+                    from,
+                    to,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    100,
+                    null,
+                    allRegex);
+            assertEquals(
+                    List.of("VERIFY", "CHANGE_SAVE", "VERIFY"),
+                    operationalRegex.stream().map(row -> row.get("event")).toList());
+
+            final List<Map<String, Object>> hiddenExact = store.eventPage(
+                    operational,
+                    from,
+                    to,
+                    "API_USER_UPDATED",
+                    null,
+                    null,
+                    null,
+                    null,
+                    100,
+                    null);
+            assertEquals(0, hiddenExact.size());
+
+            final List<Map<String, Object>> adminEvents = store.categoryEvents(
+                    allScope(),
+                    DashboardEventPolicy.RouteCategory.ADMIN_API,
+                    from,
+                    to,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    100);
+            assertEquals(List.of("API_USER_UPDATED"),
+                    adminEvents.stream().map(row -> row.get("event")).toList());
+
+            final List<Map<String, Object>> deniedAdminEvents = store.categoryEvents(
+                    operational,
+                    DashboardEventPolicy.RouteCategory.ADMIN_API,
+                    from,
+                    to,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    100);
+            assertEquals(0, deniedAdminEvents.size());
+
+            final Map<String, Object> operationalSummary =
+                    store.summary(operational, from, to, to, 3);
+            @SuppressWarnings("unchecked")
+            final List<Map<String, Object>> operationalCounts =
+                    (List<Map<String, Object>>) operationalSummary.get("counts");
+            assertEquals(
+                    List.of("CHANGE_SAVE", "VERIFY", "VERIFY"),
+                    operationalCounts.stream().map(row -> row.get("event")).toList());
+            assertNull(operationalSummary.get("lockedUserCount"));
+            assertEquals(List.of(), operationalSummary.get("lockedUsers"));
+
+            final Map<String, Object> fullSummary =
+                    store.summary(allScope(), from, to, to, 3);
+            assertEquals(1L, fullSummary.get("lockedUserCount"));
+            @SuppressWarnings("unchecked")
+            final List<Map<String, Object>> lockedUsers =
+                    (List<Map<String, Object>>) fullSummary.get("lockedUsers");
+            assertEquals("locked-user", lockedUsers.getFirst().get("userRef"));
         }
     }
 
@@ -428,5 +552,19 @@ class DashboardStoreTest {
         return new NormalizedEvent(
                 1, id, time, time, "node-01", type, result, "test", null, sourceNetwork,
                 null, "ok", "1", 0, id);
+    }
+
+    private static DashboardEventScope allScope() {
+        return DashboardEventPolicy.scopeFor(new DashboardAuthorizer.Principal(
+                "auditor",
+                DashboardAuthorizer.Role.DASHBOARD_AUDITOR,
+                "user:auditor"));
+    }
+
+    private static DashboardEventScope operationalScope() {
+        return DashboardEventPolicy.scopeFor(new DashboardAuthorizer.Principal(
+                "operator",
+                DashboardAuthorizer.Role.DASHBOARD_OPERATOR,
+                "user:operator"));
     }
 }

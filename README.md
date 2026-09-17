@@ -23,7 +23,7 @@ published artifacts.
 
 ## Requirements
 
-- [Shibboleth IdP 5.2 or later](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3199511079)
+- [Shibboleth IdP 5.2.1 or later, but earlier than 5.2.4](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3199511079)
 - [Java 21](https://openjdk.org/projects/jdk/21/)
 - [Jetty 12 runtime for IdP 5](https://shibboleth.atlassian.net/wiki/spaces/IDP5/pages/3516104706/Jetty12)
 - [PostgreSQL](https://www.postgresql.org/docs/) for production deployments
@@ -51,6 +51,13 @@ other Linux distributions are not currently tested by this project.
 - IdP installation: [docs/INSTALL.md](docs/INSTALL.md)
 - Security guide: [docs/SECURITY.md](docs/SECURITY.md)
 - Security checklist: [docs/SECURITY-CHECKLIST.md](docs/SECURITY-CHECKLIST.md)
+- Support policy: [docs/SUPPORT-POLICY.md](docs/SUPPORT-POLICY.md)
+- Compatibility matrix: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
+- Backup and restore: [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md)
+- Operations runbook: [docs/OPERATIONS-RUNBOOK.md](docs/OPERATIONS-RUNBOOK.md)
+- Threat model: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)
+- Patent review: [docs/PATENT-REVIEW.md](docs/PATENT-REVIEW.md)
+- Design provenance: [docs/development-history/README.md](docs/development-history/README.md)
 - Build from source: [docs/build.md](docs/build.md)
 - Admin tools: [docs/ADMIN-TOOLS.md](docs/ADMIN-TOOLS.md)
 - Configuration reference: [docs/CONFIG-REFERENCE.md](docs/CONFIG-REFERENCE.md)

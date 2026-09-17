@@ -45,6 +45,8 @@ final class GraphicalMatrixLdapConfig {
     private final String totpSeedAttr;
     private final String totpStatusAttr;
     private final String totpRegisteredAtAttr;
+    private final String totpRegistrationIdAttr;
+    private final String totpRegistrationExpiresAtAttr;
     private final String lastSuccessAtAttr;
     private final String forceSequenceChangeAttr;
     private final String stateVersionAttr;
@@ -71,6 +73,9 @@ final class GraphicalMatrixLdapConfig {
         this.totpSeedAttr = attr("totp_seed", "ldap_totp_seed");
         this.totpStatusAttr = attr("totp_status", "ldap_totp_status");
         this.totpRegisteredAtAttr = attr("totp_registered_at", "ldap_totp_registered_at");
+        this.totpRegistrationIdAttr = attr("totp_registration_id", "ldap_totp_registration_id");
+        this.totpRegistrationExpiresAtAttr = attr("totp_registration_expires_at",
+            "ldap_totp_registration_expires_at");
         this.lastSuccessAtAttr = attr("last_success_at", "ldap_last_success_at");
         this.forceSequenceChangeAttr = attr("force_sequence_change", "ldap_force_sequence_change");
         this.stateVersionAttr = attr("state_version", "ldap_state_version");
@@ -152,6 +157,14 @@ final class GraphicalMatrixLdapConfig {
         return totpRegisteredAtAttr;
     }
 
+    String totpRegistrationIdAttr() {
+        return totpRegistrationIdAttr;
+    }
+
+    String totpRegistrationExpiresAtAttr() {
+        return totpRegistrationExpiresAtAttr;
+    }
+
     String lastSuccessAtAttr() {
         return lastSuccessAtAttr;
     }
@@ -171,7 +184,8 @@ final class GraphicalMatrixLdapConfig {
     String[] returningAttributes() {
         return new String[] {
             sequenceAttr, initialSequenceAttr, statusAttr, failedCountAttr, lockedUntilAttr,
-            mfaMethodAttr, totpSeedAttr, totpStatusAttr, totpRegisteredAtAttr, lastSuccessAtAttr,
+            mfaMethodAttr, totpSeedAttr, totpStatusAttr, totpRegisteredAtAttr,
+            totpRegistrationIdAttr, totpRegistrationExpiresAtAttr, lastSuccessAtAttr,
             forceSequenceChangeAttr, stateVersionAttr, createdAtAttr, updatedAtAttr
         };
     }

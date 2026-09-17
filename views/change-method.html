@@ -32,7 +32,7 @@
           <span>WebAuthn / Passkey</span>
         </label>
       </fieldset>
-      <p>TOTPを選択した場合、次回ログイン時にQRコード登録画面が表示されます。WebAuthnはIdP側のWebAuthnプラグイン導入後に利用します。</p>
+      <p>TOTPを選択した場合、次回ログイン時にQRコード登録画面が表示されます。WebAuthnは登録済みcredentialがあればそのまま方式を変更します。credentialがない場合だけ公式登録画面へ進むため、「Add new security key」で新しいcredentialを登録してください。</p>
       <div class="actions">
         <button class="primary" type="submit">変更する</button>
         <button type="submit" form="back-menu-form">戻る</button>

@@ -57,15 +57,6 @@ public final class DashboardServer implements AutoCloseable {
     private static final Pattern SAFE_NETWORK =
             Pattern.compile("[0-9A-Fa-f:.]+(?:/[0-9]{1,3})?");
     private static final int MAX_RATE_LIMIT_ENTRIES = 10_000;
-    private static final Set<String> AUTH_EVENTS = Set.of(
-            "START", "CHALLENGE_CREATED", "VERIFY",
-            "FORCE_SEQUENCE_CHANGE_START", "FORCE_SEQUENCE_CHANGE_SAVE");
-    private static final Set<String> SELF_SERVICE_EVENTS = Set.of(
-            "TOTP_REGISTER_START", "TOTP_REGISTER_VERIFY", "TOTP_REGISTER_CANCEL",
-            "SELF_SERVICE_AUTH", "SELF_SERVICE_HANDOFF", "CHANGE_LDAP_AUTH", "CHANGE_START",
-            "CHANGE_CHALLENGE_CREATED", "CHANGE_VERIFY", "CHANGE_CHOOSE_SEQUENCE",
-            "CHANGE_CHOOSE_METHOD", "CHANGE_BACK_MENU", "CHANGE_SAVE", "CHANGE_METHOD_SAVE");
-
     private final DashboardConfig config;
     private final DashboardStore store;
     private final DashboardAuthorizer authorizer;
@@ -181,22 +172,31 @@ public final class DashboardServer implements AutoCloseable {
             sendJson(exchange, 429, Map.of("error", "rate_limited"));
             return;
         }
+        final DashboardEventScope eventScope = DashboardEventPolicy.scopeFor(principal);
         final Map<String, String> query = parseQuery(exchange.getRequestURI());
         try {
             final TimeRange range = timeRange(query);
             final Object response;
             if ("/api/v1/summary".equals(path)) {
-                response = store.summary(
+                response = summary(
+                        eventScope,
+                        principal,
                         range.from(),
                         range.to(),
                         parseTopMismatchLimit(query.get("topMismatchLimit")),
                         parseTopSourceNetworkLimit(query.get("topSourceNetworkLimit")));
             } else if ("/api/v1/authentication".equals(path)) {
-                response = categoryEvents(range, query, AUTH_EVENTS);
+                response = categoryEvents(
+                        eventScope, range, query,
+                        DashboardEventPolicy.RouteCategory.AUTHENTICATION);
             } else if ("/api/v1/self-service".equals(path)) {
-                response = categoryEvents(range, query, SELF_SERVICE_EVENTS);
+                response = categoryEvents(
+                        eventScope, range, query,
+                        DashboardEventPolicy.RouteCategory.SELF_SERVICE);
             } else if ("/api/v1/admin-api".equals(path)) {
-                response = categoryEvents(range, query, Set.of(), "API_");
+                response = categoryEvents(
+                        eventScope, range, query,
+                        DashboardEventPolicy.RouteCategory.ADMIN_API);
             } else if ("/api/v1/ingest-health".equals(path)) {
                 response = Map.of(
                         "nodes", store.ingestHealth(),
@@ -204,13 +204,13 @@ public final class DashboardServer implements AutoCloseable {
                         "staleEventSeconds", config.staleEventSeconds(),
                         "parseFailureWarningCount", config.parseFailureWarningCount());
             } else if ("/api/v1/events".equals(path)) {
-                response = eventPage(range, query);
+                response = eventPage(eventScope, range, query);
             } else if ("/api/v1/export".equals(path)) {
                 if (!config.exportEnabled()) {
                     sendJson(exchange, 404, Map.of("error", "export_disabled"));
                     return;
                 }
-                sendExport(exchange, range, query);
+                sendExport(exchange, eventScope, range, query);
                 store.recordAccess(principal.user(), principal.role().name(), "export",
                         "time_range", "OK", exchange.getRemoteAddress().getAddress().getHostAddress());
                 return;
@@ -229,22 +229,15 @@ public final class DashboardServer implements AutoCloseable {
     }
 
     private Map<String, Object> categoryEvents(
+            final DashboardEventScope eventScope,
             final TimeRange range,
             final Map<String, String> query,
-            final Set<String> allowed) throws SQLException {
-        return categoryEvents(range, query, allowed, null);
-    }
-
-    private Map<String, Object> categoryEvents(
-            final TimeRange range,
-            final Map<String, String> query,
-            final Set<String> allowed,
-            final String eventPrefix) throws SQLException {
+            final DashboardEventPolicy.RouteCategory category) throws SQLException {
         final List<Map<String, Object>> rows = store.categoryEvents(
+                eventScope,
+                category,
                 range.from(),
                 range.to(),
-                allowed,
-                eventPrefix,
                 filter(query, "event"),
                 filter(query, "result"),
                 nodeFilter(query),
@@ -255,12 +248,14 @@ public final class DashboardServer implements AutoCloseable {
     }
 
     private Map<String, Object> eventPage(
+            final DashboardEventScope eventScope,
             final TimeRange range,
             final Map<String, String> query) throws SQLException {
         final int limit = parseLimit(query.get("limit"));
         final DashboardStore.EventCursor cursor = decodeCursor(query.get("cursor"));
         final EventRegexFilter regexFilter = regexFilter(query);
         final List<Map<String, Object>> events = store.eventPage(
+                eventScope,
                 range.from(), range.to(),
                 regexFilter == null ? filter(query, "event") : null,
                 regexFilter == null ? filter(query, "result") : null,
@@ -281,10 +276,12 @@ public final class DashboardServer implements AutoCloseable {
 
     private void sendExport(
             final HttpExchange exchange,
+            final DashboardEventScope eventScope,
             final TimeRange range,
             final Map<String, String> query) throws IOException, SQLException {
         final EventRegexFilter regexFilter = regexFilter(query);
         final List<Map<String, Object>> events = store.events(
+                eventScope,
                 range.from(), range.to(),
                 regexFilter == null ? filter(query, "event") : null,
                 regexFilter == null ? filter(query, "result") : null,
@@ -311,6 +308,30 @@ public final class DashboardServer implements AutoCloseable {
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    private Map<String, Object> summary(
+            final DashboardEventScope eventScope,
+            final DashboardAuthorizer.Principal principal,
+            final Instant from,
+            final Instant to,
+            final int topMismatchLimit,
+            final int topSourceNetworkLimit) throws SQLException {
+        final Map<String, Object> response = store.summary(
+                eventScope, from, to, topMismatchLimit, topSourceNetworkLimit);
+        final Map<String, Object> visibility = new LinkedHashMap<>();
+        visibility.put("scope", eventScope.externalName());
+        visibility.put("lockedUsersAvailable", eventScope.allowsLockedUsers());
+        visibility.put("eventsAvailable", principal.role().permits(
+                DashboardAuthorizer.Role.DASHBOARD_OPERATOR));
+        visibility.put("ingestHealthAvailable", principal.role().permits(
+                DashboardAuthorizer.Role.DASHBOARD_OPERATOR));
+        visibility.put("adminApiAvailable", principal.role().permits(
+                DashboardAuthorizer.Role.DASHBOARD_AUDITOR));
+        visibility.put("exportAvailable", config.exportEnabled()
+                && principal.role().permits(DashboardAuthorizer.Role.DASHBOARD_AUDITOR));
+        response.put("visibility", visibility);
+        return response;
     }
 
     private static String csv(final Object value) {
