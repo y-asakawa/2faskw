@@ -45,6 +45,7 @@ ldap.properties
 *.dump
 *.csv
 *.tsv
+sp-migration/
 
 # Keep source schema files tracked explicitly.
 !postgresql-schema.sql

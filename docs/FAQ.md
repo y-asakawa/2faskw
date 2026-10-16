@@ -2,6 +2,279 @@
 
 2FAS-KW Plugin for Shibboleth IdP の設定、認証、運用で発生しやすい事象をまとめる。
 
+## 既存のSPを追加するには？
+
+一般的なShibboleth IdP、または既存2FAS-KW IdPから別の2FAS-KW IdPへ移す場合は、v1.4.0の
+`2faskw-sp-import-tools.zip`をホームへ展開し、元設定を解析する。
+IdPの`plugin.sh`で導入するツールではない。元IdP設定は変更しない。
+
+```bash
+# 元IdPを解析し、tool配下のsp-migration/へTXTと移行metadataを保存する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp \
+  --non-interactive
+
+# 一般IdPのSP登録を先に、属性送信は後で設定する。先に新IdPをネットワーク隔離する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp \
+  --defer-attributes --registration-only --confirm-isolated-target \
+  --apply
+```
+
+先に`inventory.txt`、`analysis.txt`、`manual-actions.txt`、`access-control.txt`を読み、applyなしの新IdP確認も行う。
+sudoの解析例はSecureDirectoryStream対応のLinuxを前提とする。非対応環境では読取可能なsnapshotをsudoなしで解析する。
+target管理有効化・初期化・ACS host許可は別途必要である。属性resolver/mappingは属性設定段階で準備する。
+通常modeでは不明な属性送信条件をnoneへの置換で迂回しない。
+明示的な`--defer-attributes`は属性条件を未解決の後工程へ分ける。加工metadata filter、
+期限切れ、曖昧なaggregate親設定など他の保留は解除しない。
+一般モードの明示的なaggregate snapshot抽出は後述の手順に限定する。
+一般モードのRP override・ContextCheckは登録と別の認可判定になり、未移行時の通常applyは止まる。
+登録後のSP側IdP信頼切替、NameID、属性、browser SSOは管理者が確認する。
+詳細は[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md)を参照。
+
+同じIdP内の限定的な手作業SPを管理移管する場合は、既存`adopt`の対象条件を確認する。
+単一SPを通常追加するだけなら[INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md)の`add`を使う。
+SP Import Toolsは既存管理情報を一括上書きする仕組みではない。
+
+### SP登録だけを移して、属性送信は移行後に設定できる？
+
+一般IdP bundleでは`--defer-attributes`で可能である。登録profileは`none`固定、
+属性承認・profile作成を行わない。applyは`--registration-only --confirm-isolated-target`と
+`DEFER ATTRIBUTES ISOLATED`の対話確認が必要である。元認可の未移行やmetadataの要確認には別の確認も必要。
+属性個別の保留は登録viewで後工程へ分けるだけで、元bundleを変更しない。
+2FAS-KW管理bundleでは管理意図を保持するため、このmodeを使用できない。
+
+終了コード`11`は登録段階の確認/完了であり、属性設定やSSO切替の成功ではない。
+`runs/RUN_ID/attribute-migration-todo.txt`に従い、既存CLIの属性承認・profile作成/再利用・
+`set-attributes`と必要な値filter・認可を設定する。既存承認の分類/用途は無確認で上書きしない。
+元の値限定・deny条件を全値送信へ変えず、filtered AACLIとSP受信属性、許可・拒否を確認する。
+**noneでも共有policyによる属性送信はあり得るため、検証完了まで新IdPの隔離を維持する。**
+手順は[SP-INPORT-TOOLS.md 第6.3節](./SP-INPORT-TOOLS.md#63-推奨sp登録と属性送信設定を分ける一般idpモード)を参照。
+
+### 移行元がmetadataを自動更新していれば、移行後も期限は更新される？
+
+このツールは取得URLではなく静的snapshotを登録するため、自動更新は引き継がない。
+期限は移行先の準備時、対話確認後の書込前、各SP登録直前にも再確認する。
+`SOURCE_METADATA_EXPIRED`なら最新の信頼できる原本で新bundleを生成する。期限を手で延長しない。
+自動更新を継続する構成はHTTP providerなどの別設計・検証が必要である。
+
+### 解析結果はZIPにしてSCPで転送してよい？
+
+可能である。配布ツールのZIPではなく、解析で生成されたbundleディレクトリ全体をZIPにする。
+XMLだけではなく`manifest.tsv`、TXT、metadata、evidence、`runs/`を含め、新IdPの管理者ホームへSCPする。
+新IdPにも同じ修正版ツールを展開し、その配下へbundleを一般ユーザー権限で展開する。
+ZIP・bundleとも既存の同名ファイルへ上書き・混在させない。
+`--export-dir`を変更した場合、転送・展開・`--bundle-dir`に同じ実際の名前を使用する。
+標準手順はtoolディレクトリへ移動して`BUNDLE="$PWD/sp-migration"`、ZIP名は`sp-migration.zip`で統一する。
+通常のZIPは暗号化されない。属性やアクセス制限の値を含むため、0600で保護し公開場所へ置かない。
+コマンドは[SP-INPORT-TOOLS.md 第6.1節](./SP-INPORT-TOOLS.md#61-bundle全体を転送する)を参照する。
+
+### REVIEWで終了コード0になったら、移行は完了している？
+
+解析modeでは完了していない。終了コード`0`は保留なくbundleを生成できたという意味である。
+`REVIEW`は確認後に選択できる候補、`HELD`は移行不可の候補を表す。
+metadata更新運用、移送元の信頼、NameID・暗号化、新IdP証明書のSP側信頼を確認し、
+別の新IdPでapplyなしの事前確認、必要な適用、最後に実browser SSO確認へ進む。
+一般モードで登録保留がなくても、元のアクセス制御が未移行なら終了コード10である。
+
+### 元IdPのJavaが11の場合、21へ切り替える必要がある？
+
+IdP本体のJavaを切り替える必要はない。SP Import Tools専用のJava 21を
+`/opt/2faskw-import-java21-complete`などへ完全に展開し、ツール起動時だけ指定する。
+標準のjava、alternatives、IdPのsystemd設定は変更しない。
+
+```bash
+sudo env JAVA=/opt/2faskw-import-java21-complete/bin/java \
+  ./graphicalmatrix-sp-import.sh --version
+```
+
+取得・SHA-256確認・展開・一般ユーザー/root双方の起動確認は、
+[専用Java 21の導入手順](./SP-INPORT-TOOLS.md#専用java-21を別ディレクトリへ導入するlinux)と
+同梱READMEを参照する。`bin/`だけをコピーせず、既存の不完全な展開先を上書きしない。
+古いOSの対応は別途確認する。終了コード2なら直前のエラーを確認し、bundleが生成されたと扱わない。
+
+### 「確認後に登録可能」は、具体的に何を確認する？
+
+確認済みという意味ではない。一覧と`review-checklist.txt`は各SPの元ファイル・送信予定属性に
+合わせて確認手順を表示する。`d 番号`で保存原本path/hash、期限、ACS、証明書fingerprint、
+元filterとアクセス制御の根拠・すべての診断を確認できる。
+共通確認事項は一覧の先頭に一度だけ表示し、各SPには送信予定属性などの固有事項を表示する。
+両方を確認する。`d 番号`は共通事項を含む単体の確認手順を表示する。
+
+- 原本の配信元・entityIDが正しく、署名を信頼鍵/trust engineで別途確認したこと。
+  未署名なら元の許容条件と別経路での真正性確認が必要で、hash一致だけで代用しない。
+- 親/entityの期限・cacheDuration・filter順序とroleが正しいこと。
+  動的snapshotは自動更新を引き継がないため、更新担当と手順も決める。
+- 表示された送信予定属性を承認し、新IdPのresolver/SAML mappingと対象ユーザーのAACLI結果を確認したこと。
+- 新IdPのdry-runで管理名、属性profile、MFA方針、ACS許可hostを確認したこと。
+  管理モードでは元/新の管理policyとglobal MFAも照合する。
+- 利用制限の移行方法を登録前に決め、登録後は隔離した新IdPで等価な設定と許可/拒否試験を行うこと。
+- 公開前にNameID・暗号化・SP側の新IdPへの信頼設定を確認し、実browser SSO・属性・MFAを試験すること。
+
+対話中は`held`、`ready`、`all`で表示を絞れる。番号と登録可否は変わらない。
+
+新しい解析の保留根拠には期限の実際の値、親group/entityの位置、UTCの`checked_at`と原因`reason`を表示する。
+期限切れ、不正日時、欠落、許容期間超過、未対応cacheDurationを区別し、filterの上限も確認する。
+属性条件の保留はpolicy名・属性ID・条件式を確認する。スクリプト本文や長大な条件は省略するため、
+省略表示がある場合は元XMLを確認する。検証を無効化したり未知の条件を`ANY`へ置換したりして回避しない。
+旧bundleに新しい根拠は追加されないため、必要なら新しい保存先へ再解析する。
+全件保留でも詳細確認と終了は可能だが登録できない。期限関連の保留は不正日時・未対応cacheDurationも
+含むため、詳細を読まず期限切れと断定したり、validUntilを書き換えて回避してはならない。
+説明TXTを編集しても承認・保留解除にはならない。
+
+### 保留の原因を分類して、SPごとの移行作業を確認するには？
+
+新版は一覧へ作業分類とSP別の作業順を表示する。詳しい対象ファイル位置・policy・
+属性ID・条件値と完了確認は`d 番号`または`migration-actions.txt`で確認できる。
+
+```bash
+less "$BUNDLE/migration-actions.txt"
+```
+
+- 属性ID欠落・末尾空白等は「元ファイル・設定要確認」。元resolverの正式IDと照合し、
+  意図確認・バックアップ後に修正する。例えば`uid `を自動で`uid`へ変えない。
+- 実際の期限切れは「元メタデータ更新」。元providerの更新失敗と時計を確認し、
+  信頼する最新版の署名・期限を検証する。不正日時やfilter上限超過とは区別する。
+- 値限定/denyは「属性送信条件の手動移行」。元設定の誤りとは断定しない。
+  新IdPの`conf/attribute-filter.xml`等で同等条件と共通/管理policyの影響を確認し、
+  filtered AACLI・SP受信属性で一致/不一致/空値/複数値混在を試験する。
+- 独自条件・script・ref等は「追加調査・個別判断」。意味を元IdP担当者と確認し、
+  実行・推測・`ANY`置換で回避しない。
+- 抽出方式、管理設定の整合性、認可の別途移行、公開前のSP信頼/SSO試験もSPごとに案内する。
+
+値限定は全値送信profileへ変換できないため、移行先に手動設定しても本ツールでは保留を維持する。
+必要なら信頼済み単体metadata・適切なprofile・手動filterを使う既存CLIの別手順を計画する。
+属性の値限定とログインの許可/拒否は別に試験する。親metadata更新後も別原因の保留は残り得る。
+
+分類・TXTは説明資料であり、承認・実行計画・検証結果ではない。TXT編集では解除できない。
+旧bundleも読めるが、古い診断から理由を推測しないため、詳しい分類が必要なら
+新版で元IdPを新しい保存先へ再解析する。
+
+### 元IdPのContextCheckで登録も止まる場合、別々に移行できる？
+
+修正版の一般IdPモードは`registration_state`と`access_control_state`を分離する。
+literalな`RelyingPartyByName`は該当SPへ限定して報告し、認可条件は`access-control.txt`へ
+AND/OR/NOT・属性map・regex・属性のfiltered/unfiltered指定とともに記録する。
+動的式、ref、Functionや設定欠落は`UNRESOLVED`であり、制限なしとは扱わない。
+`NONE_OBSERVED`も静的解析で検出しなかったという意味で、稼働中の制限なしを保証しない。
+
+認可が未移行でも登録だけ先に進める場合、新IdPを管理者が隔離してから以下を実行する。
+
+```bash
+cd "$HOME/2faskw-sp-import-tools-1.4.0"
+BUNDLE="$PWD/sp-migration"
+sudo ./graphicalmatrix-sp-import.sh \
+  --bundle-dir "$BUNDLE" \
+  --target-idp-home /opt/shibboleth-idp \
+  --registration-only \
+  --confirm-isolated-target \
+  --apply
+```
+
+対話で`REGISTER ONLY ISOLATED`を確認する。フラグだけでfirewallは設定されない。
+元の認可ルールは自動適用しないため、成功後も終了コード10・`REGISTERED_ACCESS_PENDING`になる。
+`runs/RUN_ID/access-control-status.txt`も確認し、認可再構成・許可/拒否browser試験までは隔離を維持する。
+NOTを単純denyへ変換したり、regexをドメイン一致へ単純化したりしない。
+既存`verify`はSP登録の照合であり認可の検証ではない。終了コード0を得るためにaddを繰り返さない。
+新しい出力先へ再解析し、両hostで同じ修正版を使う。旧一般bundleは`LEGACY_UNASSESSED`となる。
+曖昧なaggregate親設定・加工metadata filter・属性値限定releaseの保留は残るため、全候補が自動登録できる変更ではない。
+管理モードの2FAS-KW bundleではこの登録限定指定を拒否し、従来のpolicy移行手順を使う。
+
+### BUNDLE_LIMIT_EXCEEDED: manifest exceeds 4 MiBの場合は？
+
+旧版ツールの内部manifest容量制限である。多数のSPや詳細な解析・認可根拠で発生し、
+このエラーだけでは元IdPのXMLが不正とは判断できない。
+元/新host双方へ修正版を配置して再解析する。manifest上限は32 MiBに統一され、
+共通診断の重複保存も削減される。保留理由や認可根拠は保持する。
+出力先が未作成なら同じコマンドで再実行し、既存結果がある場合は保存して新しい
+`--export-dir`を使う。空のbundleを作成して迂回しない。
+32 MiB超の場合は`--entity-id`で対象を絞って別々のbundleへ保存する。
+詳細は[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md#manifestの容量超過)を参照。
+
+### 多くのSPがaggregateでHELD、標準内部beanまでUNRESOLVEDになる場合は？
+
+一般IdPでは、多数のSPが集合メタデータに含まれている場合がある。検出件数は利用中SP数ではない。
+修正版は標準system resourceのframework beanを`standard_framework_review`へ集約し、
+要確認の`MANUAL_REQUIRED`として扱う。独自class・未知selector・実際の不明な条件は`UNRESOLVED`のままである。
+この分類は標準ファイルの真正性や「制限なし」を保証しない。
+
+ファイルaggregateの独立snapshotを作る場合は、一般解析で明示指定する。
+
+```bash
+cd "$HOME/2faskw-sp-import-tools-1.4.0"
+BUNDLE="$PWD/sp-migration-recheck"
+sudo ./graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp \
+  --source-type shibboleth \
+  --extract-aggregate \
+  --export-dir "$BUNDLE" \
+  --non-interactive
+```
+
+元XMLは`evidence/metadata-sources/SHA256.xml`へ保存する。抽出snapshotは未署名であり、
+親のnamespace・最も早い期限を保持する。固定cache durationでも期限を制限する。
+親Extensions、xml:base、期限切れ、未知設定・加工filterは保留する。
+既知の署名・有効期限filterを要確認へ分類しても、署名検証が成功した意味ではない。
+原本署名・信頼・期限・group/filter順序を独立確認した後だけ、移行先の一般applyへ
+`--confirm-metadata-review`を追加し、`VERIFY SOURCE METADATA`を入力する。
+未移行認可があれば`--registration-only --confirm-isolated-target`と隔離確認も必要。
+元/新host双方に同じ修正版を配置して再解析し、原本を含むbundle全体を転送する。
+2FAS-KW管理モードは変更しない。詳細は[SP-INPORT-TOOLS.md 第5.3節](./SP-INPORT-TOOLS.md#53-一般idpの集合メタデータを明示的に抽出する)を参照。
+
+### 既存2FAS-KWでCLI管理したSPの場合は？
+
+`--source-type auto`（既定）はregistryの存在から2FAS-KWモードを選択する。
+破損registryは一般IdPモードへfallbackせず停止する。管理名/profile、SP別MFA/CIDRs、
+属性承認、allow/denyとenabled状態を実設定と照合して移す。revision/history/秘密鍵/利用者は移さない。
+
+```bash
+# 管理情報を含めて元IdPを解析する。元設定は変更しない。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp \
+  --source-type 2faskw \
+  --analysis-only
+
+# bundle転送・新IdPの前提確認後、隔離された新IdPへ対話で適用する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp \
+  --confirm-isolated-target \
+  --apply
+```
+
+新IdPの隔離はedge/firewall等で管理者が実施する。フラグだけでネットワーク隔離されるわけではない。
+SP登録後にaccess設定が失敗する可能性があるため、失敗時も隔離を維持して`--resume RUN_ID`で
+実状態を照合し残作業を継続する。元policyがdisabledの場合はset後にdisableする。
+全体MFAはコピーせず元/新設定の差分で停止する。新IdPのresolver/mapping/ACS host許可と、
+access policyを移す場合のContextCheck初期化・有効化は事前に完了する。
+同名既存profileの属性が違う場合や既存SPとの衝突は上書きしない。
+結果の`CONFIG_VERIFIED`は構成照合であり、公開判断・実SSO成功ではない。
+詳細な前提、再開、切替確認は[SP-INPORT-TOOLS.md 第10節](./SP-INPORT-TOOLS.md#10-2fas-kwで管理済みのspを新idpへ移す)を参照する。
+
+### 共通policyの属性が管理profileに含まれず、移行が保留された場合は？
+
+例えば管理profileが`uid,mail`で、`alwaysRelease`が`schacHomeOrganization`を追加している場合、
+修正版ツールはSP専用policyの属性と共通policyによる追加属性を分ける。
+この追加だけを理由に`SOURCE_ATTRIBUTE_FILTER_DRIFT`と判定しない。
+元IdPのprofileや共通policyを変更せず、修正版ZIPで新しい出力先へ再解析する。
+
+```bash
+cd "$HOME/2faskw-sp-import-tools-1.4.0"
+BUNDLE="$PWD/sp-migration-recheck"
+sudo ./graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp \
+  --export-dir "$BUNDLE" \
+  --non-interactive
+```
+
+`analysis.txt`の`managed_profile_attributes`と`additional_release_attributes`を確認する。
+古いHELD bundleを読み込むだけでは保留は解除されない。新bundle全体を別の新IdPへ転送する。
+この例だけは再解析のため`sp-migration-recheck`を使う。転送・展開・`--bundle-dir`も同じ別名に読み替える。
+新IdPに同じ追加属性のpolicy/resolver/mappingがなければ、差分を表示して書込み前に停止する。
+共通policyを自動コピーしたり、管理profileへ追加属性を混ぜたりはしない。
+SP専用policyそのものの属性差分や未知条件は、引き続き保留する。
+
 ## `graphicalmatrix.properties` の読込エラーはどのような場合に発生するか
 
 現在の実装では、主に以下の場合に `graphicalmatrix.properties` の読込エラーが発生する。

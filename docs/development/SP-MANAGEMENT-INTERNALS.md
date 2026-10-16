@@ -7,6 +7,15 @@ MFA方針、SP別access policyの内部設計を説明します。操作手順�
 
 ## Command architecture
 
+The standalone [SP Import Tools](./SP-IMPORT-TOOLS.md) analyzes a different source
+IdP and invokes this existing CLI. It does not change this management runtime,
+add shared locks, or write the registry directly. Its source and distribution
+are kept separate from the IdP plugin.
+Its managed-source mode cross-checks the existing registry/catalog/filter/MFA/access
+contracts and replays approved intent through this CLI. Global MFA is compared, not
+copied. Per-SP access is applied after registration under mandatory target isolation;
+the importer handles partial resume without changing this CLI's transactions or locks.
+
 ```text
 graphicalmatrix-sp.sh
   -> Java classpath and IDP_HOME setup
@@ -255,4 +264,3 @@ registryとのdriftになります。`mfa show`と`mfa reconcile`はこの差分
 
 SP管理変更ではunit testに加え、`scripts/tests/package-regression.sh`で配布物にCLI、依存JAR、
 template、documentationが含まれることを確認します。
-

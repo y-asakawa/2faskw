@@ -27,6 +27,9 @@ Only materials actually used or reviewed should be listed as design sources.
 
 ## Files
 
+- [SP-IMPORT-TOOLS.md](./SP-IMPORT-TOOLS.md): standalone source analysis and one-time
+  migration decisions introduced in the local v1.4.0 development work.
+
 - [DESIGN-SOURCES.md](./DESIGN-SOURCES.md): public specifications, standards, OSS
   documentation, patents, papers, and other public sources actually reviewed.
 - [DESIGN-DECISIONS.md](./DESIGN-DECISIONS.md): important architectural and security
