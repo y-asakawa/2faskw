@@ -88,7 +88,7 @@ Dashboard ZIPもShibboleth pluginではなく、Dashboard Service、Agent、オ�
 単独導入するための配布物である。詳細な`docs/`は含めず、配布専用READMEから
 [DASHBOARD.md](./DASHBOARD.md)へ案内する。
 SP Import Toolsも独立ZIPであり、Java 21の専用JARとホームで動く入口scriptを含む。
-管理ファイル解析用のJackson core 2.21.5を`lib/`へ同梱し、JAR manifestのClass-Path、
+管理ファイル解析用のJackson core 2.21.7を`lib/`へ同梱し、JAR manifestのClass-Path、
 `package-metadata/RUNTIME-DEPENDENCIES.txt`、CycloneDX形式の`SBOM.cdx.json`を生成・検査する。
 SBOMには同梱ライブラリのSHA-256を記録する。既存IdPのclasspathへ追加する方式ではない。
 詳細は[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md)を参照する。既存IdPプラグインJARには含めない。

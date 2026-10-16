@@ -22,7 +22,7 @@ Shibbolethの`plugin.sh`でインストールする製品ではない。
 ~/2faskw-sp-import-tools-1.4.0/
   graphicalmatrix-sp-import.sh
   lib/2faskw-sp-import-tools-1.4.0.jar
-  lib/jackson-core-2.21.5.jar
+  lib/jackson-core-2.21.7.jar
   README.md
   package-metadata/
   sp-migration/                  # 初回解析時に生成。ZIPには含めない

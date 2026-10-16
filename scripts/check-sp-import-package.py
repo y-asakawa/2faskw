@@ -10,7 +10,7 @@ import zipfile
 
 archive, root, version = sys.argv[1:4]
 required = {
-    'graphicalmatrix-sp-import.sh', f'lib/2faskw-sp-import-tools-{version}.jar', 'lib/jackson-core-2.21.5.jar',
+    'graphicalmatrix-sp-import.sh', f'lib/2faskw-sp-import-tools-{version}.jar', 'lib/jackson-core-2.21.7.jar',
     'README.md', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.md',
     'package-metadata/VERSION', 'package-metadata/COMPATIBILITY.txt',
     'package-metadata/PACKAGE-CONTENTS.txt', 'package-metadata/PACKAGE-MANIFEST.sha256', 'package-metadata/RUNTIME-DEPENDENCIES.txt',
@@ -60,7 +60,7 @@ with zipfile.ZipFile(archive) as z:
             if 'io/github/yasakawa/faskw/spimport/' + name + '.class' not in jar.namelist():
                 raise SystemExit('missing two-stage migration implementation: ' + name)
         manifest = jar.read('META-INF/MANIFEST.MF').decode().replace('\r\n ', '').replace('\r\n', '\n')
-        if 'Class-Path: jackson-core-2.21.5.jar\n' not in manifest:
+        if 'Class-Path: jackson-core-2.21.7.jar\n' not in manifest:
             raise SystemExit('runtime dependency missing from JAR classpath')
         for entry in (
             'Implementation-Title: 2FAS-KW SP Import Tools',
@@ -74,7 +74,7 @@ with zipfile.ZipFile(archive) as z:
     if sbom['metadata']['component']['version'] != version or len(components) != 1:
         raise SystemExit('SBOM version/component mismatch')
     component = components[0]
-    if component['purl'] != 'pkg:maven/com.fasterxml.jackson.core/jackson-core@2.21.5' or component['hashes'] != [
-            {'alg': 'SHA-256', 'content': hashlib.sha256(read('lib/jackson-core-2.21.5.jar')).hexdigest()}]:
+    if component['purl'] != 'pkg:maven/com.fasterxml.jackson.core/jackson-core@2.21.7' or component['hashes'] != [
+            {'alg': 'SHA-256', 'content': hashlib.sha256(read('lib/jackson-core-2.21.7.jar')).hexdigest()}]:
         raise SystemExit('SBOM dependency hash mismatch')
 print('SP Import package contents and manifest: OK')

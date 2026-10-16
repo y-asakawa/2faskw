@@ -278,7 +278,7 @@ reader and runtime Properties reader must yield identical data. Duplicate proper
 continuations and ambiguous escape/non-ASCII decoding are held rather than guessed.
 The initial CIDR adapter supports IPv4 only.
 
-Jackson core 2.21.5 is the sole additional runtime dependency, packaged beside the
+Jackson core 2.21.7 is the sole additional runtime dependency, packaged beside the
 tool JAR, not installed into the IdP. Trees contain only maps/lists/strings/longs/
 booleans. Limits include 4 MiB JSON input, depth 32 and 100000 nodes, with narrower
 registry/catalog/access file limits of 2/1/1 MiB. Duplicate keys, unknown fields,

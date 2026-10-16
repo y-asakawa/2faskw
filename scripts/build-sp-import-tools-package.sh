@@ -36,7 +36,7 @@ rm -rf "$PACKAGE"
 mkdir -p "$PACKAGE/lib" "$PACKAGE/package-metadata"
 install -m 0755 sp-import-tools/graphicalmatrix-sp-import.sh "$PACKAGE/graphicalmatrix-sp-import.sh"
 cp "sp-import-tools/target/$BASE.jar" "$PACKAGE/lib/"
-cp sp-import-tools/target/runtime-libraries/jackson-core-2.21.5.jar "$PACKAGE/lib/"
+cp sp-import-tools/target/runtime-libraries/jackson-core-2.21.7.jar "$PACKAGE/lib/"
 cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "$PACKAGE/"
 "$PYTHON" - "$PACKAGE" "$VERSION" <<'PY'
 import hashlib
@@ -64,15 +64,15 @@ template = pathlib.Path('plugin-metadata/SP-IMPORT-PACKAGE-README.md.in').read_t
     'Unknown conditions are held by default; explicit deferred mode retains attribute holds as phase-two work, never resolves metadata/global holds.\n'
     'Historical IdP runtime behavior is not certified.\n', encoding='utf-8')
 (package / 'package-metadata/RUNTIME-DEPENDENCIES.txt').write_text(
-    'com.fasterxml.jackson.core:jackson-core:2.21.5 | Apache-2.0 | lib/jackson-core-2.21.5.jar\n', encoding='utf-8')
+    'com.fasterxml.jackson.core:jackson-core:2.21.7 | Apache-2.0 | lib/jackson-core-2.21.7.jar\n', encoding='utf-8')
 (package / 'package-metadata/SBOM.cdx.json').write_text(json.dumps({
     'bomFormat': 'CycloneDX', 'specVersion': '1.6', 'version': 1,
     'metadata': {'component': {'type': 'application', 'name': '2faskw-sp-import-tools', 'version': version,
         'purl': f'pkg:maven/io.github.yasakawa/2faskw-sp-import-tools@{version}'}},
     'components': [{'type': 'library', 'group': 'com.fasterxml.jackson.core', 'name': 'jackson-core',
-        'version': '2.21.5', 'purl': 'pkg:maven/com.fasterxml.jackson.core/jackson-core@2.21.5',
+        'version': '2.21.7', 'purl': 'pkg:maven/com.fasterxml.jackson.core/jackson-core@2.21.7',
         'licenses': [{'license': {'id': 'Apache-2.0'}}],
-        'hashes': [{'alg': 'SHA-256', 'content': hashlib.sha256((package / 'lib/jackson-core-2.21.5.jar').read_bytes()).hexdigest()}]}]
+        'hashes': [{'alg': 'SHA-256', 'content': hashlib.sha256((package / 'lib/jackson-core-2.21.7.jar').read_bytes()).hexdigest()}]}]
 }, indent=2) + '\n', encoding='utf-8')
 content = package / 'package-metadata/PACKAGE-CONTENTS.txt'
 content.touch()
