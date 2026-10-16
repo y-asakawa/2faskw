@@ -39,6 +39,7 @@ PostgreSQL HA構成、検証用IdP/AP、SimpleSAMLphpテストSPを構築する�
 - [INSTALL_Passchange_SP.md](./INSTALL_Passchange_SP.md)
 
 管理CLIだけを導入する場合は、[ADMIN-TOOLS.md](./ADMIN-TOOLS.md) を参照してください。
+既存の一般的なShibboleth IdPからSPを移行する場合は、[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md)を参照してください。
 API連携を行う場合は、[openapi.yaml](./openapi.yaml)、
 [API-TOKEN-ROTATION.md](./API-TOKEN-ROTATION.md)、
 [API-CURL-TESTS.md](./API-CURL-TESTS.md) を参照してください。
@@ -62,6 +63,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [development/CODE-REFERENCE.md](./development/CODE-REFERENCE.md) | 主要クラス・関数の責務、変更影響、テスト対応。 |
 | [development/AUTHENTICATION-FLOW.md](./development/AUTHENTICATION-FLOW.md) | 認証、MFA選択、自己管理、TOTP、WebAuthnの呼出関係。 |
 | [development/SP-MANAGEMENT-INTERNALS.md](./development/SP-MANAGEMENT-INTERNALS.md) | SP registry、metadata、属性、access、MFA管理CLIの内部設計。 |
+| [development/SP-IMPORT-TOOLS.md](./development/SP-IMPORT-TOOLS.md) | Standalone Java source analyzer, migration bundle, existing-CLI orchestration, and tests. |
 | [development/DATA-STORAGE.md](./development/DATA-STORAGE.md) | DB/LDAP schema、状態遷移、sequence/TOTP保護、backup境界。 |
 | [development-history/README.md](./development-history/README.md) | 公開情報、設計判断、実装根拠、prior-art調査を結ぶdesign provenance記録。 |
 
@@ -74,6 +76,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [INSTALL_Manual_Installation.md](./INSTALL_Manual_Installation.md) | `graphicalmatrix-plugin-check.sh` / `graphicalmatrix-plugin-config.sh` を使わずに手動で確認・配置する手順。 |
 | [INSTALL_LDAP.md](./INSTALL_LDAP.md) | LDAP新規導入、属性設計、TOTP/WebAuthn LDAP保存設定の手順。 |
 | [INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md) | v1.3.0のSP管理CLIを使った、新しいSAML SPの登録、属性release、SP別MFA方針、検証、取消し手順。 |
+| [SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md) | 一般IdP/既存2FAS-KWのSP設定を解析し、別IdPへ既存CLIで登録。管理モードの隔離・アクセス制限・部分再開も説明する。 |
 | [INSTALL_NEW_Manual_SP.md](./INSTALL_NEW_Manual_SP.md) | SP管理CLIを使わず、metadata provider、属性release、MFAポリシーを手作業で設定する手順。 |
 | [INSTALL_Passchange_IdP.md](./INSTALL_Passchange_IdP.md) | GraphicalMatrix変更およびMFA方式変更を、IdP内のShibboleth再認証済み自己管理フローで提供するための設計。推奨方式。 |
 | [INSTALL_Passchange_SP.md](./INSTALL_Passchange_SP.md) | 外部自己管理SPを追加し、GraphicalMatrix変更およびMFA方式変更を提供するための設計。 |
@@ -99,6 +102,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | File | Description |
 | --- | --- |
 | [ADMIN-TOOLS.md](./ADMIN-TOOLS.md) | 管理CLI、Admin Tools 単体導入、CSV import/export、監査ログの運用説明。 |
+| [release-notes/v1.4.0-SP-IMPORT-TOOLS.md](./release-notes/v1.4.0-SP-IMPORT-TOOLS.md) | SP Import Toolsの実装構成、対応範囲、失敗・再実行、配布・ビルド。 |
 | [BACKUP-RESTORE.md](./BACKUP-RESTORE.md) | DB/LDAP、storage-format secret、IdP設定、SP管理情報を同一世代で保存・検証復元する手順。 |
 | [OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md) | 日常点検、変更作業、障害切り分け、security incident初動、復旧完了判定。 |
 | [CSV-EXPORT.md](./CSV-EXPORT.md) | `graphicalmatrix_enrollment` から管理CSVを出力する手順。 |

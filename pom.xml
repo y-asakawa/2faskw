@@ -38,13 +38,13 @@
         <jakarta.servlet.version>6.1.0</jakarta.servlet.version>
         <spring.framework.version>7.0.9</spring.framework.version>
         <httpclient.version>4.5.14</httpclient.version>
-        <slf4j.version>2.0.19</slf4j.version>
+        <slf4j.version>2.0.20</slf4j.version>
         <zxing.version>3.5.4</zxing.version>
-        <postgresql.version>42.7.13</postgresql.version>
+        <postgresql.version>42.7.14</postgresql.version>
         <hikaricp.version>7.1.0</hikaricp.version>
-        <owasp.encoder.version>1.4.0</owasp.encoder.version>
+        <owasp.encoder.version>1.5.0</owasp.encoder.version>
         <junit.version>6.1.3</junit.version>
-        <h2.version>2.5.250</h2.version>
+        <h2.version>2.5.252</h2.version>
     </properties>
 
     <repositories>

@@ -13,6 +13,15 @@ CLIを使わずに`metadata-providers.xml`、`attribute-filter.xml`、`mfa-polic
 従来手順は、[INSTALL_NEW_Manual_SP.md](./INSTALL_NEW_Manual_SP.md)を参照する。CLI管理するSPに対して、
 それらのファイルを直接編集してはならない。
 
+別の既存IdPから複数SPを移す場合は、v1.4.0の独立配布
+[SP Import Tools](./SP-INPORT-TOOLS.md)を使用できる。一般IdPのXML解析に加え、
+既存2FAS-KWの管理名/profile/SP別MFA/access policyも整合性確認付きで移行する。
+管理モードでは新IdPを隔離し、登録とaccess設定の間に利用者が接続しないようにする。
+単一SPの通常追加、同一IdPのadopt、IdP全体の更新とは別の手順である。
+元IdPの解析bundleはディレクトリSCP、またはZIP・SCP・新IdPでの展開により移す。
+XML単体や配布ツールZIPだけでは解析結果を移送できない。
+転送手順は[SP-INPORT-TOOLS.md 第6.1節](./SP-INPORT-TOOLS.md#61-bundle全体を転送する)を参照する。
+
 ## 2. 事前に決める項目
 
 | 項目 | 内容 |

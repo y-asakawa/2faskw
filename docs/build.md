@@ -5,17 +5,18 @@
 リリースおよびパッケージのビルドでは、`version.ini` をバージョン情報の正とする。
 
 ```ini
-VERSION=1.3.0
+VERSION=1.4.0
 ARTIFACT_ID=2faskw-idp-plugin
 ADMIN_ARTIFACT_ID=2faskw-admin-tools
 DASHBOARD_ARTIFACT_ID=2faskw-dashboard
+SP_IMPORT_ARTIFACT_ID=2faskw-sp-import-tools
 ```
 
 `scripts/build-plugin-package.sh` は `version.ini` を読み込み、Mavenへ
 `-Drevision` としてバージョンを渡す。plugin metadata、OpenAPI、パッケージに
 同梱する文書も同じバージョンで生成する。
 
-Mavenを直接実行する場合、PluginとDashboardの`pom.xml`は`revision`の既定値として
+Mavenを直接実行する場合、Plugin、Dashboard、SP Import Toolsの`pom.xml`は`revision`の既定値として
 `0.0.0-SNAPSHOT`を使用する。これは、`version.ini`を読み込まない直接buildを公開releaseと
 誤認しないための開発用versionである。リリース成果物は`scripts/build-plugin-package.sh`で
 生成する。
@@ -28,7 +29,7 @@ mvn -B -ntp clean package
 
 ## リリースパッケージ
 
-plugin、管理ツール、Standalone Dashboardのリリースパッケージを生成する。
+plugin、管理ツール、Standalone Dashboard、SP Import Toolsのリリースパッケージを生成する。
 
 ```bash
 ./scripts/build-plugin-package.sh
@@ -39,10 +40,10 @@ plugin、管理ツール、Standalone Dashboardのリリースパッケージを
 `bootstrap/keys.txt` として格納される。秘密鍵やpassphraseをリポジトリに置いてはいけない。
 
 スクリプトは`version.ini`の`VERSION`をMavenへ`-Drevision`で渡してbuildし、Pluginと
-DashboardのJAR Manifestに記録された`Implementation-Version`が同じ値であることを検査する。
+Dashboard、SP Import ToolsのJAR Manifestに記録された`Implementation-Version`が同じ値であることを検査する。
 不一致の場合は配布物を生成せず終了する。その後、リリース用ディレクトリ、
 固定名およびバージョン付きのplugin ZIP/tar.gz、固定名およびバージョン付きの
-Admin Tools ZIP、固定名およびバージョン付きのDashboard ZIP、固定名アーカイブ4件の
+Admin Tools ZIP、固定名およびバージョン付きのDashboard ZIP、SP Import Tools ZIP、固定名アーカイブ5件の
 `SHA256SUMS`を生成する。
 
 ローカルでソースから作成した成果物は、リリース担当者の署名手順で署名されるまでは、
@@ -59,6 +60,8 @@ target/admin-dist/2faskw-admin-tools-<VERSION>.zip
 target/admin-dist/2faskw-admin-tools.zip
 target/dashboard-dist/2faskw-dashboard-<VERSION>.zip
 target/dashboard-dist/2faskw-dashboard.zip
+target/sp-import-dist/2faskw-sp-import-tools-<VERSION>.zip
+target/sp-import-dist/2faskw-sp-import-tools.zip
 target/plugin-dist/SHA256SUMS
 ```
 
@@ -71,6 +74,12 @@ IdPプラグイン本体と同様、Admin Tools ZIPにも詳細な`docs/`は含�
 Dashboard ZIPもShibboleth pluginではなく、Dashboard Service、Agent、オフラインimport CLIを
 単独導入するための配布物である。詳細な`docs/`は含めず、配布専用READMEから
 [DASHBOARD.md](./DASHBOARD.md)へ案内する。
+SP Import Toolsも独立ZIPであり、Java 21の専用JARとホームで動く入口scriptを含む。
+管理ファイル解析用のJackson core 2.21.5を`lib/`へ同梱し、JAR manifestのClass-Path、
+`package-metadata/RUNTIME-DEPENDENCIES.txt`、CycloneDX形式の`SBOM.cdx.json`を生成・検査する。
+SBOMには同梱ライブラリのSHA-256を記録する。既存IdPのclasspathへ追加する方式ではない。
+詳細は[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md)を参照する。既存IdPプラグインJARには含めない。
+単独の検証・未署名梱包には`./scripts/build-sp-import-tools-package.sh`を使用できる。
 
 通常ビルドではGPG署名を生成しない。秘密鍵を保管するリリース環境で、追跡対象の
 Git差分がないことを確認してから、リリース担当者だけが次を実行する。
@@ -79,7 +88,7 @@ Git差分がないことを確認してから、リリース担当者だけが�
 ./scripts/build-plugin-package.sh --sign
 ```
 
-`--sign`は、固定名とバージョン付きのpluginアーカイブ、Admin Tools ZIP、Dashboard ZIP、
+`--sign`は、固定名とバージョン付きのpluginアーカイブ、Admin Tools ZIP、Dashboard ZIP、SP Import Tools ZIP、
 `SHA256SUMS`へASCII armored detached signatureを生成する。その後、
 `bootstrap/keys.txt`だけを読み込んだ一時鍵リングで、署名とfingerprintを検証する。
 秘密鍵、passphrase、秘密鍵バックアップ、失効証明書をGit、CI、配布物へ置いてはいけない。

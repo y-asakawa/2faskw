@@ -17,6 +17,10 @@ DASHBOARD_DIST="$ROOT/target/dashboard-dist"
 DASHBOARD_ROOT="2faskw-dashboard-$VERSION"
 DASHBOARD_VERSIONED="$DASHBOARD_DIST/$DASHBOARD_ROOT.zip"
 DASHBOARD_FIXED="$DASHBOARD_DIST/2faskw-dashboard.zip"
+SP_IMPORT_DIST="$ROOT/target/sp-import-dist"
+SP_IMPORT_ROOT="2faskw-sp-import-tools-$VERSION"
+SP_IMPORT_VERSIONED="$SP_IMPORT_DIST/$SP_IMPORT_ROOT.zip"
+SP_IMPORT_FIXED="$SP_IMPORT_DIST/2faskw-sp-import-tools.zip"
 CHECKSUMS="$PLUGIN_DIST/SHA256SUMS"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
@@ -45,6 +49,8 @@ for file in \
   "$ADMIN_FIXED" \
   "$DASHBOARD_VERSIONED" \
   "$DASHBOARD_FIXED" \
+  "$SP_IMPORT_VERSIONED" \
+  "$SP_IMPORT_FIXED" \
   "$CHECKSUMS"; do
   [[ -s "$file" ]] || fail "required artifact is missing or empty: $file"
 done
@@ -53,12 +59,39 @@ cmp -s "$ADMIN_VERSIONED" "$ADMIN_FIXED" \
   || fail "fixed-name and versioned Admin Tools ZIP files differ"
 cmp -s "$DASHBOARD_VERSIONED" "$DASHBOARD_FIXED" \
   || fail "fixed-name and versioned Dashboard ZIP files differ"
+cmp -s "$SP_IMPORT_VERSIONED" "$SP_IMPORT_FIXED" \
+  || fail "fixed-name and versioned SP Import ZIP files differ"
+"$PYTHON" "$ROOT/scripts/check-sp-import-package.py" "$SP_IMPORT_FIXED" "$SP_IMPORT_ROOT" "$VERSION"
+
+# Exercise managed JSON loading through the extracted launcher's packaged classpath.
+unzip -q "$SP_IMPORT_FIXED" -d "$TMP/sp-import-runtime"
+"$PYTHON" - "$TMP/managed-source" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+conf = root / 'conf/graphicalmatrix'
+conf.mkdir(parents=True)
+(conf / 'sp-management-registry.json').write_text(json.dumps({'schemaVersion': 2, 'entries': []}), encoding='utf-8')
+PY
+runtime_rc=0
+"$TMP/sp-import-runtime/$SP_IMPORT_ROOT/graphicalmatrix-sp-import.sh" \
+  --source-idp-home "$TMP/managed-source" --source-type 2faskw --analysis-only \
+  > "$TMP/managed-runtime.txt" 2>&1 || runtime_rc=$?
+[[ "$runtime_rc" == 3 ]] || fail "managed runtime fixture should be held, rc=$runtime_rc"
+[[ -s "$TMP/sp-import-runtime/$SP_IMPORT_ROOT/sp-migration/analysis.txt" ]] \
+  || fail "extracted managed launcher did not produce analysis reports"
+if grep -Eq 'NoClassDefFoundError|ClassNotFoundException' "$TMP/managed-runtime.txt"; then
+  fail "managed parser dependency is missing from extracted runtime"
+fi
 
 cp \
   "$PLUGIN_DIST/2faskw-idp-plugin.tar.gz" \
   "$PLUGIN_DIST/2faskw-idp-plugin.zip" \
   "$ADMIN_FIXED" \
   "$DASHBOARD_FIXED" \
+  "$SP_IMPORT_FIXED" \
   "$CHECKSUMS" \
   "$TMP/"
 (

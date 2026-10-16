@@ -124,6 +124,132 @@ sudo tail -n 200 /opt/shibboleth-idp/logs/idp-process.log
 | `--config-only --idp-home DIR` | 設定ファイルと参照ファイルを検査する。DB接続は行わない。 |
 | `--strict` | WARNも失敗として扱う。リリース前・変更後確認に使う。 |
 
+### 2.2 SP Import Tools専用の移行入口
+
+IdP/Admin Toolsの`bin/`へは追加せず、独立ZIPをホームへ展開する。
+元設定は読取専用、新IdPへの更新は既存SP管理CLIだけで行う。
+元hostで生成されたbundle全体を、ディレクトリSCPまたはZIP・SCP・新hostでの展開により移す。
+詳細な転送コマンドは[SP-INPORT-TOOLS.md 第6.1節](./SP-INPORT-TOOLS.md#61-bundle全体を転送する)を参照する。
+下記は既定の出力名`sp-migration`の例である。`--export-dir`を指定した場合は、
+すべての`--bundle-dir`を実際に生成・転送・展開したディレクトリへ読み替える。
+同梱READMEと操作マニュアルの標準例も`BUNDLE="$PWD/sp-migration"`、転送ZIPは`sp-migration.zip`で統一する。
+解析の終了コード`0`と`REVIEW`表示は登録完了ではない。同じ元IdPへ戻して適用しない。
+
+```bash
+# 既存2FAS-KWの管理名、属性profile、SP別MFA/CIDR、access policyを照合・exportする。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp --source-type 2faskw --analysis-only
+
+# 別hostへ転送したbundleで新IdPの前提を確認する。applyを付けない読取処理である。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp
+
+# 隔離済みの新IdPへ、対話で承認した管理設定を適用する。SP側SSO切替は別途行う。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp --confirm-isolated-target --apply
+
+# 部分失敗した計画と実状態を照合し、未完了段階だけを再開する。同じ対象を選択する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp --resume RUN_ID --confirm-isolated-target --apply
+```
+
+`--source-type auto`が既定。一般IdPを明示する場合は`shibboleth`だが、2FAS-KW管理方針は
+そのmodeでは移行しない。全体MFA差分、未知の条件、既存SP/profile衝突は自動修復しない。
+
+一覧には各SPの登録前確認を具体的に表示し、同じ内容を`review-checklist.txt`にも保存する。
+共通確認事項は先頭に一度だけ表示し、各SPには元ファイル・送信予定属性・利用制限などの固有事項を表示する。
+両方を確認する。`d 番号`の詳細は、共通事項を含む単体の確認手順となる。
+原本配信元・署名/期限、送信予定属性とAACLI、移行先MFA/ACS、利用制限、SP側信頼・SSO試験を確認する。
+「確認後に登録可能」は確認済みという意味ではない。対話では`held`、`ready`、`all`、`d 番号`を使用でき、
+絞り込み後も番号と登録判定は変わらない。全件保留でも詳細確認・終了は可能である。
+`--lang en`はガイダンスの英語表示。元診断と登録時の確認要件は維持する。
+新しい解析の保留根拠は期限/期間の実値、UTCの`checked_at`、原因`reason`、該当する親group/entityの位置、
+filterの許容上限を示す。属性条件はpolicy名・属性ID・条件treeを示し、本文/未知の値や長大な部分を省略する。
+省略された条件は元XMLを確認する。旧bundleに新しい値を推測で追加しないため、必要なら別保存先へ再解析する。
+
+一覧は作業分類とSP別の作業順も表示し、`d 番号`と任意資料`migration-actions.txt`で
+対象ファイル・policy・属性ID・条件値・完了確認を示す。属性IDの空白等は元設定確認、
+実際の期限切れは原本更新、値限定/denyは手動同等移行、独自条件は追加調査へ分ける。
+分類件数は同じSP内で重複を除くが分類間は重複する。分類だけで登録可能にはならない。
+手動条件はHELDを維持し、移行先への手動設定でも解除しない。全値送信への置換で回避せず、
+必要なら既存CLIの別手順を計画する。filtered AACLIの一致/不一致/空値/複数値混在と
+SP受信属性を確認し、認可・信頼/SSO試験と区別する。TXTは承認・実行計画ではない。
+既存CLI・選択制約・隔離・終了コードは変更せず、旧bundleにもこのTXTを必須化しない。
+
+一般モードでは登録と元の認可条件を分離して`access-control.txt`へ出力する。
+非標準の自己完結したContextCheck設定は元解析時に`--context-check-config FILE`を指定する。
+認可が未移行のSPの通常applyは書込前に停止する。登録だけ先に進める場合は新IdPを先に隔離する。
+
+```bash
+# 一般bundleだけに使用する。元の認可条件は移行しない。隔離は管理者が別途実施する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp \
+  --registration-only --confirm-isolated-target --apply
+```
+
+追加対話は`REGISTER ONLY ISOLATED`。終了コード10・`REGISTERED_ACCESS_PENDING`は
+登録が成功しても認可未移行という意味であり、認可再構成とbrowser許可/拒否試験まで隔離を維持する。
+管理bundleへの`--registration-only`は拒否する。再開時も同じフラグ・移行先・計画が必要である。
+sudoの解析例はSecureDirectoryStream対応Linuxが前提であり、非対応環境では読取可能なsnapshotをsudoなしで使う。
+
+一般IdPのファイルaggregateを明示抽出する場合は、解析へ`--extract-aggregate`を追加する。
+原本XMLをhash付きでbundleへ保存し、未署名snapshotに継承namespaceと最も早い期限を反映する。
+未知の親情報・加工filterは保留する。標準検証filterは要確認であって検証成功ではない。
+
+```bash
+# 新しい出力先を選ぶ。既存bundleは上書きしない。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --source-idp-home /opt/shibboleth-idp --source-type shibboleth \
+  --extract-aggregate --export-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration-recheck" \
+  --non-interactive
+
+# 独立した原本の署名・信頼・期限・group/filter確認と、新IdP隔離の実施後のみ。
+# 移行先で転送済みの実際のbundleを指定する。認可は自動移行しない。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration-recheck" \
+  --target-idp-home /opt/shibboleth-idp \
+  --confirm-metadata-review --registration-only --confirm-isolated-target --apply
+```
+
+metadata確認の追加対話は`VERIFY SOURCE METADATA`。確認flagだけでは署名検証・隔離を行わない。
+再開も同じmetadata確認flagを要する。一般plan-v3は旧plan-v1/v2と自動互換ではない。
+`--extract-aggregate`は元解析専用で管理モードには使用できず、
+`--confirm-metadata-review`は移行先の一般モード専用である。
+隔離フラグは申告でありfirewallを変更しない。手順・終了コード・対話確認は
+[SP-INPORT-TOOLS.md](./SP-INPORT-TOOLS.md)を参照する。
+
+### SP登録と属性送信を分離する（一般IdP bundle）
+
+```bash
+# 新IdPで属性後設定modeの登録予定だけを確認する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp --defer-attributes
+
+# 管理者が新IdPのネットワーク隔離を実施した後だけ適用する。
+sudo ~/2faskw-sp-import-tools-1.4.0/graphicalmatrix-sp-import.sh \
+  --bundle-dir "$HOME/2faskw-sp-import-tools-1.4.0/sp-migration" \
+  --target-idp-home /opt/shibboleth-idp \
+  --defer-attributes --registration-only --confirm-isolated-target --apply
+```
+
+profileは`none`固定。属性承認・profile作成・認可移行を行わず、属性個別の保留だけを
+登録viewのREVIEWとして後工程へ分ける。元bundleは変更せず、その他の保留は維持する。
+管理2FAS-KW bundleでは拒否する。追加対話は`DEFER ATTRIBUTES ISOLATED`であり、
+未移行認可なら`REGISTER ONLY ISOLATED`、要確認metadataなら原本確認後の
+`--confirm-metadata-review`と`VERIFY SOURCE METADATA`も必要である。
+dry-run/登録段階完了は終了コード11。`attribute-migration-todo.txt`で後工程を確認する。
+既存CLIで属性承認/profile作成/`set-attributes`、元の値条件と認可の再構成を行う。
+noneでも共有policyは属性を送信し得るため、filtered AACLI・受信属性・許可/拒否・SSO/MFA確認まで隔離する。
+resumeは同じmode/フラグを維持する。modeの変更や設定済みprofileのnoneへの上書きはしない。
+metadataは準備時・書込前・SP登録直前に期限を再確認する。期限切れなら最新原本から新bundleを生成する。
+静的snapshotは元のHTTP自動更新を引き継がない。後工程のコマンド例は
+[SP-INPORT-TOOLS.md 第6.3節](./SP-INPORT-TOOLS.md#63-推奨sp登録と属性送信設定を分ける一般idpモード)を参照する。
+
 ## 3. DB管理CLI
 
 この節は`graphicalmatrix.savedata = db`の場合だけに適用する。LDAP保存時はLDAPの管理手段を使う。

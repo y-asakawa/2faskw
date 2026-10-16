@@ -27,6 +27,16 @@ Version 2.0. See `LICENSE`.
 | H2 Database Engine | 2.4.240 | MPL-2.0 OR EPL-1.0 | Rebuildable Dashboard search index. It is not the MFA enrollment database. |
 | RE2/J | 1.8 | BSD-3-Clause | Linear-time regular expression matching for event filters. |
 
+## Runtime Libraries Bundled in the SP Import Tools ZIP
+
+| Component | Version | License | Notes |
+| --- | --- | --- | --- |
+| Jackson core | 2.21.5 | Apache-2.0 | Bounded streaming JSON parsing of management records; no databind or polymorphic object loading. |
+
+The standalone tool ships its dependency JAR beside the application JAR. Its package
+metadata includes a runtime dependency inventory and a CycloneDX JSON SBOM with the
+bundled library's SHA-256. It does not change the IdP's runtime libraries.
+
 ## Provided by the Shibboleth IdP Runtime
 
 These dependencies are declared with Maven `provided` scope and are not

@@ -19,6 +19,18 @@
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
+### v1.4.0のSP移行支援ツールを利用する場合
+
+SP Import Toolsはホームへ展開する独立ZIPであり、ツールだけを使うために既存IdPの
+認証設定・DB schemaを更新する必要はない。移行先CLIの連携対象は1.3.5/1.4.0である。
+既存IdPをその場でアップグレードする本書の手順と、別IdPへのSP移行を混同しない。
+既存2FAS-KWの管理SPを移す場合は[SP-INPORT-TOOLS.md 第10節](./SP-INPORT-TOOLS.md#10-2fas-kwで管理済みのspを新idpへ移す)
+に従い、隔離・backup・属性/ContextCheck準備、部分失敗時の再開、実SSOを確認する。
+登録revision/history/ユーザー/MFA credential/秘密鍵は移行せず、全体MFAも自動変更しない。
+解析bundleの転送は[SP-INPORT-TOOLS.md 第6.1節](./SP-INPORT-TOOLS.md#61-bundle全体を転送する)に従う。
+配布ZIPとは別にbundle全体をSCPするかZIP化して移送し、新IdPのtool配下へ展開する。
+既存bundleへの上書き・混在は行わず、`--bundle-dir`には実際の転送先を指定する。
+
 ## バージョン別の追加確認
 
 | 更新元 | 更新先 | 必須対応 | 任意対応 |

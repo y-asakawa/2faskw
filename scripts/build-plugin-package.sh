@@ -159,6 +159,7 @@ require_var VERSION
 require_var ARTIFACT_ID
 require_var ADMIN_ARTIFACT_ID
 require_var DASHBOARD_ARTIFACT_ID
+require_var SP_IMPORT_ARTIFACT_ID
 require_var PLUGIN_ID
 require_var DOWNLOAD_BASE_URL
 require_var RELEASE_TAG
@@ -262,6 +263,9 @@ PYTHON="$PYTHON" \
 VERSION_CONFIG="$VERSION_CONFIG" \
   "$ROOT_DIR/scripts/build-dashboard-package.sh"
 
+MVN="$MVN" PYTHON="$PYTHON" VERSION_CONFIG="$VERSION_CONFIG" \
+  "$ROOT_DIR/scripts/build-sp-import-tools-package.sh"
+
 BASE_NAME="${ARTIFACT_ID}-${VERSION}"
 PLUGIN_ARCHIVE_BASE_NAME="$ARTIFACT_ID"
 ADMIN_BASE_NAME="${ADMIN_ARTIFACT_ID}-${VERSION}"
@@ -286,6 +290,9 @@ ADMIN_PUBLIC_ZIP_FILE="$ADMIN_DIST_ROOT/$ADMIN_ARTIFACT_ID.zip"
 DASHBOARD_DIST_ROOT="$ROOT_DIR/target/dashboard-dist"
 DASHBOARD_ZIP_FILE="$DASHBOARD_DIST_ROOT/$DASHBOARD_BASE_NAME.zip"
 DASHBOARD_PUBLIC_ZIP_FILE="$DASHBOARD_DIST_ROOT/$DASHBOARD_ARTIFACT_ID.zip"
+SP_IMPORT_DIST_ROOT="$ROOT_DIR/target/sp-import-dist"
+SP_IMPORT_ZIP_FILE="$SP_IMPORT_DIST_ROOT/$SP_IMPORT_ARTIFACT_ID-$VERSION.zip"
+SP_IMPORT_PUBLIC_ZIP_FILE="$SP_IMPORT_DIST_ROOT/$SP_IMPORT_ARTIFACT_ID.zip"
 
 rm -rf \
   "$DIST_DIR" \
@@ -619,6 +626,7 @@ sha256_digest() {
   printf '%s  %s\n' "$(sha256_digest "$ZIP_FILE")" "$(basename "$ZIP_FILE")"
   printf '%s  %s\n' "$(sha256_digest "$ADMIN_PUBLIC_ZIP_FILE")" "$(basename "$ADMIN_PUBLIC_ZIP_FILE")"
   printf '%s  %s\n' "$(sha256_digest "$DASHBOARD_PUBLIC_ZIP_FILE")" "$(basename "$DASHBOARD_PUBLIC_ZIP_FILE")"
+  printf '%s  %s\n' "$(sha256_digest "$SP_IMPORT_PUBLIC_ZIP_FILE")" "$(basename "$SP_IMPORT_PUBLIC_ZIP_FILE")"
 } > "$CHECKSUM_FILE"
 
 verify_checksums() {
@@ -629,6 +637,7 @@ verify_checksums() {
     "$ZIP_FILE" \
     "$ADMIN_PUBLIC_ZIP_FILE" \
     "$DASHBOARD_PUBLIC_ZIP_FILE" \
+    "$SP_IMPORT_PUBLIC_ZIP_FILE" \
     "$CHECKSUM_FILE" \
     "$check_dir/"
   (
@@ -700,6 +709,8 @@ verify_release_signatures() {
     "$VERSIONED_ZIP_FILE" \
     "$ADMIN_ZIP_FILE" \
     "$DASHBOARD_ZIP_FILE" \
+    "$SP_IMPORT_PUBLIC_ZIP_FILE" \
+    "$SP_IMPORT_ZIP_FILE" \
     "$CHECKSUM_FILE"; do
     if ! verify_signature "$verify_home" "$artifact"; then
       rm -rf "$verify_home"
@@ -721,6 +732,8 @@ if [[ "$SIGN_RELEASE" == "1" ]]; then
     "$VERSIONED_ZIP_FILE"
     "$ADMIN_ZIP_FILE"
     "$DASHBOARD_ZIP_FILE"
+    "$SP_IMPORT_PUBLIC_ZIP_FILE"
+    "$SP_IMPORT_ZIP_FILE"
     "$CHECKSUM_FILE"
   )
   SIGNING_COMPLETE=0
