@@ -65,6 +65,11 @@ cmp -s "$SP_IMPORT_VERSIONED" "$SP_IMPORT_FIXED" \
 
 # Exercise managed JSON loading through the extracted launcher's packaged classpath.
 unzip -q "$SP_IMPORT_FIXED" -d "$TMP/sp-import-runtime"
+SP_IMPORT_LAUNCHER="$TMP/sp-import-runtime/$SP_IMPORT_ROOT/graphicalmatrix-sp-import.sh"
+if ! "$SP_IMPORT_LAUNCHER" --version > "$TMP/sp-import-version.txt" 2>&1; then
+  cat "$TMP/sp-import-version.txt" >&2
+  fail "SP Import runtime cannot start; set JAVA_HOME or JAVA to a working Java 21+ runtime (Maven may use a different Java)"
+fi
 "$PYTHON" - "$TMP/managed-source" <<'PY'
 import json
 import pathlib
@@ -76,10 +81,13 @@ conf.mkdir(parents=True)
 (conf / 'sp-management-registry.json').write_text(json.dumps({'schemaVersion': 2, 'entries': []}), encoding='utf-8')
 PY
 runtime_rc=0
-"$TMP/sp-import-runtime/$SP_IMPORT_ROOT/graphicalmatrix-sp-import.sh" \
+"$SP_IMPORT_LAUNCHER" \
   --source-idp-home "$TMP/managed-source" --source-type 2faskw --analysis-only \
   > "$TMP/managed-runtime.txt" 2>&1 || runtime_rc=$?
-[[ "$runtime_rc" == 3 ]] || fail "managed runtime fixture should be held, rc=$runtime_rc"
+if [[ "$runtime_rc" != 3 ]]; then
+  cat "$TMP/managed-runtime.txt" >&2
+  fail "managed runtime fixture should be held, rc=$runtime_rc"
+fi
 [[ -s "$TMP/sp-import-runtime/$SP_IMPORT_ROOT/sp-migration/analysis.txt" ]] \
   || fail "extracted managed launcher did not produce analysis reports"
 if grep -Eq 'NoClassDefFoundError|ClassNotFoundException' "$TMP/managed-runtime.txt"; then

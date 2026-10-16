@@ -2,6 +2,19 @@
 
 ## ビルド
 
+ビルドと配布物の実行時検査にはJava 21以上を使用する。Maven独自のJavaとPATH上の`java`は
+一致するとは限らないため、`JAVA_HOME`を明示して同じJavaで検査する。
+macOS/HomebrewでJava 21を使用する例は次のとおり。
+
+```bash
+export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
+export JAVA="$JAVA_HOME/bin/java"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+`JAVA`の明示設定は`JAVA_HOME`やPATHより優先される。パッケージ生成後の
+`./scripts/tests/package-regression.sh`も同じJava設定のシェルから実行する。
+
 リリースおよびパッケージのビルドでは、`version.ini` をバージョン情報の正とする。
 
 ```ini

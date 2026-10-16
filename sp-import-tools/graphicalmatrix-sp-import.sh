@@ -18,7 +18,11 @@ command -v "$JAVA_BIN" >/dev/null 2>&1 || {
   echo 'ERROR: Java 21 or newer is required; set JAVA_HOME or JAVA.' >&2
   exit 2
 }
-VERSION_OUTPUT="$("$JAVA_BIN" -version 2>&1)"
+if ! VERSION_OUTPUT="$("$JAVA_BIN" -version 2>&1)"; then
+  printf 'ERROR: unable to run Java: %s; set JAVA_HOME or JAVA to a working Java 21+ runtime.\n' "$JAVA_BIN" >&2
+  printf '%s\n' "$VERSION_OUTPUT" >&2
+  exit 2
+fi
 JAVA_MAJOR="$(printf '%s\n' "$VERSION_OUTPUT" | sed -nE 's/.*version "([0-9]+).*/\1/p' | head -n 1)"
 [[ "$JAVA_MAJOR" =~ ^[0-9]+$ && "$JAVA_MAJOR" -ge 21 ]] || {
   echo 'ERROR: Java 21 or newer is required.' >&2
