@@ -12,16 +12,29 @@ package io.github.yasakawa.faskw;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import javax.naming.ldap.Control;
 import javax.naming.NamingException;
 import org.junit.jupiter.api.Test;
 
 final class GraphicalMatrixLdapAssertionSupportTest {
+    @Test
+    void encodesAttributeAbsenceAsNotPresentAndRejectsContradictoryAssertions() {
+        final Control absent = GraphicalMatrixLdapAssertionSupport.control(Map.of(), Set.of("time"));
+        assertTrue(absent.isCritical());
+        assertArrayEquals(new byte[] { (byte) 0xa0, 8, (byte) 0xa2, 6, (byte) 0x87, 4, 't', 'i', 'm', 'e' },
+            absent.getEncodedValue());
+        assertThrows(IllegalArgumentException.class, () ->
+            GraphicalMatrixLdapAssertionSupport.control(Map.of("time", "1"), Set.of("time")));
+    }
+
     @Test
     void createsACriticalRfc4528AndFilter() {
         final Map<String, String> equalities = new LinkedHashMap<>();

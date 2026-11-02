@@ -32,25 +32,30 @@ Usage:
 
 Read commands:
   list
-      Show all GraphicalMatrix enrollment rows.
+      Show all GraphicalMatrix enrollment rows, including a WebAuthn registration summary.
 
   show USER
       Show one user's MFA method, sequence status, lock state, TOTP state,
-      timestamps, and other public management fields.
+      timestamps, WebAuthn registration status/count, and other public management fields.
 
 User registration / update:
   add USER img03,img07,img11,img14
   add USER A B C D
       Add or update a user's current GraphicalMatrix sequence.
       Alias values such as A/B/C/D are resolved by graphicalmatrix.aliases.
+      New users also receive the same plaintext initial sequence and a forced-change flag.
+      First-login change enforcement follows graphicalmatrix.force_sequence_change.
+      Existing users keep their initial sequence unchanged.
 
   set-sequence USER img03,img07,img11,img14
   set-sequence USER A B C D
       Update the user's current GraphicalMatrix sequence.
+      If the user does not exist, create it with the same initial sequence and forced change.
 
   set-initial-sequence USER img03,img07,img11,img14
   set-initial-sequence USER A B C D
-      Update the plaintext initial sequence used by USER RESET.
+  set-initial-sequence USER --stdin
+      Update the administrator-readable plaintext initial sequence used by USER RESET.
 
   set-method USER GraphicalMatrix|TOTP|WebAuthn
       Change the MFA method selected for the user.
@@ -59,8 +64,14 @@ User registration / update:
       Enable or disable forced GraphicalMatrix sequence change after login.
 
   USER RESET
-      Copy the plaintext initial sequence into the protected current sequence,
+  reset-user USER
+      Encode the plaintext initial sequence as the protected current sequence,
       set status=ACTIVE, clear the lock state, and require sequence change.
+      Ask for YES/NO before writing. NO or an empty answer cancels the reset.
+
+  USER RESET -y
+  reset-user USER --yes
+      Perform the same reset without asking for confirmation.
 
 Account status / lock:
   enable USER
@@ -179,6 +190,7 @@ Configuration help:
 Safety notes:
   - CSV import without --apply is dry-run.
   - WebAuthn reset/delete without --apply is dry-run.
+  - USER RESET / reset-user requires YES, or -y / --yes to skip confirmation.
   - Other update commands modify the DB immediately.
   - Standard CSV mode rejects D; physical deletion uses delete USER.
   - Provisioning CSV mode treats D as disable.
@@ -295,6 +307,26 @@ sql_quote() {
 
 validate_user() {
   [[ "${1:-}" =~ ^[A-Za-z0-9._@-]+$ ]] || die "invalid user id: ${1:-}"
+}
+
+confirm_user_reset() {
+  local user="$1" answer
+  echo "Reset restores GraphicalMatrix authentication and clears the TOTP registration." >&2
+  while true; do
+    printf "Reset user '%s' to the initial sequence and require a change? [YES/NO] (default: NO): " "$user" >&2
+    if ! IFS= read -r answer; then
+      printf '\n' >&2
+      die "reset confirmation was not received; DB unchanged. Use -y for unattended execution"
+    fi
+    case "$answer" in
+      [Yy][Ee][Ss]) return 0 ;;
+      ""|[Nn][Oo])
+        echo "Reset cancelled: user=$user; DB unchanged" >&2
+        return 1
+        ;;
+      *) echo "Please enter YES or NO." >&2 ;;
+    esac
+  done
 }
 
 graphical_id_lines() {
@@ -561,9 +593,7 @@ WHERE initial_sequence IS NOT NULL AND initial_sequence <> '';" | tail -n 1 | tr
   initial_incompatible="$(run_scalar "
 SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
 WHERE initial_sequence IS NOT NULL AND initial_sequence <> ''
-  AND (initial_sequence LIKE 'kw1:%'
-    OR initial_sequence LIKE 'aesgcm1:%'
-    OR initial_sequence LIKE 'hsp1:%');" | tail -n 1 | trim)"
+  AND (initial_sequence LIKE 'kw1:%' OR initial_sequence LIKE 'aesgcm1:%' OR initial_sequence LIKE 'hsp1:%');" | tail -n 1 | trim)"
   initial_empty="$(run_scalar "
 SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
 WHERE initial_sequence IS NULL OR initial_sequence = '';" | tail -n 1 | trim)"
@@ -662,8 +692,26 @@ sequence_storage_encode() {
 }
 
 initial_sequence_plaintext() {
-  local sequence="$1"
-  normalize_initial_sequence "$sequence"
+  normalize_initial_sequence "$1"
+}
+
+sequence_storage_matches() {
+  local cp
+  cp="$(sequence_tool_classpath)"
+  builtin printf '%s\n%s' "$1" "$2" | java -cp "$cp" \
+    io.github.yasakawa.faskw.GraphicalMatrixSequenceTool matches-stdin "$IDP_HOME"
+}
+
+enrollment_write() {
+  local operation="$1" user="$2" cp
+  cp="$(sequence_tool_classpath)"
+  if [[ "$db_type" == "h2" ]]; then cp="$(h2_tool_classpath)"; fi
+  if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
+    sudo -u jetty env DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixInitialSequenceTool "$operation" "$IDP_HOME" "$user"
+  else
+    java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixInitialSequenceTool "$operation" "$IDP_HOME" "$user"
+  fi
 }
 
 sequence_storage_display() {
@@ -677,16 +725,66 @@ sequence_storage_display() {
 
 enrollment_list() {
   local user="${1:-}"
+  local filter="" base fallback
+  base="${select_public_columns%FROM graphicalmatrix_enrollment}"
   if [[ -n "$user" ]]; then
     local user_q
     user_q="$(sql_quote "$user")"
-    run_sql "$select_public_columns
-WHERE user_id = '$user_q'
-ORDER BY user_id;"
-  else
-    run_sql "$select_public_columns
-ORDER BY user_id;"
+    filter="WHERE user_id = '$user_q'"
   fi
+  fallback="$base,
+       'UNKNOWN' AS webauthn_status,
+       'UNKNOWN' AS webauthn_credential_count
+FROM graphicalmatrix_enrollment
+$filter
+ORDER BY user_id;"
+
+  if [[ "$db_type" == "postgresql" ]]; then
+    # The official repository keys this context by canonical username, not user handle.
+    # Suppress DB diagnostics here because malformed credential JSON can contain key material.
+    if run_sql "BEGIN READ ONLY;
+SET LOCAL statement_timeout = '5s';
+$base,
+       CASE WHEN w.record_found IS NULL THEN 'UNREGISTERED'
+            WHEN w.credential_count IS NULL THEN 'UNKNOWN'
+            WHEN w.credential_count > 0 THEN 'REGISTERED'
+            ELSE 'UNREGISTERED' END AS webauthn_status,
+       CASE WHEN w.record_found IS NULL THEN '0'
+            WHEN w.credential_count IS NULL THEN 'UNKNOWN'
+            ELSE w.credential_count::text END AS webauthn_credential_count
+FROM graphicalmatrix_enrollment e
+LEFT JOIN LATERAL (
+  SELECT true AS record_found,
+         CASE WHEN jsonb_typeof(r.data) = 'array'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(r.data) = 'array' THEN r.data ELSE '[]'::jsonb END
+                     ) AS item
+                     WHERE jsonb_typeof(item) IS DISTINCT FROM 'object'
+                        OR jsonb_typeof(item -> 'credential' -> 'credentialId') IS DISTINCT FROM 'string'
+                        OR COALESCE(item -> 'credential' ->> 'credentialId', '') = ''
+                   )
+              THEN (SELECT count(DISTINCT item -> 'credential' ->> 'credentialId')
+                    FROM jsonb_array_elements(
+                      CASE WHEN jsonb_typeof(r.data) = 'array' THEN r.data ELSE '[]'::jsonb END
+                    ) AS item)
+              ELSE NULL END AS credential_count
+  FROM (
+    SELECT CASE WHEN s.expires IS NULL OR s.expires > $now_expr
+                THEN s.value::jsonb ELSE '[]'::jsonb END AS data
+    FROM storagerecords s
+    WHERE s.context = 'net.shibboleth.idp.plugin.authn.webauthn'
+      AND s.id = e.user_id
+  ) r
+) w ON true
+$filter
+ORDER BY user_id;
+COMMIT;" 2>/dev/null; then
+      return 0
+    fi
+    echo "WARNING: WebAuthn registration summary unavailable in this database; displaying UNKNOWN." >&2
+  fi
+  run_sql "$fallback"
 }
 
 totp_seed_storage_encode() {
@@ -1027,14 +1125,15 @@ display_timezone="$(display_time_zone)"
 if [[ "$db_type" == "postgresql" ]]; then
   now_expr="(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint"
   select_public_columns="
-SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, failed_count,
+SELECT user_id, mfa_method, force_sequence_change,
+       CASE WHEN initial_sequence = '' THEN '[unset]'
+            WHEN initial_sequence LIKE 'hsp1:%' THEN '[reentry-required]'
+            WHEN initial_sequence LIKE 'kw1:%' OR initial_sequence LIKE 'aesgcm1:%' THEN '[migration-required]'
+            ELSE initial_sequence END AS initial_sequence,
+       sequence, status, failed_count,
        CASE WHEN locked_until = 0 THEN NULL
             ELSE to_char(to_timestamp(locked_until / 1000.0) AT TIME ZONE '$display_timezone',
                          'YYYY/MM/DD HH24:MI:SS') END AS locked_until,
-       totp_status,
-       CASE WHEN totp_registered_at = 0 THEN NULL
-            ELSE to_char(to_timestamp(totp_registered_at / 1000.0) AT TIME ZONE '$display_timezone',
-                         'YYYY/MM/DD HH24:MI:SS') END AS totp_registered,
        CASE WHEN last_success_at = 0 THEN NULL
             ELSE to_char(to_timestamp(last_success_at / 1000.0) AT TIME ZONE '$display_timezone',
                          'YYYY/MM/DD HH24:MI:SS') END AS last_success,
@@ -1042,24 +1141,27 @@ SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, s
                'YYYY/MM/DD HH24:MI:SS') AS created,
        to_char(to_timestamp(updated_at / 1000.0) AT TIME ZONE '$display_timezone',
                'YYYY/MM/DD HH24:MI:SS') AS updated,
+       totp_status,
+       CASE WHEN totp_registered_at = 0 THEN NULL
+            ELSE to_char(to_timestamp(totp_registered_at / 1000.0) AT TIME ZONE '$display_timezone',
+                         'YYYY/MM/DD HH24:MI:SS') END AS totp_registered,
        CASE WHEN totp_seed IS NULL OR totp_seed = '' THEN 'NO' ELSE 'YES' END AS totp_seed_set
 FROM graphicalmatrix_enrollment"
   totp_seed_status_expr="CASE WHEN totp_status = 'ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END"
 else
   now_expr="DATEDIFF('MILLISECOND', TIMESTAMP '1970-01-01 00:00:00', CURRENT_TIMESTAMP)"
   select_public_columns="
-SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, status, failed_count,
+SELECT user_id, mfa_method, force_sequence_change,
+       CASE WHEN initial_sequence = '' THEN '[unset]'
+            WHEN initial_sequence LIKE 'hsp1:%' THEN '[reentry-required]'
+            WHEN initial_sequence LIKE 'kw1:%' OR initial_sequence LIKE 'aesgcm1:%' THEN '[migration-required]'
+            ELSE initial_sequence END AS initial_sequence,
+       sequence, status, failed_count,
        CASEWHEN(locked_until = 0, NULL,
          FORMATDATETIME(
            DATEADD('MILLISECOND', locked_until,
              TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
            'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS locked_until,
-       totp_status,
-       CASEWHEN(totp_registered_at = 0, NULL,
-         FORMATDATETIME(
-           DATEADD('MILLISECOND', totp_registered_at,
-             TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
-           'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS totp_registered,
        CASEWHEN(last_success_at = 0, NULL,
          FORMATDATETIME(
            DATEADD('MILLISECOND', last_success_at,
@@ -1073,6 +1175,12 @@ SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, s
          DATEADD('MILLISECOND', updated_at,
            TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
          'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone') AS updated,
+       totp_status,
+       CASEWHEN(totp_registered_at = 0, NULL,
+         FORMATDATETIME(
+           DATEADD('MILLISECOND', totp_registered_at,
+             TIMESTAMP WITH TIME ZONE '1970-01-01 00:00:00+00:00'),
+           'yyyy/MM/dd HH:mm:ss', 'en', '$display_timezone')) AS totp_registered,
        CASEWHEN(totp_seed IS NULL OR totp_seed = '', 'NO', 'YES') AS totp_seed_set
 FROM graphicalmatrix_enrollment"
   totp_seed_status_expr="CASEWHEN(totp_status = 'ACTIVE', 'ACTIVE', 'PENDING')"
@@ -1081,7 +1189,7 @@ fi
 upsert_sequence_sql() {
   local user_q="$1"
   local sequence_q="$2"
-  local initial_sequence_q="${3:-$sequence_q}"
+  local initial_sequence_q="${3:-}"
   if [[ "$db_type" == "postgresql" ]]; then
     cat <<SQL
 INSERT INTO graphicalmatrix_enrollment
@@ -1300,11 +1408,11 @@ PY
     method="$(normalize_method "$method")"
     force_sql="$(normalize_force_value "$force_value")"
     validate_sequence "$sequence"
-    if [[ -z "$initial_sequence" ]]; then
-      initial_sequence="$sequence"
+    normalized_initial_sequence=""
+    if [[ -n "$initial_sequence" ]]; then
+      validate_sequence "$initial_sequence"
+      normalized_initial_sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
     fi
-    validate_sequence "$initial_sequence"
-    normalized_initial_sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
     resolved_sequence="$(resolve_sequence_to_graphicals "$sequence")"
     validate_sequence "$resolved_sequence"
     stored_sequence="$(sequence_storage_encode "$resolved_sequence")"
@@ -1314,10 +1422,19 @@ PY
     fi
 
     sequence_q="$(sql_quote "$stored_sequence")"
-    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$normalized_initial_sequence")")"
+    initial_sequence_q=""
+    if [[ -n "$normalized_initial_sequence" ]]; then
+      if [[ "$force_sql" != "1" ]]; then
+        local bootstrap_match
+        bootstrap_match="$(sequence_storage_matches "$stored_sequence" "$normalized_initial_sequence")" \
+          || die "CSV sequence comparison failed"
+        [[ "$bootstrap_match" == "false" ]] || die "CSV bootstrap registration requires force_sequence_change=on"
+      fi
+      initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$normalized_initial_sequence")")"
+    fi
     method_q="$(sql_quote "$method")"
     printf "line=%s action=%s user_id=%s mfa_method=%s force_sequence_change=%s initial_sequence=%s sequence=%s\n" \
-      "$line_no" "$action" "$user" "$method" "$force_value" "$normalized_initial_sequence" "$preview_sequence" >> "$preview_file"
+      "$line_no" "$action" "$user" "$method" "$force_value" "[protected-or-unset]" "[protected]" >> "$preview_file"
     if [[ "$action" == "A" ]]; then
       add_count=$((add_count + 1))
     else
@@ -1814,7 +1931,7 @@ WHERE user_id = '$user_q' AND status = 'DISABLED';"
 cmd="${1:-}"
 if [[ "${2:-}" =~ ^[Rr][Ee][Ss][Ee][Tt]$ ]]; then
   cmd="reset-user"
-  set -- "$cmd" "$1"
+  set -- "$cmd" "$1" "${@:3}"
 fi
 
 case "$cmd" in
@@ -1876,17 +1993,16 @@ case "$cmd" in
     recoverable="$(run_scalar "SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
 WHERE UPPER(totp_status) = 'PENDING'
   AND COALESCE(sequence, '') <> ''
-  AND COALESCE(initial_sequence, '') <> ''
   AND ($pending_sequence_predicate);" | tail -n 1 | trim)"
     manual="$(run_scalar "SELECT COUNT(*) AS initial_sequence FROM graphicalmatrix_enrollment
 WHERE UPPER(totp_status) = 'PENDING'
-  AND (COALESCE(sequence, '') = '' OR COALESCE(initial_sequence, '') = ''
+  AND (COALESCE(sequence, '') = ''
        OR NOT ($pending_sequence_predicate));" | tail -n 1 | trim)"
     echo "mode=$([[ "$pending_apply" == "1" ]] && echo apply || echo dry-run)"
     echo "pending_recoverable=$recoverable"
     echo "pending_manual_recovery=$manual"
     run_sql "SELECT user_id,
-  CASE WHEN COALESCE(sequence, '') <> '' AND COALESCE(initial_sequence, '') <> ''
+  CASE WHEN COALESCE(sequence, '') <> ''
             AND ($pending_sequence_predicate)
        THEN 'RECOVERABLE' ELSE 'MANUAL_RECOVERY' END AS migration_status
 FROM graphicalmatrix_enrollment
@@ -1909,7 +2025,6 @@ SET mfa_method = 'GraphicalMatrix',
     updated_at = $now_expr
 WHERE UPPER(totp_status) = 'PENDING'
   AND COALESCE(sequence, '') <> ''
-  AND COALESCE(initial_sequence, '') <> ''
   AND ($pending_sequence_predicate);"
       echo "result=APPLY_OK"
       if [[ "$manual" != "0" ]]; then
@@ -1950,12 +2065,8 @@ WHERE UPPER(totp_status) = 'PENDING'
     validate_user "$user"
     validate_sequence "$sequence"
     user_q="$(sql_quote "$user")"
-    sequence_q="$(sql_quote "$(sequence_storage_encode "$sequence")")"
-    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$sequence")")"
-    run_sql "$init_sql
-$(upsert_sequence_sql "$user_q" "$sequence_q" "$initial_sequence_q")
-$select_public_columns
-WHERE user_id = '$user_q';"
+    builtin printf '%s' "$sequence" | enrollment_write current "$user"
+    run_sql "$select_public_columns WHERE user_id = '$user_q';"
     ;;
 
   csv|provisioning-csv)
@@ -1987,22 +2098,18 @@ WHERE user_id = '$user_q';"
 
   set-initial-sequence)
     user="${2:-}"
-    sequence="$(sequence_from_args "${@:3}")"
-    sequence="$(resolve_sequence_to_graphicals "$sequence")"
     validate_user "$user"
-    validate_sequence "$sequence"
     user_q="$(sql_quote "$user")"
-    initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$sequence")")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
-SET initial_sequence = '$initial_sequence_q',
-    totp_registration_id = NULL,
-    totp_registration_expires_at = 0,
-    state_version = state_version + 1,
-    updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+    if [[ "${3:-}" == "--stdin" ]]; then
+      [[ "$#" -eq 3 ]] || die "--stdin accepts no sequence arguments"
+      enrollment_write initial "$user"
+    else
+      sequence="$(sequence_from_args "${@:3}")"
+      sequence="$(resolve_sequence_to_graphicals "$sequence")"
+      validate_sequence "$sequence"
+      builtin printf '%s' "$sequence" | enrollment_write initial "$user"
+    fi
+    run_sql "$select_public_columns WHERE user_id = '$user_q';"
     ;;
 
   set-method)
@@ -2125,45 +2232,30 @@ WHERE user_id = '$user_q';"
       *) die "require-change value must be on or off" ;;
     esac
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
-SET force_sequence_change = $force_value, totp_registration_id = NULL,
-    totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+    if [[ "$force_value" == "1" ]]; then
+      enrollment_write require-change "$user"
+    else
+      enrollment_write allow-change-off "$user"
+    fi
+    run_sql "$select_public_columns WHERE user_id = '$user_q';"
     ;;
 
   reset-user)
     user="${2:-}"
     validate_user "$user"
+    reset_yes=0
+    for reset_option in "${@:3}"; do
+      case "$reset_option" in
+        -y|--yes) reset_yes=1 ;;
+        *) die "unknown reset option: $reset_option (use -y or --yes to skip confirmation)" ;;
+      esac
+    done
+    if [[ "$reset_yes" != "1" ]] && ! confirm_user_reset "$user"; then
+      exit 0
+    fi
     user_q="$(sql_quote "$user")"
-    initial_sequence="$(run_scalar "
-SELECT initial_sequence AS initial_sequence
-FROM graphicalmatrix_enrollment
-WHERE user_id = '$user_q';" | tail -n 1 | trim)"
-    [[ -n "$initial_sequence" ]] || die "initial_sequence is empty for user: $user"
-    validate_sequence "$initial_sequence"
-    sequence="$(resolve_sequence_to_graphicals "$initial_sequence")"
-    sequence_q="$(sql_quote "$(sequence_storage_encode "$sequence")")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
-SET mfa_method = 'GraphicalMatrix',
-    sequence = '$sequence_q',
-    status = 'ACTIVE',
-    failed_count = 0,
-    locked_until = 0,
-    force_sequence_change = 1,
-    totp_seed = NULL,
-    totp_status = 'UNREGISTERED',
-    totp_registered_at = 0,
-    totp_registration_id = NULL,
-    totp_registration_expires_at = 0,
-    state_version = state_version + 1,
-    updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+    enrollment_write reset "$user"
+    run_sql "$select_public_columns WHERE user_id = '$user_q';"
     ;;
 
   enable)

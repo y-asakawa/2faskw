@@ -30,12 +30,13 @@ final class GraphicalMatrixSelfServiceSessionTest {
     @Test
     void handoffCanBeConsumedOnlyOnce() {
         final HttpSession session = session();
-        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 2000L);
+        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 7L, 2000L);
 
         final GraphicalMatrixSelfServiceSession.Handoff handoff =
             GraphicalMatrixSelfServiceSession.consume(session, 1000L);
 
         assertEquals("test01", handoff.getUser());
+        assertEquals(7L, handoff.getStateVersion());
         assertEquals(2000L, handoff.getExpiresAt());
         assertNull(GraphicalMatrixSelfServiceSession.consume(session, 1000L));
     }
@@ -43,10 +44,35 @@ final class GraphicalMatrixSelfServiceSessionTest {
     @Test
     void expiredHandoffIsRejectedAndCleared() {
         final HttpSession session = session();
-        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 999L);
+        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 7L, 999L);
 
         assertNull(GraphicalMatrixSelfServiceSession.consume(session, 1000L));
         assertNull(GraphicalMatrixSelfServiceSession.consume(session, 500L));
+    }
+
+    @Test
+    void rejectsOldFormatAndExactExpiry() {
+        final HttpSession session = session();
+        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 7L, 1000L);
+        assertNull(GraphicalMatrixSelfServiceSession.consume(session, 1000L));
+        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 7L, 2000L);
+        session.removeAttribute("graphicalmatrixSelfService.stateVersion");
+        assertNull(GraphicalMatrixSelfServiceSession.consume(session, 1000L));
+    }
+
+    @Test
+    void concurrentConsumersObtainAtMostOneHandoff() throws Exception {
+        final HttpSession session = session();
+        GraphicalMatrixSelfServiceSession.initialize(session, "test01", 7L, 2000L);
+        try (final var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            final var results = new java.util.ArrayList<java.util.concurrent.Future<GraphicalMatrixSelfServiceSession.Handoff>>();
+            for (int i = 0; i < 32; i++) {
+                results.add(executor.submit(() -> GraphicalMatrixSelfServiceSession.consume(session, 1000L)));
+            }
+            int successes = 0;
+            for (final var result : results) { if (result.get() != null) { successes++; } }
+            assertEquals(1, successes);
+        }
     }
 
     private static HttpSession session() {

@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.Clock;
 
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
@@ -43,13 +44,23 @@ final class GraphicalMatrixLdapEnrollmentStore {
     private final GraphicalMatrixLdapConfig config;
     private final GraphicalMatrixSequenceStorage sequenceStorage;
     private final GraphicalMatrixTotpSeedStorage totpSeedStorage;
+    private final ContextFactory contextFactory;
+
+    interface ContextFactory { LdapContext open() throws NamingException; }
 
     GraphicalMatrixLdapEnrollmentStore(final String idpHome,
             final GraphicalMatrixSequenceStorage sequenceStorage,
             final GraphicalMatrixTotpSeedStorage totpSeedStorage) {
+        this(idpHome, sequenceStorage, totpSeedStorage, null);
+    }
+
+    GraphicalMatrixLdapEnrollmentStore(final String idpHome,
+            final GraphicalMatrixSequenceStorage sequenceStorage,
+            final GraphicalMatrixTotpSeedStorage totpSeedStorage, final ContextFactory contextFactory) {
         this.config = GraphicalMatrixLdapConfig.load(idpHome);
         this.sequenceStorage = sequenceStorage;
         this.totpSeedStorage = totpSeedStorage;
+        this.contextFactory = contextFactory;
     }
 
     GraphicalMatrixEnrollment findEnrollment(final String user) throws Exception {
@@ -76,6 +87,83 @@ final class GraphicalMatrixLdapEnrollmentStore {
                 entry.record.stateVersion
             );
         }
+    }
+
+    GraphicalMatrixMfaSuccessRecord.Result checkAndRecordMfaCompletion(
+            final GraphicalMatrixMfaSuccessRecord.Expectation expected,
+            final GraphicalMatrixMfaSuccessRecordOptions options, final Clock clock) throws Exception {
+        GraphicalMatrixMfaSuccessRecord.Result completed = null;
+        try (LdapSession session = context()) {
+            completed = GraphicalMatrixMfaSuccessRecord.checkAndRecord(expected, options, clock,
+                new GraphicalMatrixMfaSuccessRecord.Store() {
+                    private Entry entry;
+                    @Override public GraphicalMatrixMfaSuccessRecord.Snapshot read(final boolean timestamps)
+                            throws Exception {
+                        entry = findEntry(session.context, expected.user());
+                        if (entry == null) { return null; }
+                        final Record row = entry.record;
+                        final GraphicalMatrixMfaSettings settings = new GraphicalMatrixMfaSettings(
+                            row.status, row.mfaMethod, row.totpStatus, !row.totpSeed.isEmpty(),
+                            !row.sequence.isEmpty(), row.stateVersion);
+                        return new GraphicalMatrixMfaSuccessRecord.Snapshot(settings, entry.dn, row.status,
+                            attr(entry.attributes, config.stateVersionAttr()),
+                            timestamps ? timestampAttribute(entry.attributes, config.lastSuccessAtAttr()) : null,
+                            timestamps ? timestampAttribute(entry.attributes, config.updatedAtAttr()) : null,
+                            row.stateVersionPresent);
+                    }
+                    @Override public boolean update(final GraphicalMatrixMfaSuccessRecord.Snapshot snapshot,
+                            final long now, final int ignoredTimeout) throws Exception {
+                        final Map<String, String> equalities = new LinkedHashMap<>();
+                        final Set<String> absent = new HashSet<>();
+                        for (final String name : List.of(config.statusAttr(), config.mfaMethodAttr(),
+                                config.stateVersionAttr())) {
+                            equalities.put(name, rawSingle(entry.attributes, name));
+                        }
+                        if ("TOTP".equals(expected.method())) {
+                            equalities.put(config.totpStatusAttr(), rawSingle(entry.attributes, config.totpStatusAttr()));
+                            equalities.put(config.totpSeedAttr(), rawSingle(entry.attributes, config.totpSeedAttr()));
+                        } else if ("GRAPHICALMATRIX".equals(expected.method())) {
+                            equalities.put(config.sequenceAttr(), rawSingle(entry.attributes, config.sequenceAttr()));
+                        }
+                        timestampAssertion(equalities, absent, config.lastSuccessAtAttr(), snapshot.lastSuccess());
+                        timestampAssertion(equalities, absent, config.updatedAtAttr(), snapshot.updatedAt());
+                        try {
+                            GraphicalMatrixLdapAssertionSupport.modify(session.context, entry.dn, equalities, absent,
+                                replace(config.lastSuccessAtAttr(), String.valueOf(now)),
+                                replace(config.updatedAtAttr(), String.valueOf(Math.max(now,
+                                    GraphicalMatrixMfaSuccessRecord.timestamp(snapshot.updatedAt())))));
+                            return true;
+                        } catch (NamingException ex) {
+                            if (GraphicalMatrixLdapAssertionSupport.isAssertionFailed(ex)) { return false; }
+                            throw ex;
+                        }
+                    }
+                });
+            return completed;
+        } catch (Exception ex) {
+            if (completed != null) { return completed.failed("ldap_close_failed"); }
+            throw ex;
+        }
+    }
+
+    private static void timestampAssertion(final Map<String, String> equalities, final Set<String> absent,
+            final String name, final String value) {
+        if (value == null) { absent.add(name); }
+        else { equalities.put(name, value); }
+    }
+
+    private static String rawSingle(final Attributes attributes, final String name) throws NamingException {
+        final Attribute attribute = attributes.get(name);
+        if (attribute == null || attribute.size() != 1 || attribute.get() == null) {
+            throw new NamingException("Expected single-valued completion attribute");
+        }
+        return String.valueOf(attribute.get());
+    }
+
+    private static String timestampAttribute(final Attributes attributes, final String name) {
+        if (!hasAttribute(attributes, name)) { return null; }
+        try { return rawSingle(attributes, name); }
+        catch (NamingException ex) { return "invalid"; }
     }
 
     GraphicalMatrixTotpEnrollmentResult beginTotpRegistration(final String user,
@@ -160,7 +248,6 @@ final class GraphicalMatrixLdapEnrollmentStore {
                     replace(config.totpRegisteredAtAttr(), String.valueOf(now)),
                     remove(config.totpRegistrationIdAttr(), binding.registrationId()),
                     remove(config.totpRegistrationExpiresAtAttr(), String.valueOf(binding.expiresAt())),
-                    replace(config.lastSuccessAtAttr(), String.valueOf(now)),
                     replace(config.updatedAtAttr(), String.valueOf(now))
                 ));
             } catch (NamingException ex) {
@@ -457,15 +544,16 @@ final class GraphicalMatrixLdapEnrollmentStore {
                     replace(config.lockedUntilAttr(), "0"),
                     replace(config.updatedAtAttr(), String.valueOf(now))
                 ));
-                return GraphicalMatrixVerifyResult.success("sequence_change_verified");
+                return GraphicalMatrixVerifyResult.success("sequence_change_verified")
+                    .withStateTransition(entry.record.stateVersion, Math.addExact(entry.record.stateVersion, 1L));
             }
             modify(context, entry.dn, withStateVersionUpdate(entry, true,
                 replace(config.failedCountAttr(), "0"),
                 replace(config.lockedUntilAttr(), "0"),
-                replace(config.lastSuccessAtAttr(), String.valueOf(now)),
                 replace(config.updatedAtAttr(), String.valueOf(now))
             ));
-            return GraphicalMatrixVerifyResult.success();
+            return GraphicalMatrixVerifyResult.success()
+                .withStateTransition(entry.record.stateVersion, Math.addExact(entry.record.stateVersion, 1L));
         }
 
         final int failed = incrementFailureCount(entry.record.failedCount);
@@ -486,9 +574,10 @@ final class GraphicalMatrixLdapEnrollmentStore {
             + ",lock_seconds=" + lockDecision.getLockSeconds()
             + ",locked_until=" + newLockedUntil
             + (sequenceChange ? ",purpose=sequence_change" : "");
-        return lockDecision.isLocked()
+        return (lockDecision.isLocked()
             ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
-            : GraphicalMatrixVerifyResult.failed(detail);
+            : GraphicalMatrixVerifyResult.failed(detail))
+            .withStateTransition(entry.record.stateVersion, Math.addExact(entry.record.stateVersion, 1L));
     }
 
     private Entry findEntry(final LdapContext context, final String user) throws NamingException {
@@ -511,7 +600,7 @@ final class GraphicalMatrixLdapEnrollmentStore {
         if (results.hasMore()) {
             throw new NamingException("LDAP user search returned multiple entries for user=" + user);
         }
-        return new Entry(first.getNameInNamespace(), Record.from(first.getAttributes(), config));
+        return new Entry(first.getNameInNamespace(), Record.from(first.getAttributes(), config), first.getAttributes());
     }
 
     private static int incrementFailureCount(final int failedCount) {
@@ -519,6 +608,7 @@ final class GraphicalMatrixLdapEnrollmentStore {
     }
 
     private LdapSession context() throws NamingException {
+        if (contextFactory != null) { return new LdapSession(contextFactory.open()); }
         final Hashtable<String, String> env = new Hashtable<>();
         env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
         env.put(Context.PROVIDER_URL, config.url());
@@ -574,7 +664,7 @@ final class GraphicalMatrixLdapEnrollmentStore {
         final ModificationItem[] all = new ModificationItem[items.length + extraItems];
         System.arraycopy(items, 0, all, 0, items.length);
         final String current = String.valueOf(stateVersion);
-        final String next = String.valueOf(stateVersion + 1);
+        final String next = String.valueOf(Math.addExact(stateVersion, 1L));
         if (compareCurrent && stateVersionPresent) {
             all[items.length] = remove(attributeName, current);
             all[items.length + 1] = add(attributeName, next);
@@ -698,10 +788,12 @@ final class GraphicalMatrixLdapEnrollmentStore {
     private static final class Entry {
         private final String dn;
         private final Record record;
+        private final Attributes attributes;
 
-        private Entry(final String dn, final Record record) {
+        private Entry(final String dn, final Record record, final Attributes attributes) {
             this.dn = dn;
             this.record = record;
+            this.attributes = attributes;
         }
     }
 

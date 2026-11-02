@@ -440,3 +440,10 @@ CLI管理へ移行できる。手作業登録状態へ戻す場合は`restore-le
 - 検証用SimpleSAMLphp SPの構築例: [INSTALL_SP.md](./INSTALL_SP.md)
 - SP別・IP別のMFAポリシー: [FAQ.md](./FAQ.md)
 - 2FAS-KW設定項目: [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)
+
+
+## v1.4.1のadopt／access init
+
+既存SPの値制限を単純な属性profileへ自動変換しない。RequesterとANYだけの同等性を確認できない場合はadoptを停止し、元のAttribute Filterを保持する。移行前後にfiltered AACLIと実SP受信で一致値・不一致値・属性なし・複数値を確認する。
+
+ContextCheck moduleはaccess init前に管理者が別途有効化して生成設定を確認する。既存Conditionはサンプルに似ていても削除しない。競合時は既存制限を維持し、手動の統合または既存構成の継続を選ぶ。

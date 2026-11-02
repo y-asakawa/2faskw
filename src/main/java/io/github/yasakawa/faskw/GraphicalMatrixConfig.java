@@ -99,6 +99,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
     private final int orderMode;
     private final int challengeSeconds;
     private final int totpRegistrationTtlSeconds;
+    private final GraphicalMatrixMfaSuccessRecordOptions mfaSuccessRecordOptions;
     private final int lockoutFailureLimit;
     private final int lockoutLockSeconds;
     private final int lockoutMaxLockFailureCount;
@@ -166,7 +167,8 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             final Path totpRegisterTemplatePath, final Path changeStartTemplatePath,
             final Path changeCurrentTemplatePath, final Path changeMenuTemplatePath,
             final Path changeNewTemplatePath, final Path changeMethodTemplatePath,
-            final Path changeCompleteTemplatePath) {
+            final Path changeCompleteTemplatePath,
+            final GraphicalMatrixMfaSuccessRecordOptions mfaSuccessRecordOptions) {
         this.columns = columns;
         this.rows = rows;
         this.mobileBreakpointPx = mobileBreakpointPx;
@@ -175,6 +177,7 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
         this.orderMode = orderMode;
         this.challengeSeconds = challengeSeconds;
         this.totpRegistrationTtlSeconds = totpRegistrationTtlSeconds;
+        this.mfaSuccessRecordOptions = mfaSuccessRecordOptions;
         this.lockoutFailureLimit = lockoutFailureLimit;
         this.lockoutLockSeconds = lockoutLockSeconds;
         this.lockoutMaxLockFailureCount = lockoutMaxLockFailureCount;
@@ -375,11 +378,16 @@ public final class GraphicalMatrixConfig implements java.io.Serializable {
             templateEnabled, templatePath,
             lockedTemplatePath, unavailableTemplatePath, totpRegisterTemplatePath,
             changeStartTemplatePath, changeCurrentTemplatePath, changeMenuTemplatePath,
-            changeNewTemplatePath, changeMethodTemplatePath, changeCompleteTemplatePath);
+            changeNewTemplatePath, changeMethodTemplatePath, changeCompleteTemplatePath,
+            GraphicalMatrixMfaSuccessRecordOptions.from(properties));
     }
 
     public int getColumns() {
         return columns;
+    }
+
+    public GraphicalMatrixMfaSuccessRecordOptions getMfaSuccessRecordOptions() {
+        return mfaSuccessRecordOptions;
     }
 
     public int getRows() {

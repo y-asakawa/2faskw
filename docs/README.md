@@ -65,6 +65,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [development/SP-MANAGEMENT-INTERNALS.md](./development/SP-MANAGEMENT-INTERNALS.md) | SP registry、metadata、属性、access、MFA管理CLIの内部設計。 |
 | [development/SP-IMPORT-TOOLS.md](./development/SP-IMPORT-TOOLS.md) | Standalone Java source analyzer, migration bundle, existing-CLI orchestration, and tests. |
 | [development/DATA-STORAGE.md](./development/DATA-STORAGE.md) | DB/LDAP schema、状態遷移、sequence/TOTP保護、backup境界。 |
+| [development/MFA-SUCCESS-RECORD.md](./development/MFA-SUCCESS-RECORD.md) | Common MFA completion timestamps, optional audit, conditional storage and Dashboard indexing. |
 | [development-history/README.md](./development-history/README.md) | 公開情報、設計判断、実装根拠、prior-art調査を結ぶdesign provenance記録。 |
 
 ## 導入・設定
@@ -102,6 +103,9 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | File | Description |
 | --- | --- |
 | [ADMIN-TOOLS.md](./ADMIN-TOOLS.md) | 管理CLI、Admin Tools 単体導入、CSV import/export、監査ログの運用説明。 |
+| [release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md](./release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md) | v1.4.2予定の管理CLI監査ログ詳細設計。RESET等の対象・実行主体・確定結果、CSV／migration、秘密値除外とログ障害時の契約。設計案・未実装。 |
+| [release-notes/v1.4.1-RELEASE-NOTES.md](./release-notes/v1.4.1-RELEASE-NOTES.md) | v1.4.1統合リリースノート。N1〜N4の仕様・詳細設計、移行・切戻し、性能影響、ローカル／テスト環境検証結果と未確認範囲。テスト環境適用済み・未公開。 |
+| [release-notes/v1.5-MFA-SUCCESS-RECORD.md](./release-notes/v1.5-MFA-SUCCESS-RECORD.md) | 共通MFA成功日時・監査・Dashboard集約のローカル実装ノート。正式リリース番号未確定。 |
 | [release-notes/v1.4.0-SP-IMPORT-TOOLS.md](./release-notes/v1.4.0-SP-IMPORT-TOOLS.md) | SP Import Toolsの実装構成、対応範囲、失敗・再実行、配布・ビルド。 |
 | [BACKUP-RESTORE.md](./BACKUP-RESTORE.md) | DB/LDAP、storage-format secret、IdP設定、SP管理情報を同一世代で保存・検証復元する手順。 |
 | [OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md) | 日常点検、変更作業、障害切り分け、security incident初動、復旧完了判定。 |
@@ -209,8 +213,9 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh sequence-mode
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh totp-seed-mode
 ```
 
-代表的な管理操作は以下のとおりである。`add`、`set-method`、`unlock`、`RESET`などはDBを直ちに
-変更するため、対象ユーザーを確認して実行する。
+代表的な管理操作は以下のとおりである。`add`、`set-method`、`unlock`などはDBを直ちに
+変更するため、対象ユーザーを確認して実行する。`RESET`はYES/NO確認後に実行し、自動実行で
+確認を省略する場合は`user001 RESET -y`を指定する。NOまたは空入力なら中止する。
 
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh add user001 A B C D

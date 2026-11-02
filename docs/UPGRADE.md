@@ -16,8 +16,55 @@
 - v1.3.2 から v1.3.3 への更新
 - v1.3.3 から v1.3.4 への更新
 - v1.3.4 から v1.3.5 への更新
+- v1.4.0 から v1.4.1 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
+
+<a id="mfa-completion-recording"></a>
+
+### 共通MFA成功日時・監査集約の導入
+
+本節は共通記録機能を含むv1.4.1のソース／配布物に適用する。公開前の候補版には修正前後の
+成果物があるため、版番号だけでなく導入する成果物のchecksumと対象コミットを確認すること。
+設定だけを追加しても、修正前のJARへ機能や互換修正は追加されない。
+
+1. 通常のbackupに加え、Dashboardを停止して専用H2 DB、Agentのstate／spool、原本監査ログを
+   整合した組でbackupする。認証DB／LDAPの既存日時とcredentialは移行で書き換えない。
+2. 共有DB／LDAPへ接続する全認証ノードを更新する。段階更新中は新機能の2フラグを明示的に
+   `false`にし、旧ノードへの新規流入を止め、進行中フローの終了も確認する。旧版はフラグを
+   解釈せず、画像照合・TOTP登録で日時を書くため、OFFだけで旧版との意味混在は防げない。
+3. 既存の`mfa-authn-config.xml`を確認し、3方式の共通CompletionStrategy接続がなければ追加する。
+   [MFA遷移設定の修正位置と完成形](#mfa-flow-upgrade)に従い、既存遷移を保持して統合する。
+   自己管理の認可証跡、format=2 Handoff、登録世代の条件付き保存は従来どおり必要である。
+   TOTPでは公式結果型`TOTPPrincipal`に対応した修正版JARを使用する。初期候補版のJARでは
+   コード検証成功後に本人一致検査で拒否される。XML接続の追加だけでこの不具合は解消しない。
+   WebAuthnも、公式1.4.2の第二要素結果と同一Subjectに束縛された正規化名を扱う修正版が必要である。
+   公式TOTP／WebAuthnプラグインの差し替え・改変や、既存seed／キーの再登録は不要である。
+4. Dashboard利用時は先にDashboard／Agentを更新する。Dashboard索引は起動時にschema 5から6へ
+   nullable列を追加する。認証DBのschema変更ではない。旧イベントは残すが方式を推測して埋めない。
+   古いAgentで既に正規化済みのMFA_COMPLETEには方式情報がないため、必要なら本書ではなく
+   [Dashboardの再取り込み手順](./DASHBOARD.md#ログの再取り込みと索引の再構築)を利用する。
+5. `graphicalmatrix.properties`へ次を統合する。省略時も日時保存と監査は両方ONとなる。
+
+```properties
+graphicalmatrix.mfa.successRecord.enabled = true
+graphicalmatrix.mfa.successRecord.queryTimeoutSeconds = 1
+graphicalmatrix.mfa.completionAudit.enabled = true
+```
+
+6. config検査を実行し、必要なWAR再構築・Jetty再起動後、GraphicalMatrix／TOTP／WebAuthnの
+   通常認証・自己管理・拒否ケースを確認する。config-onlyはDB権限やLDAP assertionの実動作を保証しない。
+   `last_success`、`MFA_COMPLETE`とDashboard方式別集計、保存障害時のWARNを確認する。
+7. ピーク時の追加UPDATE数、ロック待ち、p95/p99、監査容量を日時保存ON／OFFで比較する。
+   性能上の問題なら日時保存のみOFFにできる。OFFでも状態SELECTと既存カウンター／登録更新は残る。
+
+新しい日時保存は登録世代を進めず、通常最大1回の条件付きUPDATE／LDAP modifyを試みる。
+保存だけの障害は認証を停止しないが、必須状態検査の障害・不一致は従来どおり拒否する。
+既存日時や未来の保存日時は自動修正しない。NTPの時刻同期を別途管理する。
+
+切戻しは新機能の2フラグをOFFにして認証処理を確認する方法を優先する。旧Pluginへ戻すと日時の
+意味も旧版へ戻る。旧Dashboardはschema 6を拒否するため、停止後のbackup復元、または別索引への
+原本再取り込みを行う。稼働中のDBファイル差替えや新列の手動削除はしない。
 
 ### v1.4.0のSP移行支援ツールを利用する場合
 
@@ -47,6 +94,7 @@ SP Import Toolsはホームへ展開する独立ZIPであり、ツールだけ�
 | v1.3.2 | v1.3.3 | 旧JAR削除、WAR再構築、設定検査、GraphicalMatrix認証の回帰試験 | 狭いviewportでのモバイル列数切替 |
 | v1.3.3 | v1.3.4 | `web.xml`へsecurity header Filterを反映し、外部JavaScriptと標準templateを統合する。IdP自己管理flow利用時は従来LDAP自己管理も停止する | 独自templateのCSP互換性、SAML POST、MFA、自己管理を回帰試験する |
 | v1.3.4 | v1.3.5 | missing enrollmentを既定拒否にし、MFA開始・完了の状態guard、custom failure event、MFA結果再利用停止を統合する | `delete USER`のWebAuthn credential完全削除と途中失敗時DISABLED保持を試験する |
+| v1.4.0 | v1.4.1 | 修正版JARを配備し、[MFA完了の3遷移・bean・拒否イベント・reuseConditionを確認／統合](#mfa-flow-upgrade)する。初期値移行など後述のv1.4.1更新事項も確認する | 成功日時保存・成功監査のON/OFF、Dashboard方式別集計 |
 
 v1.1.0ではDB状態とsequence保存方式のセキュリティmigrationが必要です。
 v1.0.xから更新する場合は、通常の更新手順を実行する前にv1.1.0のセキュリティ更新項目を確認してください。
@@ -425,7 +473,7 @@ sudo diff -u \
 ***
 ***
 
-## 以下の追加手順が必要ない場合は、設定検査から始めてください。
+## 以下の追加手順が必要ない場合は、このページの下部　「設定検査」　から始めてください。
 
 
 ## v1.0.xからv1.1.0への追加手順
@@ -1786,6 +1834,8 @@ graphicalmatrix.mfa.missingEnrollmentPolicy = deny
 - `GraphicalMatrixMfaCompletionStrategy` bean
 - `authn/External`、`authn/TOTP`、`authn/WebAuthn`成功後のcompletion遷移
 
+XML内の統合位置と標準構成の完成形は、後述の[MFA遷移設定の修正位置と完成形](#mfa-flow-upgrade)を参照する。
+
 ```bash
 sudo diff -u \
   /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
@@ -1974,6 +2024,196 @@ mvn -q -f dashboard/pom.xml test
 bash scripts/tests/security-regression.sh
 ```
 
+## v1.4.1への更新
+
+### MFA遷移設定の修正位置と完成形
+
+<a id="mfa-flow-upgrade"></a>
+
+**JAR更新だけでは、既存の`mfa-authn-config.xml`は自動で書き換わらない。**
+旧設定が「Password後に方式を選び、第二要素成功後は暗黙に終了する」形のままでは、
+`GraphicalMatrixMfaCompletionStrategy`が呼ばれない。共通の本人・登録状態・世代の検査、
+`last_success`記録、`MFA_COMPLETE`監査、自己管理への認可証跡の発行を行うには、
+第二要素成功後の明示的な遷移が必要である。日時保存と監査をOFFにする場合も、この接続は省略しない。
+
+既に同じ接続がある環境は重複追加しない。修正前のv1.4.1候補版から更新する場合も確認する。
+TOTP／WebAuthnの認証結果形式への互換修正を含むJARを先に配備する。XMLだけの変更で
+`MFA factor subject binding failed`の互換性不具合が直るわけではない。
+
+#### 1. 対象ファイルとバックアップ
+
+以下は、署名・checksumを検証したv1.4.1配布物を展開したディレクトリで実行する。
+`./examples/`と`./bin/`はその配布物内のパスであり、ソースリポジトリ直下とは異なる。
+
+| 対象ファイル | 確認・修正する位置 |
+| --- | --- |
+| `/opt/shibboleth-idp/conf/authn/mfa-authn-config.xml` | `shibboleth.authn.MFA.TransitionMap`内の開始・Password後・第二要素成功後の遷移、およびマップ外の2つのstrategy bean |
+| `/opt/shibboleth-idp/conf/authn/authn-events-flow.xml` | 2つの`end-state`と、それらへ進む`global-transitions`内の遷移 |
+| `/opt/shibboleth-idp/conf/authn/authn.properties` | `idp.authn.MFA.reuseCondition` |
+
+本書の[バックアップ](#バックアップ)に加え、編集直前の3ファイルも稼働設定外へ保存する。
+
+```bash
+BACKUP_ROOT="/var/backups/shibboleth-idp/mfa-flow-$(date +%Y%m%d-%H%M%S)"
+sudo install -d -o root -g root -m 0700 "$BACKUP_ROOT"
+sudo cp -a /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml "$BACKUP_ROOT/"
+sudo cp -a /opt/shibboleth-idp/conf/authn/authn-events-flow.xml "$BACKUP_ROOT/"
+sudo cp -a /opt/shibboleth-idp/conf/authn/authn.properties "$BACKUP_ROOT/"
+
+sudo diff -u \
+  /opt/shibboleth-idp/conf/authn/mfa-authn-config.xml \
+  ./examples/mfa-authn-config.xml
+```
+
+`diff`は比較のみで、設定を変更しない。終了値`1`は差分あり、`2`は読込み失敗等のエラーである。
+差分表示の直後に`&&`で適用・再起動をつないでも、差分がある場合は後続コマンドは実行されない。
+バックアップに失敗した場合は編集へ進まない。
+
+#### 2. mfa-authn-config.xmlの遷移マップ内を修正する
+
+`<util:map id="shibboleth.authn.MFA.TransitionMap">`から対応する`</util:map>`までが対象である。
+標準構成は次の5エントリーとなる。**これらを既存マップへ統合し、2個目の同名マップを追加しない。**
+既に同じ`key`がある場合はそのエントリーを確認・修正し、同一キーを重複させない。
+
+```text
+開始             -> authn/Password
+Password成功後   -> GraphicalMatrixMfaDecisionStrategy（次の方式または省略を判定）
+External成功後   -> GraphicalMatrixMfaCompletionStrategy
+TOTP成功後       -> GraphicalMatrixMfaCompletionStrategy
+WebAuthn成功後   -> GraphicalMatrixMfaCompletionStrategy
+```
+
+```xml
+<util:map id="shibboleth.authn.MFA.TransitionMap">
+    <entry key="">
+        <bean parent="shibboleth.authn.MFA.Transition"
+              p:nextFlow="authn/Password" />
+    </entry>
+    <entry key="authn/Password">
+        <bean parent="shibboleth.authn.MFA.Transition"
+              p:nextFlowStrategy-ref="GraphicalMatrixMfaDecisionStrategy" />
+    </entry>
+    <entry key="authn/External">
+        <bean parent="shibboleth.authn.MFA.Transition"
+              p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+    </entry>
+    <entry key="authn/TOTP">
+        <bean parent="shibboleth.authn.MFA.Transition"
+              p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+    </entry>
+    <entry key="authn/WebAuthn">
+        <bean parent="shibboleth.authn.MFA.Transition"
+              p:nextFlowStrategy-ref="GraphicalMatrixMfaCompletionStrategy" />
+    </entry>
+</util:map>
+```
+
+上記は`<beans>`直下へ置く部分例である。配布例と同様に、ルートの`<beans>`には
+`xmlns:util="http://www.springframework.org/schema/util"`と
+`xmlns:p="http://www.springframework.org/schema/p"`、utilのschema指定が必要である。
+既存の独自遷移・他方式・custom beanを丸ごと削除しない。同じキーに独自の成功後処理がある場合は、
+その処理を保持しつつ完了検査へ接続する設計を確認し、標準例で無条件に上書きしない。
+TOTP／WebAuthnのエントリーを追加しても、その公式プラグインのインストールや利用者の方式変更は行われない。
+
+#### 3. 遷移マップの外へstrategy beanを定義する
+
+同じファイルの`</util:map>`の後、ルートの`</beans>`より前に置く。
+**`<util:map>`の中へbean定義を貼り付けない。** 既存の同名beanがあれば追加せず、そのclassを確認する。
+
+```xml
+<bean id="GraphicalMatrixMfaDecisionStrategy"
+      class="io.github.yasakawa.faskw.GraphicalMatrixMfaDecisionStrategy" />
+
+<bean id="GraphicalMatrixMfaCompletionStrategy"
+      class="io.github.yasakawa.faskw.GraphicalMatrixMfaCompletionStrategy" />
+```
+
+旧版でDecisionStrategyだけが定義されている場合は、それを残してCompletionStrategyを追加する。
+「第二要素成功でMFA完了（暗黙の終端）」等のコメントだけでは完了検査への接続にならない。
+
+#### 4. 拒否イベントと再利用設定を確認する
+
+`authn-events-flow.xml`のルート`<flow>`直下、既存の`<global-transitions>`より前へ、
+不足している`end-state`を追加する。既存の状態・遷移は保持する。
+
+```xml
+<end-state id="GraphicalMatrixAccessDenied" />
+<end-state id="GraphicalMatrixServiceUnavailable" />
+```
+
+既存の`<global-transitions>`の**内側**へ次の2行を追加する。既存の汎用的な拒否／
+`InvalidEvent`への遷移より前に置き、2個目の`<global-transitions>`を作らない。
+これにより完了検査の拒否を、未定義イベントではなく意図した認証失敗として扱える。
+
+```xml
+<transition on="GraphicalMatrixAccessDenied" to="GraphicalMatrixAccessDenied" />
+<transition on="GraphicalMatrixServiceUnavailable" to="GraphicalMatrixServiceUnavailable" />
+```
+
+`authn.properties`では次の値を設定する。既存の同名設定があれば値を変更し、重複追加しない。
+SP別・全体MFA方針やExternalの既存設定を、この作業で変更する必要はない。
+
+```properties
+idp.authn.MFA.reuseCondition = shibboleth.Conditions.FALSE
+```
+
+#### 5. 設定検査・反映・実認証を確認する
+
+展開した配布物の検査スクリプトを使用する。`graphicalmatrix-plugin-check.sh`が
+`/opt/shibboleth-idp/bin/`へ配置されているとは限らないため、以下は`./bin/`から実行する。
+
+```bash
+sudo bash ./bin/graphicalmatrix-plugin-check.sh \
+  --idp-home /opt/shibboleth-idp --config-only &&
+sudo /opt/shibboleth-idp/bin/build.sh &&
+sudo systemctl restart jetty-idp.service
+```
+
+検査では次の表示と`result: OK`を確認する。FAILがある場合は反映へ進まず修正する。
+
+```text
+OK: [config] MFA completion guard configured
+OK: [config] MFA failure events configured
+OK: [config] MFA result reuse disabled for current-state enforcement
+result: OK
+```
+
+検査は必要文字列・設定値の確認を含むものであり、名前が表示されたことだけで独自XMLの
+実行順や実認証まで保証しない。新しい認証セッションで、利用中の各方式の通常ログインと
+自己管理への再認証、初回画像列変更が必要な利用者の変更後ログインを確認する。
+拒否ケースには無効化済み利用者と、認証途中に管理者が方式／登録世代を変更した場合も含める。
+
+```bash
+sudo grep -E 'MFA method decision|MFA completion accepted|MFA factor subject binding failed|MFA enrollment changed before completion' \
+  /opt/shibboleth-idp/logs/idp-process.log | tail -n 30
+sudo grep 'event=MFA_COMPLETE ' \
+  /opt/shibboleth-idp/logs/graphicalmatrix-audit.log | tail -n 20
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+```
+
+`USER`は試験利用者へ置き換える。通常成功では`MFA completion accepted`を確認し、
+監査ONなら`MFA_COMPLETE`、日時保存ONなら`last_success`の更新も確認する。
+MFA省略ではこれらの成功記録は作らない。公式TOTP／WebAuthnプラグインの改変や、
+既存seed／キーの再登録はこの修正には不要である。
+
+### CLI・データ移行の追加確認
+
+管理CLIの`USER RESET`／`reset-user USER`はYES/NO確認後に実行するよう変更した。
+自動化スクリプトでは`USER RESET -y`（または`--yes`）へ更新する。NOまたは空入力なら中止し、
+入力EOFではDBを変更せず非ゼロ終了する。RESETへの`--apply`や未知の引数は拒否する。
+API／CSVのRESET相当操作やTOTP／WebAuthn専用コマンドへ確認を追加する変更ではない。
+
+N1〜N4の変更・確認事項は[v1.4.1リリースノート](./release-notes/v1.4.1-RELEASE-NOTES.md)を参照する。全IdPノードと実際に使用するAdmin Toolsを更新し、旧形式の自己管理権限は再認証する。初期値はDBで平文確認できる仕様とし、現在列の保護を維持する。旧候補版でhash化した初期値は復元できないため、`set-initial-sequence USER --stdin` で再入力する。元の値または新しい初期値を明示し、現在値をコピーしない。再入力だけでは現在列は変わらない。
+
+更新後のCLI add／set-sequenceで新規作成したユーザーは、入力画像列を初期値にも設定し、
+初回変更フラグをONにする。既存行の初期値は上書き・補充しないため、従来の`[unset]`は更新だけでは
+解消しない。必要な利用者だけ初期値を明示する。新規作成と同じ扱いにする目的で既存利用者を削除しない。
+API／CSVの初期値省略時の動作は変更しない。
+
+旧keyword／AES-GCM初期値は元鍵があれば移行で平文化する。平文／空の初期値は正常で、hash初期値は再入力が必要として移行を停止する。初期値移行はbackup後、管理書込と自己管理操作を停止した状態でdry-run→apply→再dry-runの順に行う。200行ごとの部分確定と再開を考慮する。過去の平文backupやCSVは自動消去されず、必要な画像列の再設定も別途行う。通常SSOとTOTP／WebAuthnの動作確認後に自己管理を再開する。
+
+値制限付きSPのadopt、既存Condition付きのaccess initは停止する。条件を消して回避せず、既存ルールを保持して移行を設計する。旧処理で削除済みの条件はbackup／legacy XMLから別途復旧・検証する。
+
 ## 設定検査
 
 ユーザーが認証を開始する前に設定検査を実行する。
@@ -1995,6 +2235,9 @@ sudo ./bin/graphicalmatrix-plugin-check.sh \
 
 設定不正の場合はJettyを起動せず、`CONFIG_CHECK_FAILED`の内容を修正する。
 
+--------------------------
+--------------------------
+--------------------------
 ## WAR再構築とJetty起動
 
 WARを再構築する。

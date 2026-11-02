@@ -118,6 +118,10 @@ public final class GraphicalMatrixConfigCheckTool {
         ok("challenge valid: seconds=" + config.getChallengeSeconds());
         ok("TOTP registration valid: ttl_seconds="
             + config.getTotpRegistrationTtlSeconds());
+        final GraphicalMatrixMfaSuccessRecordOptions recording = config.getMfaSuccessRecordOptions();
+        ok("MFA completion recording valid: enabled=" + recording.enabled()
+            + " audit_enabled=" + recording.auditEnabled()
+            + " query_timeout_seconds=" + recording.queryTimeoutSeconds());
         checkLockout(config);
         checkLdapRateLimit(config);
         ok("self-service valid: enabled=" + config.isSelfServiceEnabled()

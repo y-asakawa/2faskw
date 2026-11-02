@@ -364,6 +364,21 @@ final class GraphicalMatrixRepositoryStateTest {
         assertEquals(expectedLockedUntil, enrollment.getLockedUntil());
     }
 
+    @Test
+    void sequenceChangeVerificationCarriesTheGenerationActuallyChecked() throws Exception {
+        final GraphicalMatrixVerifyResult verified = repository.verifyForSequenceChange(
+            "alice", List.of("g1"), List.of("g1", "g2"), 2000L,
+            new GraphicalMatrixLockoutPolicy(5, 120, 10, 3600), true, false);
+        assertTrue(verified.isSuccess());
+        assertEquals(0L, verified.afterVersion());
+        try (Connection c = DriverManager.getConnection(jdbcUrl, "sa", ""); final var st = c.createStatement()) {
+            st.executeUpdate("UPDATE graphicalmatrix_enrollment SET state_version=state_version+1 WHERE user_id='alice'");
+        }
+        assertNotEquals(repository.findEnrollment("alice").getStateVersion(), verified.afterVersion().longValue());
+        assertFalse(repository.updateSequence("alice", List.of("g2"), 2001L,
+            verified.afterVersion().longValue(), true, false));
+    }
+
     private void insertEnrollment() throws Exception {
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
              PreparedStatement statement = connection.prepareStatement(

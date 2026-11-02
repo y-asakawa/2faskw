@@ -46,7 +46,6 @@ verify_status() {
   incompatible="$(printf '%s\n' "$status" | value security.incompatible_sequence_rows)"
   active_empty="$(printf '%s\n' "$status" | value security.active_empty_sequence_rows)"
   active_incompatible="$(printf '%s\n' "$status" | value security.active_incompatible_sequence_rows)"
-  [[ "$initial_empty" == "0" ]] || die "initial_sequence is missing for users: $initial_empty"
   [[ "$initial_incompatible" == "0" ]] || die "initial_sequence migration is incomplete: $initial_incompatible"
   [[ "$incompatible" == "0" ]] || die "sequence migration is incomplete: $incompatible"
   [[ "$active_empty" == "0" ]] || die "ACTIVE users have empty sequences: $active_empty"

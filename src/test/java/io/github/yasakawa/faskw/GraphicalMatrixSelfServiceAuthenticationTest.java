@@ -108,6 +108,18 @@ final class GraphicalMatrixSelfServiceAuthenticationTest {
             context("../other-user", "authn/TOTP")).isValid());
     }
 
+    @Test
+    void rejectsMissingReceiptAndConsumesValidReceiptOnlyOnce() {
+        final ProfileRequestContext missing = context("test01", "authn/TOTP");
+        missing.removeSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class);
+        assertFalse(GraphicalMatrixSelfServiceAuthentication.validate(missing).isValid());
+        for (final String flow : java.util.List.of("authn/TOTP", "authn/WebAuthn", "authn/External")) {
+            final ProfileRequestContext prc = context("test01", flow);
+            assertEquals(7L, GraphicalMatrixSelfServiceAuthentication.validate(prc).getStateVersion());
+            assertFalse(GraphicalMatrixSelfServiceAuthentication.validate(prc).isValid());
+        }
+    }
+
     private static ProfileRequestContext context(final String user, final String secondFactor) {
         final ProfileRequestContext prc = new ProfileRequestContext();
         prc.setProfileId(GraphicalMatrixSelfServiceAuthentication.PROFILE_ID);
@@ -128,6 +140,10 @@ final class GraphicalMatrixSelfServiceAuthenticationTest {
         }
         authn.addSubcontext(mfa);
         prc.addSubcontext(authn);
+        if (secondFactor != null) {
+            prc.addSubcontext(new GraphicalMatrixSelfServiceAuthorizationContext(user, 7L, secondFactor,
+                mfa.getActiveResults().get("authn/Password"), mfa.getActiveResults().get(secondFactor)));
+        }
         return prc;
     }
 
@@ -151,6 +167,16 @@ final class GraphicalMatrixSelfServiceAuthenticationTest {
         authn.setForceAuthn(true);
         authn.setAuthenticationResult(mfaResult);
         prc.addSubcontext(authn);
+        if (secondFactor != null) {
+            AuthenticationResult password = null;
+            AuthenticationResult factor = null;
+            for (final AuthenticationResultPrincipal principal : mergedSubject.getPrincipals(AuthenticationResultPrincipal.class)) {
+                final AuthenticationResult component = principal.getAuthenticationResult();
+                if ("authn/Password".equals(component.getAuthenticationFlowId())) { password = component; }
+                if (secondFactor.equals(component.getAuthenticationFlowId())) { factor = component; }
+            }
+            prc.addSubcontext(new GraphicalMatrixSelfServiceAuthorizationContext(user, 7L, secondFactor, password, factor));
+        }
         return prc;
     }
 

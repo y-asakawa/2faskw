@@ -78,6 +78,17 @@ public final class AuditLogParser {
         if (user != null && !PrivacyFilter.isValidUserReference(user)) {
             throw new ParseException("user ID contains unsafe characters");
         }
+        final String detail = decode(matcher.group("detail"));
+        if ("MFA_COMPLETE".equals(event)) {
+            try {
+                final MfaCompletionInfo completion = MfaCompletionInfo.decode(detail);
+                if (!"OK".equals(result) || !Instant.ofEpochMilli(completion.completedAt()).equals(occurredAt)) {
+                    throw new IllegalArgumentException("completion timestamp/result mismatch");
+                }
+            } catch (IllegalArgumentException ex) {
+                throw new ParseException("invalid MFA completion detail");
+            }
+        }
 
         return new RawAuditEvent(
                 occurredAt,
@@ -87,7 +98,7 @@ public final class AuditLogParser {
                 decode(matcher.group("ip")),
                 decode(matcher.group("session")),
                 decode(matcher.group("challenge")),
-                decode(matcher.group("detail")));
+                detail);
     }
 
     static String decode(final String value) throws ParseException {

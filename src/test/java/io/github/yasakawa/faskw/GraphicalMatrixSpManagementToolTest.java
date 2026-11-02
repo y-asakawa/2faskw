@@ -567,6 +567,98 @@ class GraphicalMatrixSpManagementToolTest {
             temporary.resolve("conf/graphicalmatrix/sp-management-registry.json")).isEmpty());
     }
 
+    @Test
+    void rejectsValueRestrictedAdoptionWithoutChangingAnyFiles() throws Exception {
+        prepareIdp();
+        final Path legacyMetadata = Files.writeString(temporary.resolve("metadata/legacy.xml"),
+            GraphicalMatrixSpMetadataTest.metadata(ENTITY_ID, "https://sp.example.org/acs"));
+        Files.writeString(temporary.resolve("conf/metadata-providers.xml"), """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <MetadataProvider xmlns="urn:mace:shibboleth:2.0:metadata"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                id="ShibbolethMetadata" xsi:type="ChainingMetadataProvider">
+              <MetadataProvider id="LegacySp" xsi:type="FilesystemMetadataProvider"
+                  metadataFile="%{idp.home}/metadata/legacy.xml"/>
+            </MetadataProvider>
+            """, StandardCharsets.UTF_8);
+        Files.writeString(temporary.resolve("conf/attribute-filter.xml"), """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <AttributeFilterPolicyGroup xmlns="urn:mace:shibboleth:2.0:afp"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+              <AttributeFilterPolicy id="legacyPolicy">
+                <PolicyRequirementRule xsi:type="Requester" value="%s"/>
+                <AttributeRule attributeID="uid"><PermitValueRule xsi:type="ValueRegex" regex="^staff-.*$"/></AttributeRule>
+              </AttributeFilterPolicy>
+            </AttributeFilterPolicyGroup>
+            """.formatted(ENTITY_ID), StandardCharsets.UTF_8);
+        Files.writeString(temporary.resolve("conf/graphicalmatrix/mfa-policy.properties"), """
+            graphicalmatrix.mfa.default = require
+            graphicalmatrix.mfa.forceSPs = %s
+            graphicalmatrix.mfa.bypassSPs =
+            graphicalmatrix.mfa.bypassSpCidrs =
+            graphicalmatrix.mfa.requiredSPs =
+            """.formatted(ENTITY_ID), StandardCharsets.UTF_8);
+
+        invoke("init", "--apply");
+        final Path filter = temporary.resolve("conf/attribute-filter.xml");
+        final Path providers = temporary.resolve("conf/metadata-providers.xml");
+        final String beforeFilter = Files.readString(filter);
+        final String beforeProviders = Files.readString(providers);
+        final var constructor = GraphicalMatrixSpManagementTool.class.getDeclaredConstructor(GraphicalMatrixSpManagementConfig.class);
+        constructor.setAccessible(true);
+        final Object tool = constructor.newInstance(GraphicalMatrixSpManagementConfig.load(temporary.toString()));
+        final Class<?> optionsClass = Class.forName(GraphicalMatrixSpManagementTool.class.getName() + "$Options");
+        final var parse = optionsClass.getDeclaredMethod("parse", String[].class);
+        parse.setAccessible(true);
+        final Object options = parse.invoke(null, (Object) new String[] {
+            "legacy", "--entity-id", ENTITY_ID, "--confirm", ENTITY_ID, "--apply"});
+        final var execute = GraphicalMatrixSpManagementTool.class.getDeclaredMethod("execute", String.class, optionsClass);
+        execute.setAccessible(true);
+        final var failure = assertThrows(java.lang.reflect.InvocationTargetException.class,
+            () -> execute.invoke(tool, "adopt", options));
+        assertTrue(failure.getCause() instanceof IllegalArgumentException);
+        assertEquals(beforeFilter, Files.readString(filter));
+        assertEquals(beforeProviders, Files.readString(providers));
+        assertTrue(Files.isRegularFile(legacyMetadata));
+    }
+
+    @Test
+    void accessInitPreservesExistingConditionAndStopsBeforeAnyWrites() throws Exception {
+        prepareIdp();
+        final Path context = temporary.resolve("conf/intercept/context-check-intercept-config.xml");
+        Files.createDirectories(context.getParent());
+        Files.writeString(context, "<beans xmlns='http://www.springframework.org/schema/beans'><bean id='shibboleth.context-check.Condition' parent='shibboleth.Conditions.SimpleAttribute'/></beans>");
+        final Path relying = temporary.resolve("conf/relying-party.xml");
+        Files.writeString(relying, "<beans xmlns='http://www.springframework.org/schema/beans'><ref bean='SAML2.SSO'/></beans>");
+        final String before = Files.readString(context);
+        final String beforeRelying = Files.readString(relying);
+        final var mode = Files.getPosixFilePermissions(context);
+        final var tool = new GraphicalMatrixSpGovernanceTool(GraphicalMatrixSpManagementConfig.load(temporary.toString()));
+        assertThrows(IllegalStateException.class, () -> tool.execute("access", new String[] {"init", "--apply"}));
+        assertEquals(before, Files.readString(context));
+        assertEquals(beforeRelying, Files.readString(relying));
+        assertEquals(mode, Files.getPosixFilePermissions(context));
+        assertFalse(Files.exists(temporary.resolve("conf/graphicalmatrix/sp-access-policy.json")));
+    }
+
+    @Test
+    void accessInitAppliesSafeConfigurationAndRemainsIdempotent() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+        final Path context = temporary.resolve("conf/intercept/context-check-intercept-config.xml");
+        Files.createDirectories(context.getParent());
+        Files.writeString(context, "<beans xmlns='http://www.springframework.org/schema/beans'/>");
+        final Path relying = temporary.resolve("conf/relying-party.xml");
+        Files.writeString(relying, "<beans xmlns='http://www.springframework.org/schema/beans' xmlns:p='http://www.springframework.org/schema/p'><bean parent='SAML2.SSO' p:postAuthenticationFlows='terms-of-use'/></beans>");
+        final var tool = new GraphicalMatrixSpGovernanceTool(GraphicalMatrixSpManagementConfig.load(temporary.toString()));
+        tool.execute("access", new String[] {"init", "--apply"});
+        final String first = Files.readString(relying);
+        assertTrue(first.indexOf("terms-of-use") < first.indexOf("context-check"));
+        assertTrue(GraphicalMatrixSpAccessXmlConfig.inspect(context, relying).managedFunction());
+        tool.execute("access", new String[] {"init", "--apply"});
+        assertEquals(first, Files.readString(relying));
+    }
+
     private void prepareIdp() throws Exception {
         Files.createDirectories(temporary.resolve("conf/graphicalmatrix"));
         Files.createDirectories(temporary.resolve("metadata"));

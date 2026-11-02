@@ -69,20 +69,21 @@ public final class GraphicalMatrixCsvExportTool {
                 final String storedSequence = value(rs.getString("sequence"));
                 final String storedMode = storage.storedMode(storedSequence);
 
-                if (!storage.recoverable(storedSequence)) {
+                if (!storage.recoverable(storedSequence) || !storage.recoverable(storedInitialSequence)) {
                     throw new IllegalStateException("User " + userId
                         + " has non-recoverable hash sequence; portable CSV export is not possible.");
                 }
-                final List<String> decodedInitial = GraphicalMatrixSupport.csv(storedInitialSequence);
+                final List<String> decodedInitial = storedInitialSequence.isEmpty() ? List.of()
+                    : storage.initialTokens(storedInitialSequence, graphicalConfig);
                 final List<String> decoded = storage.displayTokens(storedSequence);
-                graphicalConfig.validateSequence(graphicalConfig.resolveSequenceToGraphicals(decodedInitial));
+                if (!decodedInitial.isEmpty()) { graphicalConfig.validateSequence(graphicalConfig.resolveSequenceToGraphicals(decodedInitial)); }
                 graphicalConfig.validateSequence(decoded);
                 lines.add(csv(
                     "A",
                     userId,
                     method,
                     rs.getInt("force_sequence_change") == 0 ? "off" : "on",
-                    String.join(",", graphicalConfig.normalizeInitialSequence(decodedInitial)),
+                    decodedInitial.isEmpty() ? "" : String.join(",", graphicalConfig.normalizeInitialSequence(decodedInitial)),
                     String.join(",", decoded)
                 ));
                 if ("empty".equals(storedMode)) {

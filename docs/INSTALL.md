@@ -1138,6 +1138,22 @@ sudo grep -nE 'TransitionMap|authn/Password|GraphicalMatrixMfaDecisionStrategy|G
 
 両方のstrategyと4つのflowが表示されることを確認する。
 
+共通MFA完了処理は、3方式の最新成功日時と監査イベントも記録する。既存XMLを丸ごと置換せず、
+この3遷移を維持する。`conf/graphicalmatrix/graphicalmatrix.properties`の次の値を確認する。
+
+```properties
+graphicalmatrix.mfa.successRecord.enabled = true
+graphicalmatrix.mfa.successRecord.queryTimeoutSeconds = 1
+graphicalmatrix.mfa.completionAudit.enabled = true
+```
+
+日時保存と成功監査は独立して停止可能であり、どちらも省略時は`true`となる。
+負荷を抑えてログだけ残す場合は`successRecord.enabled=false`とする。
+利用者・方式・登録世代の検査は停止しない。標準DBでは追加schema不要、LDAPでは既存の
+成功日時属性・更新日時属性の書込み権限とcritical assertion control対応を確認する。
+導入検査だけで実認証を確認したとは扱わず、3方式のログインと自己管理も試験する。
+詳細は[CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)と[UPGRADE.md](./UPGRADE.md#mfa-completion-recording)を参照する。
+
 カスタム拒否イベントをIdPへ登録する。新規IdPで既存custom eventがない場合は配布例を配置できる。
 既存IdPでは現在のend-stateとglobal transitionを保持して、配布例の2イベントだけを統合する。
 
@@ -1764,6 +1780,9 @@ RESET:
 ```bash
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh user001 RESET
 ```
+
+対象ユーザーのYES/NO確認でYESを入力すると実行する。NOまたは空入力なら中止する。
+確認を省略する自動実行では`user001 RESET -y`（または`--yes`）を使用する。`--apply`は指定しない。
 
 CSV一括登録:
 

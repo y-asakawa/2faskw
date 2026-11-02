@@ -261,7 +261,7 @@ metadataは準備時・書込前・SP登録直前に期限を再確認する。�
 # DB上の全enrollment行を一覧表示する。値の変更は行わない。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh list
 
-# 1ユーザーのMFA方式、ロック、TOTP、日時などの管理項目を表示する。
+# 1ユーザーのMFA方式、ロック、TOTP、日時、WebAuthn登録状態・件数を表示する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
 
 # 現在のsequence保存方式を表示する。
@@ -283,15 +283,53 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh config-help [PROPERTY]
 表示時刻は既定でOSのタイムゾーン、取得できない場合はUTCとなる。表示だけ別のIANA timezoneへ
 変更する場合は、実行時に`GRAPHICALMATRIX_TIME_ZONE=Asia/Tokyo`を指定する。
 
+`list`／`show`の末尾に次の表示専用列を追加する。共通の表示列は、`locked_until`の後を
+`last_success`、`created`、`updated`、`totp_status`、`totp_registered`、`totp_seed_set`の順とし、
+続いてWebAuthnの2列を表示する。コマンドの引数やAPI／CSV形式は変更しない。
+WebAuthn列は書込みコマンドの実行結果表示へは追加しない。
+
+| 列 | 値 | 意味 |
+| --- | --- | --- |
+| `webauthn_status` | `REGISTERED` | 接続先PostgreSQLのWebAuthn保存レコードにキーが1件以上ある |
+| 同上 | `UNREGISTERED` | 対象レコードがない、期限切れ、または空の登録配列 |
+| 同上 | `UNKNOWN` | H2、テーブル不在、権限不足、読取り失敗・不正形式等で確認できない |
+| `webauthn_credential_count` | `0`以上の整数、または`UNKNOWN` | 重複credential IDを除いた登録件数。不明を`0`とみなさない |
+
+```text
+totp_seed_set | webauthn_status | webauthn_credential_count
+YES           | REGISTERED      | 3
+NO            | UNREGISTERED    | 0
+YES           | UNKNOWN         | UNKNOWN
+```
+
+対象は、enrollmentと同じDB・search pathから参照できる`storagerecords`の
+`net.shibboleth.idp.plugin.authn.webauthn` contextである。公式保存方式に従い、
+StorageRecordの`id`と利用者IDを照合する。user handleを利用者IDとして検索しない。
+GraphicalMatrix／TOTPを選択中でも、保存されているキーがあれば`REGISTERED`となる。
+これは保存先の登録スナップショットであり、現在のMFA方式・利用者の有効状態・キーでの
+ログイン成功を示すものではない。IdPが別DB・LDAP・独自repositoryを使用する場合は、
+この同一DB表示を実保存先の登録有無の根拠とせず、その保存先で確認する。
+
+WebAuthn照会は読み取り専用で、DB項目を追加せず、登録・認証・削除処理を変更しない。
+SQL照会は1回にまとめ、5秒で打ち切る。失敗時は元のenrollment照会へ戻り、WebAuthnの
+2列を`UNKNOWN`で表示する。credential JSON・公開鍵・credential IDの詳細は追加表示しない。
+JSON自体が不正で照会が失敗した場合は、対象一覧のWebAuthn列を全件`UNKNOWN`とする。
+
+`last_success`は3方式の共通MFA完了検査に合格した最新日時であり、設定変更の履歴でも
+最終SPアクセス許可日時でもない。自己管理の再認証も含む。`updated`はカウンター・設定変更・
+成功日時保存等でも更新される。日時保存OFF時は以前の値を保持し、ON復帰時に過去分を補完しない。
+旧版では画像照合成功やTOTP登録完了時の値も含むため、更新直後の既存値を一律に新しい意味で解釈しない。
+`0`は日時不明。コマンドの引数、表示列名、APIの`lastSuccessAt`は変更しない。
+
 ### 3.2 利用者・方式・ロック管理
 
-次のコマンドはDBを即時変更する。
+次のコマンドはDBを即時変更する。ただし、`USER RESET`はYES/NO確認後に実行する。
 
 ```bash
-# sequenceを登録または更新する。画像IDまたはaliasを使用でき、DBを直ちに変更する。
+# 新規作成時は入力画像列を初期値にも設定し、初回変更フラグをONにする。既存ユーザーの初期値は保持する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh add USER A B C D
 
-# 現在のsequenceだけを更新する。初期sequenceは変更しない。
+# 既存ユーザーの現在sequenceだけを更新する。未登録ユーザーならaddと同じ初期化で作成する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-sequence USER A B C D
 
 # USER RESET時に戻すplaintextの初期sequenceを設定する。DBを直ちに変更する。
@@ -318,13 +356,21 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh lock USER 15
 # 失敗回数だけを0へ戻す。sequenceやロック期限は変更しない。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh reset-failures USER
 
-# RESETは初期sequenceへ戻し、ロック解除後にsequence変更を要求する。
+# RESETはYES/NO確認後に初期sequenceへ戻し、ロック解除後にsequence変更を要求する。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh USER RESET
+
+# 確認を省略してRESETする。自動実行では明示的に-y（または--yes）を指定する。
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh USER RESET -y
 
 # enrollment、GraphicalMatrix/TOTP情報、PostgreSQL StorageRecords内の関連WebAuthn credentialを物理削除する。
 # 最初にDISABLEDへ変更し、credential削除が失敗した場合は停止状態を保持する。実行前にshowとDBバックアップを行う。
 sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh delete USER
 ```
+
+RESET確認では対象ユーザーを表示し、`YES`で実行、`NO`または空入力で中止する（大文字・小文字は不問）。
+中止は終了コード0でDBを変更しない。入力がEOFになった場合は非ゼロ終了し、DBを変更しない。
+`reset-user USER`も同じ動作で、`reset-user USER -y`または`--yes`で確認を省略できる。
+RESETにdry-runはなく、`--apply`は受け付けない。API／CSVや`reset-totp`／`webauthn-reset`の仕様は変更しない。
 
 ### 3.3 CSV、TOTP、WebAuthn、保存方式移行
 
@@ -832,3 +878,10 @@ sudo /path/to/package/bin/graphicalmatrix-security-upgrade.sh \
 - [INSTALL_NEW_SP.md](./INSTALL_NEW_SP.md): SP管理CLIによる新規SP導入・削除・復元。
 - [INSTALL_NEW_Manual_SP.md](./INSTALL_NEW_Manual_SP.md): CLIを使わない手作業のSP導入。
 - [UPGRADE.md](./UPGRADE.md): plugin更新、ロールバック、保存方式移行。
+
+
+## v1.4.1の変更
+
+`add`／`set-sequence`で新規ユーザーを作る場合、入力画像列を平文初期値にも設定し、`force_sequence_change=1`にする。alias設定がある`add USER A B C D`なら初期値は`A,B,C,D`となる。現在列のhash／暗号保存は維持する。既存ユーザーの更新では初期値を上書き・補充せず、既存の`[unset]`を自動移行しない。API／CSVの初期値省略時の動作は変更しない。`set-initial-sequence USER --stdin`は初期値だけを変更し、現在列を変えない。初回変更画面を有効にする全体設定`graphicalmatrix.force_sequence_change=1`も維持する。DB・show／listで初期値を確認でき、現在列はDB保存値を復号せず表示する。`USER RESET`は初期値を現在方式へencodeして変更を強制する。初期値なし／旧hash初期値のRESETは失敗する。旧hashは復元不能なので初期値を再入力する。`migrate-sequence-storage`は平文初期値の正規化・旧暗号初期値の平文化も対象とし、200行単位で確定・再開する。CSV previewは初期値もマスクする。
+
+`adopt`は単純なRequester＋ANYだけを自動変換し、値条件・deny・未解決構成は書込前に拒否する。`access init`は既存Conditionを常に保持して停止し、ContextCheck未準備時のmodule自動有効化を行わない。診断`context_condition_stock`は廃止し`context_condition_action=PRESERVE`を出力する。

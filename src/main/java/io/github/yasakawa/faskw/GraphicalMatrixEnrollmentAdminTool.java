@@ -58,7 +58,7 @@ public final class GraphicalMatrixEnrollmentAdminTool {
                 + "\tsequence\tstatus\tfailed_count\tlocked_until\ttotp_status\tstate_version");
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
-                    final String initial = initialDisplay(config, rs.getString("initial_sequence"));
+                    final String initial = initialDisplay(storage, config, rs.getString("initial_sequence"));
                     final String current = display(storage, rs.getString("sequence"));
                     System.out.println(cell(rs.getString("user_id"))
                         + "\t" + cell(rs.getString("mfa_method"))
@@ -75,8 +75,10 @@ public final class GraphicalMatrixEnrollmentAdminTool {
         }
     }
 
-    private static String initialDisplay(final GraphicalMatrixConfig config, final String stored) {
-        final List<String> decoded = GraphicalMatrixSupport.csv(stored);
+    private static String initialDisplay(final GraphicalMatrixSequenceStorage storage,
+            final GraphicalMatrixConfig config, final String stored) {
+        if ("hash".equals(storage.storedMode(stored))) { return "<reentry-required>"; }
+        final List<String> decoded = storage.initialTokens(stored, config);
         return decoded.isEmpty() ? "" : String.join(",", config.normalizeInitialSequence(decoded));
     }
 

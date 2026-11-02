@@ -431,3 +431,8 @@ restore試験を行います。
 
 日常点検と障害時の確認順序は[OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md)、更新時の個別backupと
 rollbackは[UPGRADE.md](./UPGRADE.md)を参照してください。
+
+
+## v1.4.1の初期パスワードとbackup
+
+初期パスワードは再通知のためDBに平文で保持する。backupにも含まれるためアクセス権・保管・廃棄を管理する。現在sequenceのhash／暗号方式と鍵・pepperは引き続き復元に必要となる。旧候補版でhash化した初期値は復元不能であり、管理者が元の初期値または新しい初期値を再入力する。現在列を初期値にコピーしない。旧keyword／AES-GCM初期値の平文化には元鍵を必要とする。再入力や正規化だけでは現在画像列を変更しない。

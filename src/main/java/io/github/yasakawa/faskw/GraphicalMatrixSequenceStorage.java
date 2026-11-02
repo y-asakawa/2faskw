@@ -47,13 +47,15 @@ public final class GraphicalMatrixSequenceStorage {
     private static final int PBKDF2_ITERATIONS = 120_000;
     private static final int PBKDF2_KEY_BITS = 256;
 
+    private final String idpHome;
     private final String mode;
     private final String keyword;
     private final byte[] aesKey;
     private final byte[] pepper;
 
-    private GraphicalMatrixSequenceStorage(final String mode, final String keyword,
+    private GraphicalMatrixSequenceStorage(final String idpHome, final String mode, final String keyword,
             final byte[] aesKey, final byte[] pepper) {
+        this.idpHome = idpHome;
         this.mode = mode;
         this.keyword = keyword;
         this.aesKey = aesKey != null ? aesKey.clone() : new byte[0];
@@ -61,6 +63,10 @@ public final class GraphicalMatrixSequenceStorage {
     }
 
     public static GraphicalMatrixSequenceStorage load(final String idpHome) {
+        return load(idpHome, null);
+    }
+
+    private static GraphicalMatrixSequenceStorage load(final String idpHome, final String legacyMode) {
         final Properties props = new Properties();
         final String overridePath = System.getenv("GRAPHICAL_PROPERTIES") != null
             ? System.getenv("GRAPHICAL_PROPERTIES").trim()
@@ -77,7 +83,7 @@ public final class GraphicalMatrixSequenceStorage {
         }
 
         final String rawMode = property(props, "graphicalmatrix.sequence.storage", "auto");
-        final String mode = normalizeMode(rawMode);
+        final String mode = legacyMode != null ? legacyMode : normalizeMode(rawMode);
         final String keyword;
         final String aesKeyText;
         final String pepperText;
@@ -103,7 +109,7 @@ public final class GraphicalMatrixSequenceStorage {
         }
 
         return new GraphicalMatrixSequenceStorage(
-            mode,
+            idpHome, mode,
             keyword,
             aesKeyText.isEmpty() ? new byte[0] : keyBytes(aesKeyText),
             pepperText.isEmpty() ? new byte[0] : pepperText.getBytes(StandardCharsets.UTF_8)
@@ -220,6 +226,68 @@ public final class GraphicalMatrixSequenceStorage {
         } catch (Exception ex) {
             return false;
         }
+    }
+
+    /** Validate a complete compatible stored credential before reusing it for RESET. */
+    public String validateStored(final String stored, final GraphicalMatrixConfig config) {
+        if (!acceptedForRuntime(stored)) { throw new IllegalArgumentException("Sequence storage migration required"); }
+        if (isHash(stored)) {
+            require(pepper, "graphicalmatrix.sequence.pepper or pepperFile");
+            final String[] parts = stored.split(":", -1);
+            if (parts.length != 4 || !parts[1].equals(Integer.toString(config.getChoiceCount()))
+                    || b64d(parts[2]).length != SALT_BYTES || b64d(parts[3]).length != 32) {
+                throw new IllegalArgumentException("Invalid stored hash envelope");
+            }
+        } else {
+            final String[] parts = stored.split(":", -1);
+            if ("keyword".equals(mode) && (parts.length != 4 || b64d(parts[1]).length != SALT_BYTES
+                    || b64d(parts[2]).length != GCM_IV_BYTES || b64d(parts[3]).length < GCM_TAG_BITS / 8)) {
+                throw new IllegalArgumentException("Invalid stored keyword envelope");
+            }
+            if ("aes-gcm".equals(mode) && (parts.length != 3 || b64d(parts[1]).length != GCM_IV_BYTES
+                    || b64d(parts[2]).length < GCM_TAG_BITS / 8)) {
+                throw new IllegalArgumentException("Invalid stored AES-GCM envelope");
+            }
+            config.validateSequence(decode(stored));
+        }
+        return stored;
+    }
+
+    /** Administrator-visible initial password, independent from the current credential's storage mode. */
+    public List<String> initialTokens(final String stored, final GraphicalMatrixConfig config) {
+        if (stored == null || stored.isBlank()) { return List.of(); }
+        if ("hash".equals(storedMode(stored))) {
+            throw new IllegalArgumentException("INITIAL_SEQUENCE_REENTRY_REQUIRED: hashed initial password cannot be recovered");
+        }
+        final String initialMode = storedMode(stored);
+        final GraphicalMatrixSequenceStorage reader = ("keyword".equals(initialMode) || "aes-gcm".equals(initialMode))
+                && !mode.equals(initialMode) ? load(idpHome, initialMode) : this;
+        final List<String> initial = config.resolveSequenceToGraphicals(reader.displayTokens(stored));
+        config.validateSequence(initial);
+        return initial;
+    }
+
+    public String normalizeInitial(final String stored, final GraphicalMatrixConfig config) {
+        final List<String> initial = initialTokens(stored, config);
+        return initial.isEmpty() ? "" : String.join(",", config.normalizeInitialSequence(initial));
+    }
+
+    /** Unrelated updates must not destroy or try to invert a legacy hashed initial password. */
+    public String preserveInitial(final String stored) {
+        return stored == null ? "" : stored;
+    }
+
+    public boolean initialMatchesCurrent(final String current, final String initial,
+            final GraphicalMatrixConfig config) {
+        if (initial == null || initial.isBlank() || "hash".equals(storedMode(initial))) { return false; }
+        return matches(current, initialTokens(initial, config), config.isOrderedSelectionRequired(),
+            config.isDuplicateSelectionsAllowed());
+    }
+
+    public String resetFromInitial(final String initial, final GraphicalMatrixConfig config) {
+        final List<String> tokens = initialTokens(initial, config);
+        if (tokens.isEmpty()) { throw new IllegalArgumentException("INITIAL_SEQUENCE_REQUIRED"); }
+        return encode(tokens, config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
     }
 
     public boolean matches(final String stored, final List<String> selected,

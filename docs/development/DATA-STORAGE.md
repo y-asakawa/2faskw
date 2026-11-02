@@ -196,6 +196,16 @@ import logはIdP runtime logではなくAdmin Tools hostに保存します。
 
 ### Dashboard
 
+Common MFA completion reuses enrollment `last_success_at` (or its LDAP mapping), not a new
+authentication-history table. The timestamp and `updated_at` advance monotonically without
+advancing `state_version`. Independent storage/audit flags do not bypass enrollment validation.
+GraphicalMatrix verification and TOTP activation retain counters and generation transitions,
+but no longer write `last_success_at` directly. Legacy timestamp values are not reinterpreted
+or migrated. See [MFA-SUCCESS-RECORD.md](./MFA-SUCCESS-RECORD.md).
+
+Dashboard schema 6 adds nullable completion fields to its own index. Old rows remain readable;
+missing metadata is not inferred. Source SP entityIDs are dropped before normalized forwarding.
+
 Dashboardはraw audit eventをparseし、`PrivacyFilter`を通したnormalized eventを独自storeへ保存します。
 認証判定の正規状態には使いません。Dashboard storeを失っても認証状態が変化しない設計です。
 
@@ -229,3 +239,8 @@ DBだけをrestoreしても、対応するstorage-format secretがなければ�
 schemaまたは保存形式を変更するpull requestでは、旧record読込、移行dry-run、rollback、同時更新、
 秘密file欠落時のfail-closed動作をtest対象に含めます。
 
+
+
+## v1.4.1の更新
+
+v1.4.1ではinitial_sequenceを再通知可能な平文の初期パスワードとして保持し、現在sequenceは設定された方式で保存する。CLI add／set-sequenceによる新規作成は入力列を初期値にも設定し、force_sequence_change=1とする。既存行の更新やAPI／CSVの省略入力からは補充しない。空の既存初期値は正常とし、自動移行しない。RESETは初期値を検証し、現在方式でencodeする。API／CLIの初期値だけの再設定は現在列を変更しない。旧hash初期値は復元不能で再入力が必要。旧keyword／AES-GCM初期値は元鍵による明示移行で平文化する。DB用移行は200行単位で確定し、TOTP seed／WebAuthn登録鍵を変更しない。

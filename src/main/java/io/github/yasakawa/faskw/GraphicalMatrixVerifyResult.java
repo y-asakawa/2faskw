@@ -25,6 +25,14 @@ public final class GraphicalMatrixVerifyResult {
 
     private GraphicalMatrixVerifyResult(final boolean success, final String event,
             final String auditResult, final String auditDetail, final long lockedUntil) {
+        this(success, event, auditResult, auditDetail, lockedUntil, null, null);
+    }
+
+    private GraphicalMatrixVerifyResult(final boolean success, final String event,
+            final String auditResult, final String auditDetail, final long lockedUntil,
+            final Long beforeVersion, final Long afterVersion) {
+        this.beforeVersion = beforeVersion;
+        this.afterVersion = afterVersion;
         this.success = success;
         this.event = event;
         this.auditResult = auditResult;
@@ -64,6 +72,20 @@ public final class GraphicalMatrixVerifyResult {
         return new GraphicalMatrixVerifyResult(
             false, "GraphicalMatrixFailed", "DB_ERROR", auditDetail, 0L);
     }
+
+    private final Long beforeVersion;
+    private final Long afterVersion;
+
+    GraphicalMatrixVerifyResult withStateTransition(final long before, final long after) {
+        if (before < 0 || after < before || (after != before && after != Math.addExact(before, 1L))) {
+            throw new IllegalArgumentException("Invalid verification generation transition");
+        }
+        return new GraphicalMatrixVerifyResult(success, event, auditResult, auditDetail, lockedUntil,
+            Long.valueOf(before), Long.valueOf(after));
+    }
+
+    Long beforeVersion() { return beforeVersion; }
+    Long afterVersion() { return afterVersion; }
 
     public boolean isSuccess() {
         return success;

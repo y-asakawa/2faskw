@@ -24,6 +24,18 @@ SAML AuthnRequest
 `UsernamePrincipal`を利用するため、browserから送られたuser IDを第二要素の主体として
 単独では信用しません。
 
+完了時は選択flowの結果自身から利用者を取得します。`authn/TOTP`では公式の`TOTPPrincipal`に
+対応し、カスタムvalidatorが返す一意の`UsernamePrincipal`も許可します。両方の型がある場合は
+一致が必要です。一次認証との一致、結果flow、登録世代の検査を省略せず、可変のSubjectContextから
+第二要素の利用者を補完しません。
+
+`authn/WebAuthn`の公式1.4.2第二要素モードでは、結果に`UsernamePrincipal`が含まれない場合が
+あります。この場合に限り、公式の成功結果生成処理が設定した`SubjectCanonicalizationContext`を
+参照し、その`Subject`が選択結果の`Subject`と同一オブジェクトであること、過去結果ではないこと、
+正規化エラーがなく利用者名が空でないことを必須にします。username principalが存在する場合は
+名前の一致も必要です。第一認証の名前だけによる代用やWebAuthn user handleの名前扱いは行いません。
+公式WebAuthnプラグイン・登録キー・追加設定は変更不要です。
+
 ## MFA policy evaluation
 
 `GraphicalMatrixMfaDecisionStrategy.apply()`は次の順で処理します。
@@ -193,6 +205,12 @@ access判定用に承認した属性は、属性release profileへ追加しな�
 
 ## Audit points
 
+Common completion recording is described in [MFA-SUCCESS-RECORD.md](./MFA-SUCCESS-RECORD.md).
+`GraphicalMatrixMfaCompletionStrategy` uses the mandatory enrollment lookup for validation and
+best-effort timestamp storage. It creates the existing self-service authorization receipt only
+after a valid state verdict; metadata flags/results never authorize a user. Re-evaluation performs
+a fresh mandatory lookup without replaying the write or `MFA_COMPLETE` audit.
+
 次の境界では成功・失敗・状態変更を監査対象にします。
 
 - challenge開始、照合成功、照合失敗、lockout。
@@ -226,3 +244,8 @@ access判定用に承認した属性は、属性release profileへ追加しな�
 - `GraphicalMatrixWebAuthnRegistrationSessionTest`
 - `GraphicalMatrixLdapLoginRateLimiterTest`
 - `GraphicalMatrixSpAccessPolicyTest`
+
+
+## v1.4.1の更新
+
+v1.4.1ではMFA完了で検証済みの世代をProfileRequestContextのGraphicalMatrixSelfServiceAuthorizationContextに保持する。最終MFA構成結果と同一のPassword／第二要素結果に束縛し、一回だけHandoffへ渡す。TOTP／WebAuthnの検証アルゴリズムは変更しない。GraphicalMatrixの検証結果は、その更新自身のbefore／after versionを返す。

@@ -2366,6 +2366,11 @@ JSON内検索を多用する場合は、実データとクエリを見てGIN ind
 ### 19.8 autovacuum / analyze
 
 GraphicalMatrixの通常認証では、成功/失敗回数、lock、last_success_at更新が発生する。
+共通成功記録を含む版では、3方式のMFA完了時に日時用の条件付きUPDATEを通常最大1回追加する。
+GraphicalMatrixの既存カウンターUPDATEは残り、単独照合・TOTP登録では日時を書かない。
+日時保存だけをOFFにする`graphicalmatrix.mfa.successRecord.enabled=false`も選択できるが、
+必須SELECT・従来の照合／登録更新は残る。人数だけでなくピーク認証数、同一ユーザーの集中、
+WAL量、待機・timeout、p95/p99をON／OFFで比較する。
 更新頻度が高い場合、autovacuum/analyzeが遅れると性能が落ちる。
 
 テーブル単位の設定例:

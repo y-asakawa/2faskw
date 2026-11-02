@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 | --- | --- | --- | --- | --- |
 | `user_id` | `VARCHAR(255)` | no | none | ユーザーID。主キー。IdPの認証済みPrincipalと対応する。 |
 | `sequence` | `VARCHAR(1024)` | no | none | 現在のGraphicalMatrix sequence。保存方式により平文、暗号化文字列、hash文字列になる。 |
-| `initial_sequence` | `VARCHAR(1024)` | no | `''` | `USER RESET`用の初期sequence。初期パスワードとして管理者が確認できるよう平文で保持する。 |
+| `initial_sequence` | `VARCHAR(1024)` | no | `''` | `USER RESET`用の初期パスワード。管理者による再通知のため平文の画像ID／aliasで保存する。未設定は空文字。現在の`sequence`の保存方式とは独立する。 |
 | `status` | `VARCHAR(32)` | no | `ACTIVE` | ユーザー状態。通常は `ACTIVE`、停止時は `DISABLED`。 |
 | `failed_count` | `INTEGER` | no | `0` | GraphicalMatrix認証失敗回数。成功時や方式変更時に0へ戻す。 |
 | `locked_until` | `BIGINT` | no | `0` | ロック解除時刻。Unix epoch milliseconds。`0` は未ロック。 |
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment (
 | `totp_registered_at` | `BIGINT` | no | `0` | TOTP登録完了時刻。Unix epoch milliseconds。 |
 | `totp_registration_id` | `VARCHAR(64)` | yes | `NULL` | 現在のPENDING自己登録を一意に識別する値。監査ログや画面へ完全値を出力しない。 |
 | `totp_registration_expires_at` | `BIGINT` | no | `0` | PENDING自己登録の固定失効時刻。Unix epoch milliseconds。完了・取消・管理変更時は0。 |
-| `last_success_at` | `BIGINT` | no | `0` | 最終認証成功時刻。Unix epoch milliseconds。 |
+| `last_success_at` | `BIGINT` | no | `0` | 共通MFA完了検査に合格した最新日時。Unix epoch milliseconds。`0`は不明。旧版由来の値は旧意味を保持する。 |
 | `force_sequence_change` | `INTEGER` | no | `0` | 次回ログイン時のGraphicalMatrix変更強制フラグ。`0` は無効、非0は有効。 |
 | `state_version` | `BIGINT` | no | `0` | 管理状態の世代番号。本人確認後の古い画面から無効化・ロック状態を上書きしないために使用する。 |
 | `created_at` | `BIGINT` | no | none | レコード作成時刻。Unix epoch milliseconds。 |
@@ -168,20 +168,25 @@ Shibboleth JDBC StorageServiceも引用符なしで参照するため、この�
 
 | Operation | Main Updates |
 | --- | --- |
-| ユーザー作成 | `graphicalmatrix_enrollment` に1行追加する。 |
-| GraphicalMatrix認証成功 | `failed_count=0`、`locked_until=0`、`last_success_at`、`updated_at` を更新する。 |
+| ユーザー作成 | `graphicalmatrix_enrollment`に1行追加する。CLI add／set-sequenceによる新規作成では入力画像列を平文初期値にも設定し、`force_sequence_change=1`とする。現在列は設定方式で保護する。 |
+| GraphicalMatrix画像照合成功 | `failed_count=0`、`locked_until=0`、`updated_at`を更新する。単独照合では`last_success_at`を書かない。 |
+| 共通MFA完了（3方式） | 日時保存ONなら`last_success_at`を単調増加で更新し、`updated_at`も巻き戻さない。`state_version`とcredentialは変更しない。 |
 | GraphicalMatrix認証失敗 | `failed_count` を加算し、閾値到達時に `locked_until` を設定する。 |
 | GraphicalMatrix変更完了 | `sequence` を更新し、`force_sequence_change=0` に戻す。 |
 | MFA方式変更 | `mfa_method` を更新し、必要に応じてTOTP状態や失敗回数を初期化する。 |
 | TOTP登録開始 | 方式、seed、`PENDING`、登録ID、固定期限、`state_version + 1`を一つの更新で設定する。 |
 | TOTP登録再試行 | 同じ登録ID、version、期限、seedを維持する。期限は延長しない。 |
-| TOTP登録完了 | Binding一致を条件に`ACTIVE`化し、登録IDと期限を消去してversionを増加する。 |
+| TOTP登録完了 | Binding一致を条件に`ACTIVE`化し、登録IDと期限を消去してversionを増加する。登録だけでは`last_success_at`を書かない。 |
 | TOTP登録取消 | Binding一致を条件にGraphicalMatrixへ戻し、PENDING seed、登録ID、期限を消去する。 |
 | WebAuthn登録 | Shibboleth WebAuthn Pluginが `storagerecords` を更新する。 |
 | WebAuthn reset/delete | 管理CLIが `storagerecords.value` を更新または行削除する。 |
 
 認証時のGraphicalMatrix/TOTP関連更新では、ユーザー行を `FOR UPDATE` で取得して同時更新を抑制する。
 TOTP自己登録の確認・取消は、利用者IDだけでなく登録ID、開始後`state_version`、固定期限の全一致を必要とする。
+共通完了の日時保存は別の短いautocommit条件付きUPDATEであり、上記登録トランザクションとは異なる。
+必須状態SELECTの接続を共用し、通常最大1 UPDATE、0件更新時の再読取りも最大1回とする。
+日時保存をOFFにしても認証状態のSELECTや従来の照合・登録UPDATEは必要である。
+この機能用の認証DB列追加や既存日時の一括変換は不要。履歴は監査ログへ保存する。
 
 ## 7. 保存データの保護
 

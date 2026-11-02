@@ -16,6 +16,10 @@ GraphicalMatrix監査ログ:
 監査ログには、ユーザーID、接続元IP、認証結果、challenge ID、操作結果が含まれます。
 `sequence`、TOTP seed、API tokenは出力しない設計ですが、監査ログは認証ログとして保護してください。
 
+共通MFA成功監査が有効な場合、TOTP／WebAuthnを含むMFA完了ごとに`MFA_COMPLETE`が
+同じ`graphicalmatrix-audit.log`へ加わる。新しいlogrotate対象ファイルは不要だが、ピーク時の
+ログ容量・転送量・保持期間を再評価する。日時保存OFFでも成功監査がONならログは増える。
+
 ## 対象範囲と保持設定
 
 以下のログは出力元・実行ユーザー・保存先が異なるため、保持設定を個別に決める。

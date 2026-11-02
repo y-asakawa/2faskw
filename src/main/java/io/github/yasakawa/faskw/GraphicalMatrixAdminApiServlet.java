@@ -347,37 +347,46 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 final String status = normalizeStatus(defaultString(body.string("status"),
                     existing != null ? existing.status : "ACTIVE"));
                 final Integer force = body.boolAsInt("forceSequenceChange");
-                final int forceValue = force != null ? force.intValue()
+                int forceValue = force != null ? force.intValue()
                     : (existing != null ? existing.forceSequenceChange : 0);
                 final List<String> initialTokens = body.sequence("initialSequence");
                 final List<String> sequenceTokens = body.sequence("sequence");
-                String storedInitialSequence = existing != null ? existing.initialSequence : "";
+                String storedInitialSequence = existing != null && initialTokens.isEmpty()
+                    ? storage.preserveInitial(existing.initialSequence) : "";
                 String storedSequence = existing != null ? existing.sequence : "";
-                String plainSequence = existing != null
-                    ? String.join(",", storage.displayTokens(existing.sequence)) : "";
-
+                List<String> initial = List.of();
+                List<String> selected = List.of();
                 if (!initialTokens.isEmpty()) {
-                    final List<String> initial = config.resolveSequenceToGraphicals(initialTokens);
+                    initial = config.resolveSequenceToGraphicals(initialTokens);
                     config.validateSequence(initial);
                     storedInitialSequence = String.join(",", config.normalizeInitialSequence(initial));
                 }
                 if (!sequenceTokens.isEmpty()) {
-                    plainSequence = String.join(",", config.resolveSequenceToGraphicals(sequenceTokens));
-                } else if (!initialTokens.isEmpty()) {
-                    plainSequence = String.join(",", config.resolveSequenceToGraphicals(initialTokens));
+                    selected = config.resolveSequenceToGraphicals(sequenceTokens);
+                } else if (existing == null && !initial.isEmpty()) {
+                    selected = initial;
                 }
-                if (plainSequence.isEmpty() && storedSequence.isEmpty()) {
+                if (!selected.isEmpty()) {
+                    config.validateSequence(selected);
+                    storedSequence = storage.encode(selected,
+                        config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+                }
+                if (storedSequence.isEmpty()) {
                     throw new ApiException(400, "SEQUENCE_REQUIRED", "API_BAD_REQUEST",
                         user, "BAD_REQUEST", "sequence_required");
                 }
-                if (!plainSequence.isEmpty()) {
-                    config.validateSequence(GraphicalMatrixSupport.csv(plainSequence));
-                    storedSequence = storage.encode(GraphicalMatrixSupport.csv(plainSequence),
-                        config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+                if (force != null && force.intValue() == 0
+                        && "hash".equals(storage.storedMode(storedInitialSequence))) {
+                    throw new ApiException(409, "INITIAL_SEQUENCE_REENTRY_REQUIRED", "API_BAD_REQUEST",
+                        user, "CONFLICT", "initial_sequence_reentry_required");
                 }
-                if (storedInitialSequence.isEmpty()) {
-                    storedInitialSequence = String.join(",",
-                        config.normalizeInitialSequence(GraphicalMatrixSupport.csv(plainSequence)));
+                final boolean bootstrap = storage.initialMatchesCurrent(storedSequence, storedInitialSequence, config);
+                if (bootstrap) {
+                    if (force != null && force.intValue() == 0) {
+                        throw new ApiException(400, "INITIAL_CHANGE_REQUIRED", "API_BAD_REQUEST",
+                            user, "BAD_REQUEST", "bootstrap_requires_change");
+                    }
+                    forceValue = 1;
                 }
 
                 if (existing == null) {
@@ -452,14 +461,15 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         }
         final GraphicalMatrixSequenceStorage storage =
             GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome());
-        if (row.initialSequence == null || row.initialSequence.trim().isEmpty()) {
-            return false;
+        if (row.initialSequence == null || row.initialSequence.isBlank()) {
+            throw new ApiException(409, "INITIAL_SEQUENCE_REQUIRED", "API_USER_RESET",
+                user, "CONFLICT", "initial_sequence_required");
         }
-        final List<String> initial = config.resolveSequenceToGraphicals(
-            GraphicalMatrixSupport.csv(row.initialSequence));
-        config.validateSequence(initial);
-        final String resetSequence = storage.encode(initial,
-            config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed());
+        if ("hash".equals(storage.storedMode(row.initialSequence))) {
+            throw new ApiException(409, "INITIAL_SEQUENCE_REENTRY_REQUIRED", "API_USER_RESET",
+                user, "CONFLICT", "initial_sequence_reentry_required");
+        }
+        final String resetSequence = storage.resetFromInitial(row.initialSequence, config);
         final long now = System.currentTimeMillis();
         try (Connection c = db()) {
             initDbIfEnabled(c);
@@ -471,11 +481,17 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                     + "totp_status = 'UNREGISTERED', totp_registered_at = 0, "
                     + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
                     + "force_sequence_change = 1, state_version = state_version + 1, "
-                    + "updated_at = ? WHERE user_id = ?")) {
+                    + "updated_at = ? WHERE user_id = ? AND state_version = ? AND initial_sequence = ?")) {
                 ps.setString(1, resetSequence);
                 ps.setLong(2, now);
                 ps.setString(3, user);
-                return ps.executeUpdate() == 1;
+                ps.setLong(4, row.stateVersion);
+                ps.setString(5, row.initialSequence);
+                if (ps.executeUpdate() != 1) {
+                    throw new ApiException(409, "ENROLLMENT_CHANGED", "API_USER_RESET", user,
+                        "CONFLICT", "enrollment_changed_during_reset");
+                }
+                return true;
             }
         }
     }
@@ -641,7 +657,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             final boolean forUpdate) throws Exception {
         final String lockClause = forUpdate ? " FOR UPDATE" : "";
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, "
+                "SELECT user_id, mfa_method, force_sequence_change, initial_sequence, sequence, state_version, "
                 + "status, failed_count, locked_until, totp_status, "
                 + "CASE WHEN totp_seed IS NULL OR totp_seed = '' THEN 0 ELSE 1 END AS totp_seed_set, "
                 + "totp_registered_at, last_success_at, created_at, updated_at "
@@ -798,6 +814,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
         private String mfaMethod;
         private int forceSequenceChange;
         private String initialSequence;
+        private long stateVersion;
         private String sequence;
         private String status;
         private int failedCount;
@@ -815,6 +832,7 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
             out.mfaMethod = rs.getString("mfa_method");
             out.forceSequenceChange = rs.getInt("force_sequence_change");
             out.initialSequence = rs.getString("initial_sequence");
+            out.stateVersion = rs.getLong("state_version");
             out.sequence = rs.getString("sequence");
             out.status = rs.getString("status");
             out.failedCount = rs.getInt("failed_count");
@@ -841,6 +859,8 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
                 + "\",\"mfaMethod\":\"" + json(mfaMethod)
                 + "\",\"forceSequenceChange\":" + (forceSequenceChange != 0)
                 + ",\"initialSequence\":" + jsonArray(displayInitialSequence)
+                + ",\"initialSequenceStorage\":\"" + json(storage.storedMode(initialSequence)) + "\""
+                + ",\"initialSequenceRecoverable\":" + storage.recoverable(initialSequence)
                 + ",\"sequence\":" + jsonArray(displaySequence)
                 + ",\"sequenceStorage\":\"" + json(storage.storedMode(sequence))
                 + "\",\"sequenceRecoverable\":" + storage.recoverable(sequence)
@@ -859,10 +879,13 @@ public final class GraphicalMatrixAdminApiServlet extends HttpServlet {
 
         private java.util.List<String> displayInitialSequence() {
             try {
-                return GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome())
-                    .normalizeInitialSequence(GraphicalMatrixSupport.csv(initialSequence));
-            } catch (Exception ex) {
-                throw new IllegalStateException("Unable to display initial sequence", ex);
+                final GraphicalMatrixSequenceStorage storage = GraphicalMatrixSequenceStorage.load(GraphicalMatrixRuntime.idpHome());
+                if ("hash".equals(storage.storedMode(initialSequence))) { return List.of(); }
+                final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome());
+                final List<String> tokens = storage.initialTokens(initialSequence, config);
+                return tokens.isEmpty() ? List.of() : config.normalizeInitialSequence(tokens);
+            } catch (IOException ex) {
+                throw new IllegalStateException("Unable to load initial sequence display configuration", ex);
             }
         }
     }

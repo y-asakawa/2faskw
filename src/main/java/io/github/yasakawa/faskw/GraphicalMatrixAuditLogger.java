@@ -34,13 +34,23 @@ public final class GraphicalMatrixAuditLogger {
 
     public void log(final String event, final String user, final String result,
             final String challengeId, final String detail, final HttpServletRequest request) {
-        final HttpSession session = request.getSession(false);
+        write(event, user, result, challengeId, detail, request, Instant.now());
+    }
+
+    boolean logCompletion(final String user, final String detail, final HttpServletRequest request,
+            final long completedAt) {
+        return write("MFA_COMPLETE", user, "OK", null, detail, request, Instant.ofEpochMilli(completedAt));
+    }
+
+    private boolean write(final String event, final String user, final String result,
+            final String challengeId, final String detail, final HttpServletRequest request, final Instant timestamp) {
+        final HttpSession session = request != null ? request.getSession(false) : null;
         final String line =
-            "ts=" + Instant.now()
+            "ts=" + timestamp
             + " event=" + value(event)
             + " user=" + value(user)
             + " result=" + value(result)
-            + " ip=" + value(request.getRemoteAddr())
+            + " ip=" + value(request != null ? request.getRemoteAddr() : null)
             + " session=" + value(auditCorrelationId(session))
             + " challenge=" + value(challengeId)
             + " detail=" + value(detail)
@@ -49,8 +59,10 @@ public final class GraphicalMatrixAuditLogger {
         synchronized (GraphicalMatrixAuditLogger.class) {
             try (FileWriter out = new FileWriter(logFile, true)) {
                 out.write(line);
+                return true;
             } catch (Exception ignored) {
                 // Authentication must not fail only because audit logging failed.
+                return false;
             }
         }
     }

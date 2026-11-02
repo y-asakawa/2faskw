@@ -56,6 +56,7 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 | `START` | `ENROLL_REQUIRED`、`LOCKED`、`DB_ERROR`、`FAIL` | 第2要素開始時の登録・ロック・DB状態確認。正常にMatrixを出せた場合は、通常`CHALLENGE_CREATED`が続く。 |
 | `CHALLENGE_CREATED` | `OK` | Matrix画面を表示するchallengeを発行した。`detail`には画像数、行・列数、選択数が入る。 |
 | `VERIFY` | `OK`、`FAIL`、`LOCKED`、`BAD_REQUEST` | 利用者のMatrix選択を照合した。`OK`は照合成功、`FAIL`は選択不一致。 |
+| `MFA_COMPLETE` | `OK` | GraphicalMatrix／TOTP／WebAuthnの共通MFA完了検査に合格した。自己管理の本人確認も含む。SPへのアクセス許可・登録保存成功ではない。 |
 | `FORCE_SEQUENCE_CHANGE_START` | `OK` | 初回設定または管理者要求により、sequence変更を開始した。 |
 | `FORCE_SEQUENCE_CHANGE_SAVE` | `OK`、`BAD_REQUEST`、`DB_ERROR` | 強制sequence変更を保存した。正解sequence自体は記録しない。 |
 | `TOTP_REGISTER_START` | `OK`、`ENROLL_REQUIRED` | TOTP初回登録画面を開始した。seedは記録しない。 |
@@ -67,6 +68,28 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 `VERIFY result=FAIL`が連続した後に`VERIFY result=LOCKED`または`START result=LOCKED`が出る場合は、
 GraphicalMatrixロックアウトが働いている。`locked_until`が`detail`に出る場合はUnix epoch millisecondsであり、
 表示時刻への変換はOSまたは監視基盤側で行う。
+
+### 共通MFA完了の構造化detail
+
+`MFA_COMPLETE`の`detail=mfa1:<Base64>`は、UTF-8のform形式を標準Base64で包んだ
+版付きデータである。暗号化ではない。`_`を含むSP entityID等が外側の旧ログdecoderで
+変化しないようにしている。監査行の通常escape解除は1回だけ行い、URL-safe Base64へ変更しない。
+
+| 復元後のキー | 値・意味 |
+| --- | --- |
+| `method` / `flow` | `GraphicalMatrix` / `authn/External`、`TOTP` / `authn/TOTP`、`WebAuthn` / `authn/WebAuthn`。 |
+| `scope` | `sso`、`self-service`、判定できないprofileの`other`。新たなキー操作の有無を示す値ではない。 |
+| `sp` | Requester entityID、なければ`-`。Dashboard Agentはこの値を転送しない。 |
+| `completedAt` | 必須状態検査後に取得したepoch milliseconds。行の`ts`と同じ時点。 |
+| `store` | `UPDATED`、`UNCHANGED`（同時刻／新しい値を保持）、`DISABLED`、`SKIPPED_CONTENDED`（競合で見送り）、`FAILED`（付加保存障害）。 |
+| `eventId` / `stateVersion` | 今回の相関UUID／検証した登録世代。Dashboardの取込主キーや認可証拠ではない。 |
+
+`store=FAILED`でも必須検査に合格していればMFA成功である。必須lookup失敗・登録世代不一致には
+成功イベントを出さない。MFA省略やTOTP登録だけの場合も対象外となる。
+日時障害・未来の保存日時・監査出力失敗はIdP処理ログの`MFA completion` WARNで確認する。
+監査出力失敗時は相関IDを付けた代替WARNを出すが、完全な履歴保存を保証しない。
+監査イベントは1回の実行で最大1回試行し、ログ障害時に再試行して重複させない。
+`VERIFY/OK`と`MFA_COMPLETE/OK`は別の段階であり、足し合わせてログイン件数にしない。
 
 ### 2.3 自己管理・変更画面event
 
@@ -281,3 +304,8 @@ Standalone Dashboardは、既定で`graphicalmatrix-audit.log`の構文を入力
 Dashboard利用時のAgent設定、収集遅延、オフラインimport、保持期間、複数IdP nodeの集約は
 [DASHBOARD.md](./DASHBOARD.md)を参照する。Dashboardは参照専用であり、認証処理、LDAP、MFA保存DB、
 IdP管理APIへ接続しない。
+
+
+## v1.4.1の自己管理拒否
+
+SELF_SERVICE_AUTHで完了証跡の欠落・不一致、SELF_SERVICE_HANDOFFで登録世代の不一致を拒否する。登録状態の変更後は新しい認証から再開する。session ID、nonce、画像列、TOTP seedは監査へ出力しない。SP初期化の競合はCONTEXT_CHECK_CONFLICTとNO_CHANGEを返す。

@@ -149,30 +149,122 @@ final class GraphicalMatrixSpXmlConfig {
         return out.toString();
     }
 
+    record AdoptionAttributePlan(String profile, String sourceHash, String policyId, String fragment) { }
+
     static String inferAttributeProfile(final Path path, final String entityId) throws Exception {
-        final List<Element> matches = matchingPolicies(parse(path), entityId);
-        if (matches.isEmpty()) {
-            return "none";
+        return planAttributeAdoption(path, entityId).profile();
+    }
+
+    static AdoptionAttributePlan planAttributeAdoption(final Path path, final String entityId) throws Exception {
+        final Document document = parse(path);
+        final String ns = "urn:mace:shibboleth:2.0:afp";
+        final Element root = document.getDocumentElement();
+        if (!ns.equals(root.getNamespaceURI()) || !"AttributeFilterPolicyGroup".equals(root.getLocalName())) {
+            throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED");
         }
-        if (matches.size() != 1) {
-            throw new IllegalArgumentException("multiple attribute policies match entityID");
+        Element match = null;
+        final java.util.Set<String> ids = new java.util.HashSet<>();
+        for (final Element policy : directElements(root)) {
+            if (!ns.equals(policy.getNamespaceURI()) || !"AttributeFilterPolicy".equals(policy.getLocalName())
+                    || !ids.add(policy.getAttribute("id"))) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED");
+            }
+            final List<Element> children = directElements(policy);
+            final List<Element> requirements = children.stream()
+                .filter(e -> ns.equals(e.getNamespaceURI()) && "PolicyRequirementRule".equals(e.getLocalName())).toList();
+            if (requirements.size() != 1 || !typed(requirements.get(0), ns, "Requester")) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED");
+            }
+            final Element requirement = requirements.get(0);
+            if (!entityId.equals(requirement.getAttribute("value"))) { continue; }
+            if (match != null || policy.getAttribute("id").startsWith("2faskw-")) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_AMBIGUOUS");
+            }
+            requireAttributes(policy, "id");
+            requireAttributes(requirement, "value", "type");
+            if (!directElements(requirement).isEmpty()) { throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED"); }
+            match = policy;
         }
-        final List<String> attributes = new ArrayList<>();
-        final NodeList rules = matches.get(0).getElementsByTagNameNS("*", "AttributeRule");
-        for (int i = 0; i < rules.getLength(); i++) {
-            final String id = ((Element) rules.item(i)).getAttribute("attributeID");
-            if (!id.isBlank()) {
-                attributes.add(id);
+        final String hash = attributeSourceHash(path);
+        if (match == null) { return new AdoptionAttributePlan("none", hash, "", ""); }
+        final java.util.Set<String> attributes = new java.util.HashSet<>();
+        for (final Element rule : directElements(match)) {
+            if ("PolicyRequirementRule".equals(rule.getLocalName())) { continue; }
+            if (!ns.equals(rule.getNamespaceURI()) || !"AttributeRule".equals(rule.getLocalName())) {
+                throw new IllegalArgumentException("ATTRIBUTE_VALUE_RESTRICTION");
+            }
+            requireAttributes(rule, "attributeID");
+            if (!attributes.add(rule.getAttribute("attributeID"))) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_AMBIGUOUS");
+            }
+            final List<Element> permits = directElements(rule);
+            if (permits.size() != 1 || !ns.equals(permits.get(0).getNamespaceURI())
+                    || !"PermitValueRule".equals(permits.get(0).getLocalName())
+                    || !typed(permits.get(0), ns, "ANY") || !directElements(permits.get(0)).isEmpty()) {
+                throw new IllegalArgumentException("ATTRIBUTE_VALUE_RESTRICTION");
+            }
+            requireAttributes(permits.get(0), "type");
+        }
+        final String profile;
+        if (attributes.equals(java.util.Set.of("uid"))) { profile = "uid"; }
+        else if (attributes.equals(java.util.Set.of("uid", "mail"))) { profile = "uid-mail"; }
+        else { throw new IllegalArgumentException("ATTRIBUTE_PROFILE_UNSUPPORTED"); }
+        return new AdoptionAttributePlan(profile, hash, match.getAttribute("id"), nodeXml(match));
+    }
+
+    static void removePlannedAttributePolicy(final Path path, final String entityId,
+            final AdoptionAttributePlan plan) throws Exception {
+        if (!attributeSourceHash(path).equals(plan.sourceHash())
+                || !planAttributeAdoption(path, entityId).equals(plan)) {
+            throw new IllegalStateException("CONFIG_CHANGED");
+        }
+        if (plan.policyId().isEmpty()) { return; }
+        final Document document = parse(path);
+        for (final Element element : directElements(document.getDocumentElement())) {
+            if (plan.policyId().equals(element.getAttribute("id"))) {
+                element.getParentNode().removeChild(element);
+                write(path, document);
+                return;
             }
         }
-        if (attributes.equals(List.of("uid"))) {
-            return "uid";
+        throw new IllegalStateException("CONFIG_CHANGED");
+    }
+
+    private static String attributeSourceHash(final Path path) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+            .digest(Files.readAllBytes(path)));
+    }
+
+    private static boolean typed(final Element element, final String namespace, final String type) {
+        final String qname = element.getAttributeNS(XSI_NS, "type");
+        final String[] parts = qname.split(":", -1);
+        if (parts.length > 2 || parts[parts.length - 1].isBlank()) { return false; }
+        return type.equals(parts[parts.length - 1])
+            && namespace.equals(element.lookupNamespaceURI(parts.length == 2 ? parts[0] : null));
+    }
+
+    private static void requireAttributes(final Element element, final String... allowed) {
+        final java.util.Set<String> names = java.util.Set.of(allowed);
+        for (int i = 0; i < element.getAttributes().getLength(); i++) {
+            final Node attribute = element.getAttributes().item(i);
+            if (XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attribute.getNamespaceURI())) { continue; }
+            if (!names.contains(attribute.getLocalName() != null ? attribute.getLocalName() : attribute.getNodeName())
+                    || (attribute.getNamespaceURI() != null && !(XSI_NS.equals(attribute.getNamespaceURI())
+                        && "type".equals(attribute.getLocalName())))) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED");
+            }
         }
-        if (attributes.size() == 2 && attributes.contains("uid") && attributes.contains("mail")) {
-            return "uid-mail";
+    }
+
+    private static List<Element> directElements(final Element parent) {
+        final List<Element> result = new ArrayList<>();
+        for (Node child = parent.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof Element element) { result.add(element); }
+            else if (child.getNodeType() == Node.TEXT_NODE && !child.getTextContent().isBlank()) {
+                throw new IllegalArgumentException("ATTRIBUTE_POLICY_UNRESOLVED");
+            }
         }
-        throw new IllegalArgumentException(
-            "legacy attribute policy is not equivalent to none, uid, or uid-mail");
+        return result;
     }
 
     static void restoreLegacyAttributePolicies(final Path path, final String fragment) throws Exception {

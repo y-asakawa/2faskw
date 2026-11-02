@@ -67,8 +67,8 @@ public final class InitializeGraphicalMatrixSelfService extends AbstractProfileA
 
         final HttpSession session = request.getSession(true);
         request.changeSessionId();
-        final long expiresAt = System.currentTimeMillis() + config.getSelfServiceTransactionMillis();
-        GraphicalMatrixSelfServiceSession.initialize(session, validation.getUser(), expiresAt);
+        final long expiresAt = Math.addExact(System.currentTimeMillis(), config.getSelfServiceTransactionMillis());
+        GraphicalMatrixSelfServiceSession.initialize(session, validation.getUser(), validation.getStateVersion(), expiresAt);
         getRequestContext(profileRequestContext).getFlowScope().put(
             "redirectUrl", CHANGE_REDIRECT_URL);
 

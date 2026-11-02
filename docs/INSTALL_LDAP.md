@@ -151,13 +151,19 @@ LDAP保存では、DBの `graphicalmatrix_enrollment` 相当をユーザーエ�
 | totp_registered_at | `ldap_totp_registered_at` | TOTP登録時刻。epoch milliseconds。 |
 | totp_registration_id | `ldap_totp_registration_id` | 進行中TOTP登録を識別する一意ID。登録完了または失効操作で消去する。 |
 | totp_registration_expires_at | `ldap_totp_registration_expires_at` | 進行中TOTP登録の固定期限。epoch milliseconds。 |
-| last_success_at | `ldap_last_success_at` | 最終成功時刻。 |
+| last_success_at | `ldap_last_success_at` | 3方式の共通MFA完了検査に合格した最新日時。epoch milliseconds。 |
 | force_sequence_change | `ldap_force_sequence_change` | 初回または強制変更フラグ。 |
 | state_version | `ldap_state_version` | 楽観ロック用version。 |
 | created_at / updated_at | `ldap_created_at` / `ldap_updated_at` | 作成/更新時刻。 |
 
 この表は配布テンプレートの属性名例です。属性名自体は変更できますが、
 LDAP schema、ACL、`ldap.properties` の3箇所で同じ名前を使う必要があります。
+
+共通MFA成功記録は、既存の日時属性をcritical assertion付きで更新し、`state_version`は進めない。
+writerには日時属性のread／compare／write権限が必要であり、サーバーのassertion control対応も
+実環境で試験する。属性が未設定の場合は「不在」を条件にし、無条件modifyへフォールバックしない。
+日時保存の失敗だけでは認証を停止せずWARNを出す。日時保存をOFFにしても、認証状態lookupや
+従来のカウンター・登録世代更新は継続する。新しいLDAP属性やcredential移行は不要である。
 
 389 Directory Serverで検証用schemaを作る場合は、各属性を `Directory String` の単一値として定義し、
 補助objectClassにまとめます。OIDは組織で管理する正式OIDに置き換えてください。

@@ -49,6 +49,9 @@ public final class GraphicalMatrixSelfServiceAuthentication {
             return ValidationResult.failed("unexpected_profile");
         }
 
+        final GraphicalMatrixSelfServiceAuthorizationContext binding =
+            profileRequestContext.getSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class);
+        profileRequestContext.removeSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class);
         final SubjectContext subjectContext =
             profileRequestContext.getSubcontext(SubjectContext.class);
         final String user = subjectContext != null ? trim(subjectContext.getPrincipalName()) : "";
@@ -79,7 +82,7 @@ public final class GraphicalMatrixSelfServiceAuthentication {
         Instant completedAt = authenticationResult.getAuthenticationInstant();
         for (final String flowId : SECOND_FACTOR_FLOWS) {
             final AuthenticationResult factorResult = componentResults.get(flowId);
-            if (isCurrent(factorResult)) {
+            if (isCurrent(factorResult) && (binding == null || flowId.equals(binding.secondFactorFlow))) {
                 secondFactor = flowId;
                 if (completedAt == null || factorResult.getAuthenticationInstant().isAfter(completedAt)) {
                     completedAt = factorResult.getAuthenticationInstant();
@@ -94,7 +97,13 @@ public final class GraphicalMatrixSelfServiceAuthentication {
         if (completedAt == null) {
             completedAt = authenticationContext.getCompletionInstant();
         }
-        return ValidationResult.success(user, secondFactor, completedAt);
+        if (binding == null || binding.stateVersion < 0 || !user.equals(binding.user)
+                || binding.passwordResult != componentResults.get(PASSWORD_FLOW)
+                || binding.secondFactorResult != componentResults.get(secondFactor)
+                || !secondFactor.equals(binding.secondFactorFlow)) {
+            return ValidationResult.failed("completion_binding_missing_or_mismatched");
+        }
+        return ValidationResult.success(user, secondFactor, completedAt, binding.stateVersion);
     }
 
     private static Map<String, AuthenticationResult> componentResults(
@@ -130,24 +139,28 @@ public final class GraphicalMatrixSelfServiceAuthentication {
         private final String secondFactor;
         private final Instant completedAt;
         private final String failureReason;
+        private final long stateVersion;
 
         private ValidationResult(final boolean valid, final String user, final String secondFactor,
-                final Instant completedAt, final String failureReason) {
+                final Instant completedAt, final String failureReason, final long stateVersion) {
             this.valid = valid;
             this.user = user;
             this.secondFactor = secondFactor;
             this.completedAt = completedAt;
             this.failureReason = failureReason;
+            this.stateVersion = stateVersion;
         }
 
         private static ValidationResult success(final String user, final String secondFactor,
-                final Instant completedAt) {
-            return new ValidationResult(true, user, secondFactor, completedAt, null);
+                final Instant completedAt, final long stateVersion) {
+            return new ValidationResult(true, user, secondFactor, completedAt, null, stateVersion);
         }
 
         private static ValidationResult failed(final String reason) {
-            return new ValidationResult(false, null, null, null, reason);
+            return new ValidationResult(false, null, null, null, reason, -1L);
         }
+
+        public long getStateVersion() { return stateVersion; }
 
         public boolean isValid() {
             return valid;

@@ -108,6 +108,19 @@ final class GraphicalMatrixMfaCompletionStrategyTest {
             overflow, "alice", Long.MAX_VALUE));
     }
 
+    @Test
+    void tracksOnlyOwnedGraphicalVerificationTransitionsIncludingFailedAttempts() {
+        final ProfileRequestContext context = context(GRAPHICAL_GUARD);
+        assertTrue(GraphicalMatrixMfaCompletionStrategy.acceptVerificationTransition(context, "alice",
+            GraphicalMatrixVerifyResult.failed("incorrect").withStateTransition(7L, 8L)));
+        assertTrue(GraphicalMatrixMfaCompletionStrategy.acceptVerificationTransition(context, "alice",
+            GraphicalMatrixVerifyResult.success().withStateTransition(8L, 9L)));
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.acceptVerificationTransition(context, "alice",
+            GraphicalMatrixVerifyResult.success().withStateTransition(10L, 11L)));
+        assertFalse(GraphicalMatrixMfaCompletionStrategy.acceptVerificationTransition(context, "bob",
+            GraphicalMatrixVerifyResult.success().withStateTransition(9L, 10L)));
+    }
+
     private static ProfileRequestContext context(final GraphicalMatrixMfaGuardContext guard) {
         final ProfileRequestContext context = new ProfileRequestContext();
         final AuthenticationContext authentication = new AuthenticationContext();

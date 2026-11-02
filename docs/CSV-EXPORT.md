@@ -40,7 +40,7 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv-export -
 - `user_id`
 - `mfa_method`
 - `force_sequence_change`
-- `initial_sequence`（平文の初期値）
+- `initial_sequence`（復元可能な場合のみ出力する初期値。未設定は空欄）
 - 復号した現在の `sequence`（復号できる保存方式の場合）
 
 以下は管理CSVの対象外です。
@@ -83,3 +83,8 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh csv /secure/path/graphicalmat
 
 本番DBにそのまま読み込むと、actionが `A` のため既存ユーザーエラーになります。
 既存ユーザーを更新する場合は、対象行のactionを `M` に変更してください。
+
+
+## v1.4.1の互換性
+
+初期パスワードは再通知のため平文保存する。現在値がhashの場合は、初期値が読めてもportable CSV出力は失敗する。旧候補版のhash初期値も復元できないため出力を拒否し、再入力を必要とする。初期値を現在値の代用品として出力しない。マスク値や偽の空値で再import可能と表示しない。初期値が未設定の場合の空欄は正常であり、import時に現在画像列から自動補充しない。初期値と現在値を同じ値で登録するbootstrap CSVはforce_sequence_change=onを必要とする。CSV dry-runの表示は秘密をマスクする。転送用CSVは秘密を含むため既存の0600保管を維持する。

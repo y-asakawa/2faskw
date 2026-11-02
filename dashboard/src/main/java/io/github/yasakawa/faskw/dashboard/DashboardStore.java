@@ -35,7 +35,7 @@ import java.util.Objects;
 
 public final class DashboardStore implements AutoCloseable {
 
-    private static final int SCHEMA_VERSION = 5;
+    private static final int SCHEMA_VERSION = 6;
     private static final int LOCKED_USER_DISPLAY_LIMIT = 100;
     static final int REGEX_CANDIDATE_LIMIT = 10_000;
     static final int DEFAULT_TOP_MISMATCH_LIMIT = 3;
@@ -120,6 +120,11 @@ public final class DashboardStore implements AutoCloseable {
                     ALTER TABLE dashboard_event
                     ADD COLUMN IF NOT EXISTS locked_until BIGINT
                     """);
+            for (final String column : List.of("mfa_method VARCHAR(32)", "mfa_flow VARCHAR(32)",
+                    "mfa_scope VARCHAR(16)", "mfa_store VARCHAR(32)", "mfa_completed_at BIGINT",
+                    "mfa_completion_id VARCHAR(36)", "mfa_state_version BIGINT")) {
+                statement.execute("ALTER TABLE dashboard_event ADD COLUMN IF NOT EXISTS " + column);
+            }
             statement.execute("""
                     CREATE INDEX IF NOT EXISTS idx_event_occurred
                     ON dashboard_event(occurred_at)
@@ -302,8 +307,9 @@ public final class DashboardStore implements AutoCloseable {
                 INSERT INTO dashboard_event (
                   event_id, schema_version, occurred_at, received_at, node_id, event_type,
                   result, reason, user_ref, source_network, locked_until, parse_status,
-                  source_generation, source_offset, line_digest
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  source_generation, source_offset, line_digest,
+                  mfa_method, mfa_flow, mfa_scope, mfa_store, mfa_completed_at, mfa_completion_id, mfa_state_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)) {
             statement.setString(1, event.eventId());
             statement.setInt(2, event.schemaVersion());
@@ -324,6 +330,14 @@ public final class DashboardStore implements AutoCloseable {
             statement.setString(13, event.sourceGeneration());
             statement.setLong(14, event.sourceOffset());
             statement.setString(15, event.lineDigest());
+            final MfaCompletionInfo completion = event.mfaCompletion();
+            statement.setString(16, completion != null ? completion.method() : null);
+            statement.setString(17, completion != null ? completion.flow() : null);
+            statement.setString(18, completion != null ? completion.scope() : null);
+            statement.setString(19, completion != null ? completion.store() : null);
+            statement.setObject(20, completion != null ? completion.completedAt() : null, java.sql.Types.BIGINT);
+            statement.setString(21, completion != null ? completion.eventId() : null);
+            statement.setObject(22, completion != null ? completion.stateVersion() : null, java.sql.Types.BIGINT);
             try {
                 return statement.executeUpdate() == 1;
             } catch (SQLException e) {
@@ -501,6 +515,7 @@ public final class DashboardStore implements AutoCloseable {
         final List<Map<String, Object>> topSourceNetworks;
         final List<Map<String, Object>> topSourceMismatchNetworks;
         final LockedUsers lockedUsers;
+        final List<Map<String, Object>> mfaCompletions;
         final Instant firstFullHour = ceilingHour(from);
         final Instant lastFullHourExclusive = to.truncatedTo(ChronoUnit.HOURS);
         try (Connection connection = connection()) {
@@ -523,6 +538,7 @@ public final class DashboardStore implements AutoCloseable {
                             connection, eventScope, from, to, topSourceNetworkLimit);
             lockedUsers = eventScope.allowsLockedUsers()
                     ? lockedUsers(connection, asOf) : null;
+            mfaCompletions = mfaCompletionCounts(connection, eventScope, from, to);
         }
         final List<Map<String, Object>> counts = totals.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
@@ -536,6 +552,9 @@ public final class DashboardStore implements AutoCloseable {
         summary.put("counts", counts);
         summary.put("graphicalMatrixSuccess", graphicalSuccess);
         summary.put("graphicalMatrixFailure", graphicalFailure);
+        summary.put("mfaCompletionCounts", mfaCompletions);
+        summary.put("mfaCompletionSuccess", mfaCompletions.stream()
+            .mapToLong(item -> ((Number) item.get("count")).longValue()).sum());
         final long attempts = graphicalSuccess + graphicalFailure;
         summary.put("graphicalMatrixFailureRate",
                 attempts == 0 ? null : (double) graphicalFailure / attempts);
@@ -554,6 +573,30 @@ public final class DashboardStore implements AutoCloseable {
             summary.put("lockedUsersAsOf", asOf);
         }
         return summary;
+    }
+
+    private List<Map<String, Object>> mfaCompletionCounts(final Connection connection,
+            final DashboardEventScope scope, final Instant from, final Instant to) throws SQLException {
+        final DashboardEventPredicate predicate = DashboardEventPredicate.create(scope,
+            DashboardEventPolicy.RouteCategory.AUTHENTICATION);
+        final StringBuilder sql = new StringBuilder("SELECT mfa_method, mfa_scope, mfa_store, COUNT(*) AS total "
+            + "FROM dashboard_event WHERE occurred_at >= ? AND occurred_at < ? "
+            + "AND event_type='MFA_COMPLETE' AND result='OK' AND mfa_method IS NOT NULL");
+        predicate.appendTo(sql);
+        sql.append(" GROUP BY mfa_method, mfa_scope, mfa_store ORDER BY mfa_method, mfa_scope, mfa_store");
+        final List<Map<String, Object>> counts = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            statement.setObject(1, utc(from));
+            statement.setObject(2, utc(to));
+            predicate.bind(statement, 3);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    counts.add(Map.of("method", rs.getString("mfa_method"), "scope", rs.getString("mfa_scope"),
+                        "store", rs.getString("mfa_store"), "count", rs.getLong("total")));
+                }
+            }
+        }
+        return counts;
     }
 
     private static List<Map<String, Object>> topMismatchUsers(
@@ -863,7 +906,8 @@ public final class DashboardStore implements AutoCloseable {
                 eventScope, DashboardEventPolicy.RouteCategory.ALL);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
-                       user_ref, source_network, locked_until
+                       user_ref, source_network, locked_until,
+                       mfa_method, mfa_flow, mfa_scope, mfa_store, mfa_completed_at, mfa_completion_id, mfa_state_version
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
@@ -939,7 +983,8 @@ public final class DashboardStore implements AutoCloseable {
                 eventScope, category);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
-                       user_ref, source_network, locked_until
+                       user_ref, source_network, locked_until,
+                       mfa_method, mfa_flow, mfa_scope, mfa_store, mfa_completed_at, mfa_completion_id, mfa_state_version
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
@@ -1038,7 +1083,8 @@ public final class DashboardStore implements AutoCloseable {
                 eventScope, DashboardEventPolicy.RouteCategory.ALL);
         final StringBuilder sql = new StringBuilder("""
                 SELECT event_id, occurred_at, received_at, node_id, event_type, result, reason,
-                       user_ref, source_network, locked_until
+                       user_ref, source_network, locked_until,
+                       mfa_method, mfa_flow, mfa_scope, mfa_store, mfa_completed_at, mfa_completion_id, mfa_state_version
                 FROM dashboard_event
                 WHERE occurred_at >= ? AND occurred_at < ?
                 """);
@@ -1131,6 +1177,12 @@ public final class DashboardStore implements AutoCloseable {
                 row.put("reason", resultSet.getString("reason"));
                 row.put("userRef", resultSet.getString("user_ref"));
                 row.put("sourceNetwork", resultSet.getString("source_network"));
+                if (resultSet.getString("mfa_method") != null) {
+                    row.put("mfaCompletion", new MfaCompletionInfo(resultSet.getString("mfa_method"),
+                        resultSet.getString("mfa_flow"), resultSet.getString("mfa_scope"),
+                        resultSet.getLong("mfa_completed_at"), resultSet.getString("mfa_store"),
+                        resultSet.getString("mfa_completion_id"), resultSet.getLong("mfa_state_version")));
+                }
                 final long lockedUntil = resultSet.getLong("locked_until");
                 row.put("lockedUntil",
                         resultSet.wasNull() ? null : Instant.ofEpochMilli(lockedUntil));

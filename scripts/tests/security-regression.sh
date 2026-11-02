@@ -153,7 +153,7 @@ EOF
     || fail "untrusted CSV symlink produced a snapshot"
 }
 
-test_csv_preview_displays_initial_and_encoded_sequence() {
+test_csv_preview_masks_both_sequences() {
   local home="$TMP/csv-preview-idp"
   local csv="$TMP/csv-preview.csv"
   mkdir -p "$home/conf/graphicalmatrix"
@@ -178,10 +178,10 @@ EOF
   output="$(GRAPHICALMATRIX_HOME="$home" SEQUENCE_TOOL_CP="$ROOT/target/classes" \
     PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
     bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" --provisioning)"
-  grep -q 'initial_sequence=img01,img02,img03,img04' <<< "$output" \
-    || fail "CSV preview did not display the initial sequence: $output"
-  grep -q 'sequence=kw1:' <<< "$output" \
-    || fail "CSV preview did not display the protected stored sequence: $output"
+  grep -q 'initial_sequence=\[protected-or-unset\]' <<< "$output" \
+    || fail "CSV preview did not mask the initial sequence: $output"
+  grep -q 'sequence=\[protected\]' <<< "$output" \
+    || fail "CSV preview did not mask the stored sequence: $output"
   ! grep -q ' sequence=img01,img02,img03,img04' <<< "$output" \
     || fail "CSV preview displayed the plaintext current sequence: $output"
 }
@@ -271,6 +271,36 @@ EOF
     || fail "CSV plaintext sequence was not delivered exclusively on standard input"
 }
 
+test_csv_rejects_equivalent_unordered_bootstrap_without_force() {
+  local home="$TMP/unordered-bootstrap" csv="$TMP/unordered-bootstrap.csv"
+  mkdir -p "$home/conf/graphicalmatrix"
+  cat > "$home/conf/graphicalmatrix/graphicalmatrix.properties" <<EOF
+graphicalmatrix.graphicals=img01-25
+graphicalmatrix.choice=4
+graphicalmatrix.order=2
+graphicalmatrix.sequence.storage=hash
+graphicalmatrix.sequence.pepper=test-only-pepper
+EOF
+  cat > "$home/conf/graphicalmatrix/db.properties" <<EOF
+graphicalmatrix.db.type=h2
+graphicalmatrix.db.driver=org.h2.Driver
+graphicalmatrix.db.url=jdbc:h2:mem:unordered-bootstrap
+graphicalmatrix.db.user=sa
+graphicalmatrix.db.password=
+EOF
+  cat > "$csv" <<EOF
+action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
+A,alice,GraphicalMatrix,off,"img01,img02,img03,img04","img04,img03,img02,img01"
+EOF
+  if GRAPHICALMATRIX_HOME="$home" SEQUENCE_TOOL_CP="$ROOT/target/classes" \
+      PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
+      bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" > "$TMP/unordered.out" 2>&1; then
+    fail "unordered-equivalent bootstrap was accepted without forced change"
+  fi
+  grep -q 'bootstrap registration requires' "$TMP/unordered.out" \
+    || fail "unordered bootstrap did not fail at the expected boundary"
+}
+
 test_management_reset_restores_plaintext_initial_factor() {
   local home="$TMP/idp"
   local test_bin="$TMP/db-test-bin"
@@ -308,11 +338,31 @@ EOF
   PATH="/opt/homebrew/opt/openjdk/bin:$test_bin:$PATH"
   local cp="$ROOT/target/classes:$h2_jar"
   GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
-    bash "$ROOT/graphicalmatrix-db.sh" add alice img01,img02,img03,img04 >/dev/null
+    bash "$ROOT/graphicalmatrix-db.sh" add alice A B C D >/dev/null
+  local bootstrap
+  bootstrap="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" show alice)"
+  grep -Eq 'alice[[:space:]]*\| GraphicalMatrix[[:space:]]*\| 1[[:space:]]*\| A,B,C,D[[:space:]]*\| kw1:' <<< "$bootstrap" \
+    || fail "CLI add did not initialize the plaintext bootstrap and protected current sequence: $bootstrap"
+  java -cp "$h2_jar" org.h2.tools.Shell -url "$db_url" -user sa -password "" \
+    -sql "UPDATE graphicalmatrix_enrollment SET initial_sequence='hsp1:4:bad:bad' WHERE user_id='alice'" >/dev/null
+  local legacy_display
+  legacy_display="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" show alice)"
+  grep -Fq '[reentry-required]' <<< "$legacy_display" || fail "legacy hashed initial did not request reentry"
+  builtin printf '%s' 'img01,img02,img03,img04' | \
+    GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
+    bash "$ROOT/graphicalmatrix-db.sh" set-initial-sequence alice --stdin >/dev/null
   GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
     bash "$ROOT/graphicalmatrix-db.sh" set-sequence alice img05,img06,img07,img08 >/dev/null
   GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
-    bash "$ROOT/graphicalmatrix-db.sh" alice RESET >/dev/null
+    bash "$ROOT/graphicalmatrix-db.sh" alice RESET -y >/dev/null
+  if GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
+      bash "$ROOT/graphicalmatrix-db.sh" require-change alice off > "$TMP/bootstrap-change-off.out" 2>&1; then
+    fail "bootstrap forced change was disabled while current still equals initial"
+  fi
+  grep -q INITIAL_CHANGE_REQUIRED "$TMP/bootstrap-change-off.out" || fail "unexpected forced-change rejection"
+
 
   local security_status
   security_status="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
@@ -332,10 +382,13 @@ EOF
     -sql "SELECT status, sequence LIKE 'kw1:%', initial_sequence, state_version FROM graphicalmatrix_enrollment WHERE user_id='alice'")"
   grep -Eq 'ACTIVE.*TRUE.*A,B,C,D.*[1-9][0-9]*' <<< "$result" \
     || fail "management reset did not restore plaintext initial factor as protected ACTIVE sequence: $result"
-  list="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
-    bash "$ROOT/graphicalmatrix-db.sh" show alice)"
-  grep -Eq 'alice[[:space:]]*\| GraphicalMatrix[[:space:]]*\| 1[[:space:]]*\| A,B,C,D[[:space:]]*\| kw1:' <<< "$list" \
-    || fail "management output does not display the initial password and raw protected sequence: $list"
+  local command
+  for command in show list; do
+    list="$(GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
+      bash "$ROOT/graphicalmatrix-db.sh" "$command" alice)"
+    grep -Eq 'alice[[:space:]]*\| GraphicalMatrix[[:space:]]*\| 1[[:space:]]*\| A,B,C,D[[:space:]]*\| kw1:' <<< "$list" \
+      || fail "management $command did not show the initial value and stored current sequence: $list"
+  done
 }
 
 test_pending_totp_invalidation_requires_apply_and_clears_binding() {
@@ -492,8 +545,11 @@ test_ldap_rate_limit_capacity_does_not_globally_deny() {
 test_token_symlink_replacement
 test_csv_immutable_snapshot
 test_csv_rejects_symlink_source
-test_csv_preview_displays_initial_and_encoded_sequence
+test_csv_preview_masks_both_sequences
 test_csv_sequence_is_not_forwarded_in_process_arguments
+test_csv_rejects_equivalent_unordered_bootstrap_without_force
+bash "$ROOT/scripts/tests/db-reset-confirmation-regression.sh"
+bash "$ROOT/scripts/tests/db-webauthn-display-regression.sh"
 test_management_reset_restores_plaintext_initial_factor
 test_pending_totp_invalidation_requires_apply_and_clears_binding
 test_h2_password_is_not_forwarded_in_process_arguments
