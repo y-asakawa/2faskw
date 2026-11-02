@@ -16,6 +16,7 @@ const state = {
 
 const knownLabels = {
   VERIFY: "GraphicalMatrix検証",
+  MFA_COMPLETE: "共通MFA完了",
   START: "GraphicalMatrix開始拒否",
   CHALLENGE_CREATED: "Challenge作成",
   SELF_SERVICE_AUTH: "自己管理認証",
@@ -106,6 +107,33 @@ function escapeText(value) {
   return String(value ?? "");
 }
 
+function renderMfaCompletions(counts) {
+  const target = document.getElementById("mfa-completion-table");
+  target.replaceChildren();
+  if (!counts.length) {
+    target.append(emptyMessage());
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+  const table = document.createElement("table");
+  const head = table.createTHead().insertRow();
+  ["MFA方式", "用途", "日時保存", "完了件数"].forEach((label) => {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    head.append(cell);
+  });
+  const body = table.createTBody();
+  counts.forEach((item) => {
+    const row = body.insertRow();
+    [item.method, item.scope, item.store, integer(item.count)].forEach((value) => {
+      row.insertCell().textContent = escapeText(value);
+    });
+  });
+  wrap.append(table);
+  target.append(wrap);
+}
+
 function eventCount(counts, event, result) {
   return counts
     .filter((item) => item.event === event && (!result || item.result === result))
@@ -138,6 +166,7 @@ function renderSummary(summary) {
     .reduce((sum, item) => sum + Number(item.count), 0)));
   text("metric-self-service", integer(eventCount(counts, "SELF_SERVICE_AUTH", "OK")));
   text("overview-range", `${formatTime(summary.from)} - ${formatTime(summary.to)}`);
+  renderMfaCompletions(summary.mfaCompletionCounts || []);
   renderMismatchUsers(summary.topMismatchUsers || []);
   renderSourceNetworks(summary.topSourceNetworks || []);
   renderSourceNetworkMismatches(summary.topSourceMismatchNetworks || []);
@@ -302,7 +331,7 @@ function renderEventTable(targetId, events) {
   wrap.className = "table-wrap";
   const table = document.createElement("table");
   const head = table.createTHead().insertRow();
-  ["発生時刻", "Node", "Event", "Result", "Reason", "ユーザーID", "IPアドレス"]
+  ["発生時刻", "Node", "Event", "Result", "Reason", "ユーザーID", "IPアドレス", "MFA方式", "用途", "日時保存"]
     .forEach((label) => {
       const cell = document.createElement("th");
       cell.textContent = label;
@@ -319,6 +348,9 @@ function renderEventTable(targetId, events) {
       item.reason,
       item.userRef || "-",
       item.sourceNetwork || "-",
+      item.mfaCompletion?.method || "-",
+      item.mfaCompletion?.scope || "-",
+      item.mfaCompletion?.store || "-",
     ];
     values.forEach((value, index) => {
       const cell = row.insertCell();

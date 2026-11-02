@@ -373,6 +373,14 @@ export GRAPHICALMATRIX_HOME=/opt/graphicalmatrix-admin
 /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh show user001
 ```
 
+`list`／`show`には表示専用の`webauthn_status`と`webauthn_credential_count`も表示する。
+同じPostgreSQL DBの`storagerecords`から登録状態と件数を読み取り、キーがあれば
+`REGISTERED`、なければ`UNREGISTERED`、確認できなければ`UNKNOWN`とする。
+H2やテーブル不在では不明を0件と扱わない。GraphicalMatrix／TOTP利用中でも残存キーは表示する。
+別DB・LDAP等の実保存先を自動検出・横断検索するものではなく、認証可否の判定にも使用しない。
+既存コマンドの引数、登録・削除・認証処理、DB schemaは変更しない。
+詳細な値と制限は[COMMAND-REFERENCE.md 第3.1節](./COMMAND-REFERENCE.md#31-照会)を参照する。
+
 設定項目のHELP:
 
 ```bash
@@ -401,8 +409,16 @@ MFA方式変更:
 RESET:
 
 ```bash
-/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh user001 RESET --apply
+# 対象ユーザーのYES/NO確認後に実行する。
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh user001 RESET
+
+# 自動実行など、確認を省略する場合。
+/opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh user001 RESET -y
 ```
+
+`YES`（大文字・小文字は不問）で実行し、`NO`または空入力ならDBを変更せず中止する。
+EOFは非ゼロ終了し、確認できないまま実行しない。`-y`と`--yes`は同義で、`reset-user USER`にも使用できる。
+RESETに`--apply`は指定しない。初期値・現在値・世代等のRESET本体の更新内容は従来どおりである。
 
 CSV import:
 
@@ -425,6 +441,7 @@ WebAuthn credential確認:
 ### 5.3 dry-run / --apply設計
 
 本番では、読み取り系以外のコマンドはdry-runを標準にする。
+ただし、現在の`USER RESET`／`reset-user USER`はdry-runではなく、前節のYES/NO確認または`-y`によって実行する。
 
 読み取り系:
 
@@ -587,59 +604,16 @@ ERROR: plaintext sequence storage is not allowed in production mode.
 
 ### 6.3 CLI監査ログ設計
 
-Admin Toolsの操作は、DB更新の成否に関係なく監査ログへ記録する。
+**現行v1.4.1のCLI直接操作には、以下の専用監査は未実装である。** sudoのcommand記録や
+端末への結果表示を、対象利用者のDB変更成功の履歴と同一視しない。
+v1.4.2で追加する詳細は[管理CLI監査ログ設計](./release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md)を参照する。
 
-ログ先例:
-
-```text
-/opt/graphicalmatrix-admin/logs/admin-audit.log
-```
-
-権限:
-
-```bash
-sudo install -d -m 0750 -o root -g graphicalmatrix-admin /opt/graphicalmatrix-admin/logs
-sudo install -m 0640 -o root -g graphicalmatrix-admin /dev/null \
-  /opt/graphicalmatrix-admin/logs/admin-audit.log
-```
-
-ログ項目:
-
-```text
-timestamp
-event
-result
-os_user
-effective_user
-host
-source_ip
-db_url_hash
-db_user
-target_user
-action
-dry_run
-apply
-rows_affected
-detail
-```
-
-例:
-
-```text
-ts=<timestamp> event=ADMIN_CLI action=set-method target_user=user001 result=OK os_user=admin01 host=db-admin01 dry_run=false rows=1 detail=mfa_method=TOTP
-```
-
-ログには以下を出さない。
-
-```text
-DBパスワード
-sequence secret
-TOTP seed
-client private key
-平文sequence
-```
-
-`db_url_hash` は接続先識別用に、JDBC URL全体ではなくハッシュ値を記録する。
+設計上は`/var/log/2faskw/admin-audit.log`へ、日時、OS実行主体、対象利用者、操作、
+変更の確定結果を記録する。秘密の画像列、TOTP seed、鍵、password、raw commandは出さない。
+操作開始・dry-run・成功・中止・失敗・部分更新・commit不明を区別する。
+DB更新前の監査障害では変更を止め、DB更新後の監査障害では更新済みと明示する方針である。
+ファイルを手作業で作るだけでは現行CLIの出力は増えない。準備・権限・rotation・導入手順は
+v1.4.2の実装と検証に合わせて更新する。
 
 ### 6.4 運用上の注意
 
@@ -651,7 +625,7 @@ client private key
 - 本番ではAdmin Tools実行OSグループを限定する。
 - 本番では `plaintext` sequence保存方式を拒否する。
 - 本番では書き込み系操作に `--apply` を必須にする。
-- 本番ではCLI監査ログを必須にする。
+- 本番ではCLI操作の記録を必須にする。v1.4.1の専用監査は未実装のため、作業記録・適用結果の保存を別途用意する。
 - 管理CLIはDB VIPへ接続する。
 - DB直接SQL更新ではなく、Admin ToolsまたはAPI経由の管理を標準とする。
 - sequence保存方式が `hash` または暗号化の場合、直接SQL登録は避ける。
@@ -912,11 +886,15 @@ last_success_at
 
 残す理由:
 
+`last_success_at`は共通MFA完了の最新日時であり、停止操作の履歴ではない。日時保存OFFや
+旧版由来の値はそのまま保持し、再有効化しても過去の通常TOTP／WebAuthn成功を自動補完しない。
+Admin Toolsの管理操作自体は`MFA_COMPLETE`を生成しない。
+
 ```text
-`initial_sequence` は `USER RESET` 用の初期値として平文で保持する。
+`initial_sequence` は `USER RESET` 用の初期パスワードとして平文保存する。CLIの新規ユーザー作成では入力した現在画像列を初期値にも設定する。既存ユーザーの現在列更新やAPI／CSVでの初期値省略時は自動補充しない。
 管理CLIの `list` / `show` では `initial_sequence` を表示し、現在の `sequence` は
-DBに保存されたraw値を表示する。保護方式では `kw1:`、`aesgcm1:`、`hsp1:` などの
-prefix付き値になる。
+DBに保存された値をそのまま表示する。保護方式では `kw1:`、`aesgcm1:`、`hsp1:` などのprefix付き値となり、復号はしない。初期値が旧hash形式なら `[reentry-required]`、
+旧暗号形式なら `[migration-required]` と表示する。
 RESET時に初期値を現在の保存方式でsequenceへ戻し、次回ログインで変更を強制できる
 監査・問い合わせ対応で過去状態を確認できる
 再雇用・再登録時に復旧ポリシーを選べる
@@ -929,7 +907,7 @@ RESET時に初期値を現在の保存方式でsequenceへ戻し、次回ログ�
 Aで既存DISABLEDユーザーが来た場合:
   status=ACTIVEへ戻す
   CSVのmfa_method, force_sequence_change, initial_sequence, sequenceで更新する
-  initial_sequenceが空の場合はsequenceから初期値を補完する
+  initial_sequenceが空の場合は空のまま保存し、sequenceから補完しない
 
 Mで既存DISABLEDユーザーが来た場合:
   標準ではstatusはDISABLEDのまま属性だけ更新する
@@ -1045,7 +1023,7 @@ TOTP seed削除やWebAuthn credential削除までは行わないため、TOTP/We
 | `user_id` | 必須 | 対象ユーザーID。 |
 | `mfa_method` | `A` / `M` で必須 | `GraphicalMatrix`, `TOTP`, `WebAuthn`。 |
 | `force_sequence_change` | `A` / `M` で必須 | `on` または `off`。 |
-| `initial_sequence` | `A` で推奨、`M` で任意 | RESET時に戻す初期sequence。空の場合は `sequence` から補完される。 |
+| `initial_sequence` | `A` で推奨、`M` で任意 | RESET時に戻す平文の初期パスワード。空の場合は未設定。`sequence` から補完しない。 |
 | `sequence` | `A` / `M` で推奨 | 現在のGraphicalMatrix sequence。空の場合は `initial_sequence` から補完される。 |
 
 `sequence` と `initial_sequence` はカンマを含むため、CSVではダブルクォートで囲む。
@@ -1053,13 +1031,13 @@ TOTP seed削除やWebAuthn credential削除までは行わないため、TOTP/We
 `A` / `M` ではCSVとして6列必要で、`initial_sequence` と `sequence` の少なくとも一方に値が必要。
 両方を指定した場合は、`initial_sequence` はRESET用の初期値、`sequence` は現在値として扱う。
 
-`M` で `initial_sequence` を空にした場合、既存DBの `initial_sequence` を維持するのではなく、
-指定された `sequence` から補完して更新する。既存の初期値を維持したい場合は、現在の
+`M` で `initial_sequence` を空にした場合、既存DBの `initial_sequence` を空に更新する。
+指定された `sequence` からは補完しない。既存の初期値を維持したい場合は、現在の
 `initial_sequence` と同じ値をCSVへ明示する。
 
 CSVに書く `sequence` は平文の画像IDまたはaliasで指定する。`kw1:`、`aesgcm1:`、`hsp1:` などの
 保存済み形式をCSVへ直接書かない。import時に、現在の `graphicalmatrix.sequence.storage` に従って
-DB保存用の値へ変換される。`initial_sequence` はRESET用の平文初期値として保存される。
+DB保存用の値へ変換される。`initial_sequence` は正規化した平文で保存される。初期値が空の場合はRESET前に新しい初期値を設定する。同一初期値を現在列に使う場合は `force_sequence_change=on` が必須。
 
 actionの意味:
 
@@ -1232,3 +1210,22 @@ sudo /opt/graphicalmatrix-admin/bin/graphicalmatrix-db.sh invalidate-pending-tot
 `MANUAL_RECOVERY`は自動変更されない。DBバックアップ、第一認証による本人確認、割り当てるMFA方式を確認し、
 利用者ごとに`reset-user`または`set-method`を実行する。dry-runはsequenceの非空と保存方式の互換性を
 確認するが、暗号化済みpayloadの完全性までは検証しない。
+
+
+## v1.4.1の管理処理の変更
+
+add／set-sequenceで新規ユーザーを作ると、入力した画像列を初期値にも設定し、初回変更フラグをONにする。`add USER A B C D`ならalias正規化後の`A,B,C,D`が初期値になる。初期値はDB・show／listで再通知できるよう平文保存し、現在画像列の保護方式は変更しない。初回変更画面には全体設定`graphicalmatrix.force_sequence_change=1`が必要である。既存ユーザーの更新では初期値を上書き・補充しない。API／CSVの登録仕様は変更しない。API／CLIの初期値だけの変更は現在画像列を変えず、世代を進める。RESETは初期値を検証して現在の保存方式でencodeし、変更を強制する。同じ初期値が有効な間は変更強制をoffにできない。CSV previewでは初期値もマスクする。
+
+初期値の再入力は、shell履歴・引数へ残さないよう次の形式を推奨する。標準入力に画像IDまたはaliasのカンマ区切りを1行入力し、改行後にCtrl+Dで入力を終了する。端末への入力は表示されるため、画面の共有・記録にも注意する。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh set-initial-sequence test01 --stdin
+```
+
+旧候補版でhash化した初期値は復元できない。show／listでは `[reentry-required]` と表示する。管理者が把握している元の初期値または新しい初期値を再入力するまでRESETを拒否する。現在画像列を初期値へコピーしない。再入力だけでは現在の認証情報は変わらない。無関係な管理変更でも旧hash初期値は消さない。
+
+`migrate-sequence-storage --dry-run` で確認し、backup後、管理書込・自己管理を停止して `--apply` を実行する。平文初期値は正規化し、旧keyword／AES-GCM初期値は元の鍵があれば平文化する。hash初期値は `INITIAL_SEQUENCE_REENTRY_REQUIRED` として停止し、推測・削除しない。200行単位で確定するため先行batchは保持される。再実行は正規化済みの値を変更しない。移行でTOTP seedやWebAuthn登録鍵は変更しない。
+
+`security-status` の `initial_sequence_incompatible_rows` は旧hash／keyword／AES-GCM初期値の件数である。平文と未設定は正常とする。これは全画像IDの妥当性検証ではないため、移行dry-runも併用する。外部管理のLDAP初期値属性はこのDB用移行の対象外。
+
+DB・backup・show／list出力は初期パスワードを含む。現在値と初期値が同じ期間は、DB読取者が画像要素を取得できる。初回変更の強制はこの残存リスクをなくすものではなく、DBと管理者権限・backupのアクセス管理を必要とする。

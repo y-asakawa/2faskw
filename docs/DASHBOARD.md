@@ -836,6 +836,30 @@ sudo journalctl \
 
 ## TOPページの統計とイベント検索
 
+### 共通MFA完了の方式別表示
+
+新しいAgentは`MFA_COMPLETE/OK`の版付きdetailを検証し、方式・flow・scope・完了時刻・
+保存結果・相関UUID・登録世代だけを正規化する。生のRequester/SP entityIDは捨ててから転送する。
+不正形式、未知／重複キー、16KiB超、行の時刻との不一致はparse failureとなり、成功件数に含めない。
+
+認証画面の「MFA完了内訳」は方式・scope・保存結果別の件数を表示する。イベント一覧にもこの3項目を
+表示する。`scope=self-service`も認証カテゴリであり、方式変更やSPへのアクセス許可の件数ではない。
+VIEWER／OPERATORにも認証カテゴリとして表示し、管理API等の閲覧範囲は拡大しない。
+
+`mfaCompletionSuccess`／`mfaCompletionCounts`は新イベントだけから集計する。
+方式別内訳は個別イベントの保持分（`dashboard.storage.retentionDays`）が対象であり、
+時間単位集計だけが残る期間の方式情報を復元しない。旧来の全イベント件数と保持範囲が異なる場合がある。
+従来の`graphicalMatrixSuccess`／失敗率は`VERIFY`由来のまま維持し、両方を足さない。
+日時保存OFFや保存失敗でも必須検査に合格したイベントは、`DISABLED`／`FAILED`として成功数に含む。
+
+新Dashboardは索引schema 6を使用し、旧schemaからnullable列を追加する。既存イベントを保持し、
+旧Agentから届いた方式情報のないMFA_COMPLETEも一覧へ残すが、方式別件数を推定しない。
+過去分を補いたい場合は原本を新Agentで再取り込みする。相関UUIDは取込主キーではなく、既存の
+node／generation／offset／行digestによる重複排除を維持する。索引を戻す場合は停止してbackupを復元する。
+更新順はDashboard、Agent、Pluginの監査ONを推奨する。
+
+### 既存の統計と検索
+
 TOPページには、選択期間内のGraphicalMatrix成功数、入力不一致数、失敗率などに加えて、次を表示する。
 
 - 入力不一致の上位ユーザーID。`event=VERIFY AND result=FAIL`をユーザーID別に集計する。

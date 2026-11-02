@@ -449,6 +449,11 @@ public final class DashboardServer implements AutoCloseable {
                                     + event.lineDigest()))) {
                 throw new IllegalArgumentException("event failed validation");
             }
+            if (event.mfaCompletion() != null && (!"MFA_COMPLETE".equals(event.event())
+                    || !"OK".equals(event.result())
+                    || !Instant.ofEpochMilli(event.mfaCompletion().completedAt()).equals(event.occurredAt()))) {
+                throw new IllegalArgumentException("completion fields do not match event");
+            }
         }
     }
 

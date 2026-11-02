@@ -66,7 +66,8 @@ public final class EventNormalizer {
                 "ok",
                 generation,
                 offset,
-                lineDigest);
+                lineDigest,
+                "MFA_COMPLETE".equals(raw.event()) ? MfaCompletionInfo.decode(raw.detail()) : null);
     }
 
     private static Long lockedUntil(final RawAuditEvent raw) {

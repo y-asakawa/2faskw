@@ -35,7 +35,7 @@ final class DashboardEventPolicy {
     }
 
     private static final Set<String> AUTHENTICATION_EVENTS = Set.of(
-            "START", "CHALLENGE_CREATED", "VERIFY",
+            "START", "CHALLENGE_CREATED", "VERIFY", "MFA_COMPLETE",
             "FORCE_SEQUENCE_CHANGE_START", "FORCE_SEQUENCE_CHANGE_SAVE");
 
     private static final Set<String> SELF_SERVICE_EVENTS = Set.of(

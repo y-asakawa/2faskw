@@ -342,6 +342,10 @@ main {
   display: block;
 }
 
+#view-authentication > .panel + .panel {
+  margin-top: 14px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

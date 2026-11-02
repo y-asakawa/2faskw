@@ -260,11 +260,12 @@ paths:
         - Actions
       summary: Reset the user to the initial GraphicalMatrix sequence
       description: |
-        Resolves the administrator-visible initialSequence, stores it in
-        sequence using the configured GraphicalMatrix sequence storage mode,
+        Validates the readable initialSequence and encodes it into sequence
+        using the configured GraphicalMatrix sequence storage mode,
         sets mfaMethod to GraphicalMatrix, keeps status ACTIVE, clears lock
         and TOTP state, and enables forceSequenceChange so the user must
-        change the sequence at the next login.
+        change the sequence at the next login. A legacy hashed initial value requires explicit reentry
+        (INITIAL_SEQUENCE_REENTRY_REQUIRED); an unset initial value cannot be reset.
       operationId: resetUser
       responses:
         "200":
@@ -588,8 +589,8 @@ components:
           items:
             type: string
           description: |
-            Administrator-visible initial password tokens used by reset.
-            Empty when graphicalmatrix.api.response.excludeSequences is true.
+            Recoverable initial password tokens used by reset.
+            Empty when the initial value is unset or hashed, or graphicalmatrix.api.response.excludeSequences is true.
         sequence:
           type: array
           items:
@@ -607,6 +608,13 @@ components:
             - hash
             - empty
           description: Storage format detected from the sequence column.
+        initialSequenceStorage:
+          type: string
+          enum: [plaintext, keyword, aes-gcm, hash, empty]
+          description: Detected initial format. New explicit initial passwords use plaintext; other nonempty formats are legacy.
+        initialSequenceRecoverable:
+          type: boolean
+          description: false for legacy hashed initial passwords; they require explicit reentry.
         sequenceRecoverable:
           type: boolean
           description: false when the stored sequence is hash + salt + pepper.
@@ -635,6 +643,7 @@ components:
         lastSuccessAt:
           type: integer
           format: int64
+          description: Latest accepted common MFA completion in epoch milliseconds; 0 means unknown. Not a settings-change or SP authorization timestamp. Legacy values retain their original meaning.
         createdAt:
           type: integer
           format: int64
@@ -669,8 +678,9 @@ components:
       description: |
         `initialSequence` and `sequence` can be arrays or comma-separated strings.
         If sequence is omitted but initialSequence is present, sequence is resolved
-        from initialSequence for request compatibility. `initialSequence` is retained
-        as the administrator-visible initial password used by reset. New users must
+        from initialSequence only for new-user bootstrap and requires a sequence change.
+        `initialSequence` is stored as normalized plaintext for administrator redistribution, independently of the current sequence storage mode. Legacy hashed initial values cannot be recovered and require explicit reentry.
+        Omitting initialSequence does not copy the current sequence into it. An initial-only edit of an existing user preserves the current sequence. New users must
         end with a usable `sequence`.
 
     MethodChangeRequest:

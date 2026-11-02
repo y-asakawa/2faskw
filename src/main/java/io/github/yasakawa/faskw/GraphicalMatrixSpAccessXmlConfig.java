@@ -44,11 +44,11 @@ final class GraphicalMatrixSpAccessXmlConfig {
     private static final String P_NS = "http://www.springframework.org/schema/p";
 
     record Inspection(boolean functionConfigured, boolean managedFunction,
-                      boolean conditionConfigured, boolean stockCondition,
+                      boolean conditionConfigured,
                       int saml2Profiles, int contextCheckProfiles) {
         boolean conflict() {
             return functionConfigured && !managedFunction
-                || conditionConfigured && !stockCondition;
+                || conditionConfigured;
         }
     }
 
@@ -60,27 +60,28 @@ final class GraphicalMatrixSpAccessXmlConfig {
         final Element function = bean(context, FUNCTION_BEAN);
         final Element condition = bean(context, CONDITION_BEAN);
         final boolean managed = function != null
-            && FUNCTION_CLASS.equals(function.getAttribute("class"));
-        final boolean stock = condition != null && stockCondition(condition);
+            && managedFunction(function);
+
         final ProfileCounts profiles = countProfiles(parse(relyingParty));
-        return new Inspection(function != null, managed, condition != null, stock,
+        return new Inspection(function != null, managed, condition != null,
             profiles.total(), profiles.configured());
     }
 
     static void initializeContextCheck(final Path path) throws Exception {
+        GraphicalMatrixSpFiles.atomicWrite(path, planContextCheck(path));
+    }
+
+    static byte[] planContextCheck(final Path path) throws Exception {
         final Document document = parse(path);
         final Element function = bean(document, FUNCTION_BEAN);
         final Element condition = bean(document, CONDITION_BEAN);
-        if (function != null && !FUNCTION_CLASS.equals(function.getAttribute("class"))) {
+        if (function != null && !managedFunction(function)) {
             throw new IllegalStateException(
                 "an existing non-2FAS-KW ContextCheck function is configured");
         }
-        if (condition != null && !stockCondition(condition)) {
+        if (condition != null) {
             throw new IllegalStateException(
                 "an existing non-2FAS-KW ContextCheck condition is configured");
-        }
-        if (condition != null) {
-            condition.getParentNode().removeChild(condition);
         }
         if (function == null) {
             final Element root = document.getDocumentElement();
@@ -100,93 +101,111 @@ final class GraphicalMatrixSpAccessXmlConfig {
                 " END 2FAS-KW SP access function "));
             root.appendChild(document.createTextNode("\n"));
         }
-        write(path, document);
+        return function != null ? Files.readAllBytes(path) : serialize(document);
     }
 
     static void initializeRelyingParty(final Path path) throws Exception {
+        GraphicalMatrixSpFiles.atomicWrite(path, planRelyingParty(path));
+    }
+
+    static byte[] planRelyingParty(final Path path) throws Exception {
         final Document document = parse(path);
+        boolean changed = false;
         final List<Element> refs = elements(document, "ref").stream()
             .filter(item -> "SAML2.SSO".equals(item.getAttribute("bean"))).toList();
         for (final Element ref : refs) {
             final Element profile = document.createElementNS(BEANS_NS, "bean");
             profile.setAttribute("parent", "SAML2.SSO");
-            configureProfile(document, profile);
+            changed |= configureProfile(document, profile);
             ref.getParentNode().replaceChild(profile, ref);
+            changed = true;
         }
         for (final Element profile : elements(document, "bean")) {
             if (profile.getAttribute("parent").contains("SAML2.SSO")) {
-                configureProfile(document, profile);
+                changed |= configureProfile(document, profile);
             }
         }
         if (refs.isEmpty() && elements(document, "bean").stream()
                 .noneMatch(item -> item.getAttribute("parent").contains("SAML2.SSO"))) {
             throw new IllegalStateException("no SAML2.SSO profile configuration was found");
         }
-        write(path, document);
+        return changed ? serialize(document) : Files.readAllBytes(path);
     }
 
-    private static void configureProfile(final Document document, final Element profile) {
-        final String propertyAttribute = profile.getAttributeNS(P_NS, "postAuthenticationFlows");
-        final List<String> flows = new ArrayList<>();
-        if (!propertyAttribute.isBlank()) {
-            for (final String value : propertyAttribute.split("[,\\s]+")) {
-                if (!value.isBlank() && !flows.contains(value)) {
-                    flows.add(value);
-                }
+    private static boolean configureProfile(final Document document, final Element profile) {
+        for (int i = 0; i < profile.getAttributes().getLength(); i++) {
+            final Node attributeNode = profile.getAttributes().item(i);
+            final String normalized = attributeNode.getLocalName() == null ? "" : attributeNode.getLocalName()
+                .replace("-", "").replace("_", "").toLowerCase(java.util.Locale.ROOT);
+            if (P_NS.equals(attributeNode.getNamespaceURI()) && normalized.startsWith("postauthenticationflows")
+                    && !"postAuthenticationFlows".equals(attributeNode.getLocalName())) {
+                throw new IllegalStateException("unsupported postAuthenticationFlows reference or alias");
             }
-            profile.removeAttributeNS(P_NS, "postAuthenticationFlows");
         }
+        final String attribute = profile.getAttributeNS(P_NS, "postAuthenticationFlows");
         Element property = null;
-        final NodeList children = profile.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            if (children.item(i) instanceof Element item
-                    && "property".equals(item.getLocalName())
-                    && "postAuthenticationFlows".equals(item.getAttribute("name"))) {
-                if (property != null) {
-                    throw new IllegalStateException(
-                        "duplicate postAuthenticationFlows property in SAML2.SSO profile");
+        for (Node node = profile.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (node instanceof Element item && "property".equals(item.getLocalName())
+                    && "postAuthenticationFlows".equalsIgnoreCase(item.getAttribute("name").replace("-", "").replace("_", ""))) {
+                if (!"postAuthenticationFlows".equals(item.getAttribute("name"))) {
+                    throw new IllegalStateException("unsupported postAuthenticationFlows alias");
                 }
+                if (property != null || !attribute.isBlank()) { throw new IllegalStateException("ambiguous postAuthenticationFlows"); }
                 property = item;
             }
         }
-        if (property == null) {
+        if (attribute.contains("%{") || attribute.contains("#{") || attribute.contains("${")) {
+            throw new IllegalStateException("unresolved postAuthenticationFlows");
+        }
+        final List<String> flows = new ArrayList<>();
+        if (!attribute.isBlank()) {
+            for (final String value : attribute.split("[,\\s]+")) {
+                if (flows.contains(value)) { throw new IllegalStateException("duplicate flow"); }
+                if (!value.isBlank()) { flows.add(value); }
+            }
+        }
+        Element list = null;
+        if (property != null) {
+            for (Node node = property.getFirstChild(); node != null; node = node.getNextSibling()) {
+                if (node instanceof Element item) {
+                    if (list != null || !BEANS_NS.equals(item.getNamespaceURI()) || !"list".equals(item.getLocalName())) {
+                        throw new IllegalStateException("unsupported postAuthenticationFlows");
+                    }
+                    list = item;
+                }
+            }
+            if (list == null || property.hasAttribute("ref") || property.hasAttribute("value")) {
+                throw new IllegalStateException("unsupported postAuthenticationFlows");
+            }
+            for (Node node = list.getFirstChild(); node != null; node = node.getNextSibling()) {
+                if (node instanceof Element item) {
+                    final String value = item.getTextContent().trim();
+                    if (!BEANS_NS.equals(item.getNamespaceURI()) || !"value".equals(item.getLocalName())
+                            || item.getElementsByTagNameNS("*", "*").getLength() != 0
+                            || value.isBlank() || value.contains("#{") || value.contains("%{") || value.contains("${")
+                            || flows.contains(value)) { throw new IllegalStateException("unsupported or duplicate flow"); }
+                    flows.add(value);
+                }
+            }
+        }
+        if (flows.contains("context-check")) { return false; }
+        if (list == null) {
             property = document.createElementNS(BEANS_NS, "property");
             property.setAttribute("name", "postAuthenticationFlows");
-            final Element list = document.createElementNS(BEANS_NS, "list");
+            list = document.createElementNS(BEANS_NS, "list");
             property.appendChild(list);
             profile.insertBefore(property, profile.getFirstChild());
-        }
-        Element list = firstElement(property, "list");
-        if (list == null) {
-            throw new IllegalStateException(
-                "postAuthenticationFlows must be represented as a Spring list");
-        }
-        final List<Node> duplicateValues = new ArrayList<>();
-        for (final Element value : elements(list, "value")) {
-            final String text = value.getTextContent().trim();
-            if ("context-check".equals(text)) {
-                duplicateValues.add(value);
-            } else if (!text.isBlank() && !flows.contains(text)) {
-                flows.add(text);
+            profile.removeAttributeNS(P_NS, "postAuthenticationFlows");
+            for (final String flow : flows) {
+                final Element value = document.createElementNS(BEANS_NS, "value");
+                value.setTextContent(flow);
+                list.appendChild(value);
             }
         }
-        for (final Node node : duplicateValues) {
-            node.getParentNode().removeChild(node);
-        }
-        while (list.hasChildNodes()) {
-            list.removeChild(list.getFirstChild());
-        }
-        final Element contextCheck = document.createElementNS(BEANS_NS, "value");
-        contextCheck.setTextContent("context-check");
-        list.appendChild(contextCheck);
-        for (final String flow : flows) {
-            if ("context-check".equals(flow)) {
-                continue;
-            }
-            final Element value = document.createElementNS(BEANS_NS, "value");
-            value.setTextContent(flow);
-            list.appendChild(value);
-        }
+        final Element value = document.createElementNS(BEANS_NS, "value");
+        value.setTextContent("context-check");
+        list.appendChild(value);
+        return true;
     }
 
     private static ProfileCounts countProfiles(final Document document) {
@@ -224,31 +243,44 @@ final class GraphicalMatrixSpAccessXmlConfig {
     private record ProfileCounts(int total, int configured) {
     }
 
-    private static boolean stockCondition(final Element condition) {
-        boolean relyingPartyCondition = false;
-        boolean simpleAttributeCondition = false;
-        for (final Element candidate : elements(condition, "bean")) {
-            final String parent = candidate.getAttribute("parent");
-            relyingPartyCondition |= "shibboleth.Conditions.RelyingPartyId".equals(parent);
-            simpleAttributeCondition |= "shibboleth.Conditions.SimpleAttribute".equals(parent);
-        }
-        boolean exampleAttribute = false;
-        for (final Element entry : elements(condition, "entry")) {
-            if ("eppn".equals(entry.getAttribute("key"))) {
-                exampleAttribute = true;
-                break;
+    private static boolean managedFunction(final Element function) {
+        if (!FUNCTION_CLASS.equals(function.getAttribute("class")) || function.hasAttribute("parent")
+                || function.hasAttribute("factory-method") || function.hasAttribute("factory-bean")) { return false; }
+        int arguments = 0;
+        for (Node node = function.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (node instanceof Element item) {
+                if (!BEANS_NS.equals(item.getNamespaceURI()) || !"constructor-arg".equals(item.getLocalName())
+                        || !"%{idp.home}".equals(item.getAttribute("value"))
+                        || item.getElementsByTagNameNS("*", "*").getLength() != 0) { return false; }
+                if (item.getAttributes().getLength() != 1) { return false; }
+                arguments++;
             }
         }
-        return relyingPartyCondition && simpleAttributeCondition && exampleAttribute;
+        for (int i = 0; i < function.getAttributes().getLength(); i++) {
+            final Node attr = function.getAttributes().item(i);
+            if (!XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attr.getNamespaceURI())
+                    && !java.util.Set.of("id", "class").contains(attr.getNodeName())) { return false; }
+        }
+        return arguments == 1;
     }
 
     private static Element bean(final Document document, final String id) {
-        for (final Element value : elements(document, "bean")) {
-            if (id.equals(value.getAttribute("id"))) {
-                return value;
+        final Element root = document.getDocumentElement();
+        if (!BEANS_NS.equals(root.getNamespaceURI()) || !"beans".equals(root.getLocalName()) || root.hasAttribute("profile")) {
+            throw new IllegalStateException("unresolved ContextCheck root");
+        }
+        Element found = null;
+        for (final Element value : elements(document, "*")) {
+            if ("import".equals(value.getLocalName()) || "alias".equals(value.getLocalName())
+                    || value.hasAttribute("profile")) { throw new IllegalStateException("unresolved ContextCheck configuration"); }
+            final boolean named = java.util.Arrays.asList(value.getAttribute("name").split("[,;\\s]+")).contains(id);
+            if (id.equals(value.getAttribute("id")) || named) {
+                if (found != null || named || !BEANS_NS.equals(value.getNamespaceURI())
+                        || !"bean".equals(value.getLocalName())) { throw new IllegalStateException("ambiguous ContextCheck definition"); }
+                found = value;
             }
         }
-        return null;
+        return found;
     }
 
     private static List<Element> elements(final Document document, final String localName) {
@@ -296,7 +328,7 @@ final class GraphicalMatrixSpAccessXmlConfig {
         }
     }
 
-    private static void write(final Path path, final Document document) throws Exception {
+    private static byte[] serialize(final Document document) throws Exception {
         final TransformerFactory factory = TransformerFactory.newInstance();
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
@@ -306,6 +338,6 @@ final class GraphicalMatrixSpAccessXmlConfig {
         transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no");
         final java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
         transformer.transform(new DOMSource(document), new StreamResult(output));
-        GraphicalMatrixSpFiles.atomicWrite(path, output.toByteArray());
+        return output.toByteArray();
     }
 }

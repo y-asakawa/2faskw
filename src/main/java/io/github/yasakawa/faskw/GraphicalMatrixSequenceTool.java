@@ -64,6 +64,16 @@ public final class GraphicalMatrixSequenceTool {
                 System.out.println(storage.encode(sequence, ordered, duplicates));
                 return;
             }
+            if ("matches-stdin".equals(command)) {
+                final String[] values = readSequenceInput(System.in).split("\\R", -1);
+                if (values.length != 2) { throw new IllegalArgumentException("Expected stored and selected sequence lines"); }
+                final GraphicalMatrixConfig config = GraphicalMatrixConfig.load(idpHome);
+                final List<String> selected = config.resolveSequenceToGraphicals(GraphicalMatrixSupport.csv(values[1]));
+                config.validateSequence(selected);
+                System.out.println(storage.matches(values[0], selected,
+                    config.isOrderedSelectionRequired(), config.isDuplicateSelectionsAllowed()));
+                return;
+            }
             if ("display".equals(command)) {
                 if (args.length < 3) {
                     usage();

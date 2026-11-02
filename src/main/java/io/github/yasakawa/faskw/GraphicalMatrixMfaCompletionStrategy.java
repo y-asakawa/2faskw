@@ -24,6 +24,7 @@ import net.shibboleth.idp.authn.context.MultiFactorAuthenticationContext;
 import org.opensaml.profile.context.ProfileRequestContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.shibboleth.shared.servlet.impl.HttpServletRequestResponseContext;
 
 /** Revalidates enrollment state and subject binding after the selected second factor succeeds. */
 public final class GraphicalMatrixMfaCompletionStrategy implements Function<ProfileRequestContext, String> {
@@ -37,6 +38,7 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
 
     @Override
     public String apply(final ProfileRequestContext input) {
+        if (input != null) { input.removeSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class); }
         final MultiFactorAuthenticationContext mfaCtx = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
         final GraphicalMatrixMfaGuardContext guard = mfaCtx != null
             ? mfaCtx.getSubcontext(GraphicalMatrixMfaGuardContext.class) : null;
@@ -47,28 +49,79 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
 
         final String passwordUser = GraphicalMatrixMfaSubjectSupport.passwordUsername(input);
         final AuthenticationResult secondResult = mfaCtx.getActiveResults().get(guard.expectedFlow());
-        final String secondFactorUser = GraphicalMatrixMfaSubjectSupport.exactUsername(secondResult);
+        final String secondFactorUser = GraphicalMatrixMfaSubjectSupport.secondFactorUsername(
+            input, secondResult, guard.expectedFlow());
         if (passwordUser.isEmpty() || secondFactorUser.isEmpty()
                 || !guard.user().equals(passwordUser) || !guard.user().equals(secondFactorUser)) {
+            LOG.warn("MFA factor subject binding details: flow={}, passwordIdentityPresent={}, factorResultPresent={}, factorIdentityPresent={}",
+                guard.expectedFlow(), !passwordUser.isEmpty(), secondResult != null, !secondFactorUser.isEmpty());
             return deny(mfaCtx, GraphicalMatrixMfaDecisionStrategy.ACCESS_DENIED_EVENT,
                 "MFA factor subject binding failed");
         }
 
-        final GraphicalMatrixMfaSettings current;
+        final GraphicalMatrixMfaSuccessRecord.Expectation expected = GraphicalMatrixMfaSuccessRecord.Expectation.from(guard);
+        GraphicalMatrixMfaCompletionRecordContext recording = input.getSubcontext(GraphicalMatrixMfaCompletionRecordContext.class);
+        if (recording == null) {
+            recording = new GraphicalMatrixMfaCompletionRecordContext();
+            input.addSubcontext(recording, true);
+        }
+        final AuthenticationResult passwordResult = mfaCtx.getActiveResults().get("authn/Password");
+        final GraphicalMatrixMfaSuccessRecordOptions options;
+        final boolean firstAttempt = !recording.attempted;
+        final GraphicalMatrixMfaSuccessRecord.Result completed;
         try {
-            current = GraphicalMatrixRuntime.repository().findMfaSettings(guard.user());
+            options = GraphicalMatrixConfig.load(GraphicalMatrixRuntime.idpHome()).getMfaSuccessRecordOptions();
+            if (firstAttempt) {
+                recording.bind(expected, passwordResult, secondResult, input.getProfileId());
+                completed = GraphicalMatrixRuntime.repository().checkAndRecordMfaCompletion(expected, options);
+                recording.result = completed;
+            } else {
+                // A prior metadata result is never evidence that the enrollment is still valid.
+                completed = expected.matches(GraphicalMatrixRuntime.repository().findMfaSettings(guard.user()))
+                    ? new GraphicalMatrixMfaSuccessRecord.Result(GraphicalMatrixMfaSuccessRecord.StateVerdict.VALID,
+                        GraphicalMatrixMfaSuccessRecord.StoreStatus.NOT_ATTEMPTED, 0L, null, false)
+                    : GraphicalMatrixMfaSuccessRecord.Result.rejected();
+            }
         } catch (Exception ex) {
-            LOG.warn("MFA completion state lookup failed for user={}: {}",
-                guard.user(), ex.toString());
+            LOG.warn("MFA completion configuration/state lookup failed for user={} type={}",
+                guard.user(), ex.getClass().getSimpleName());
             return deny(mfaCtx, GraphicalMatrixMfaDecisionStrategy.SERVICE_UNAVAILABLE_EVENT,
                 "MFA completion state lookup failed");
         }
 
-        if (!validCompletion(current, guard)) {
+        if (completed == null || !completed.valid()) {
             return deny(mfaCtx, GraphicalMatrixMfaDecisionStrategy.ACCESS_DENIED_EVENT,
                 "MFA enrollment changed before completion");
         }
 
+        if (GraphicalMatrixMfaDecisionStrategy.isSelfServiceProfile(input)) {
+            input.addSubcontext(new GraphicalMatrixSelfServiceAuthorizationContext(
+                guard.user(), guard.stateVersion(), guard.expectedFlow(),
+                passwordResult, secondResult), true);
+        }
+        if (firstAttempt && completed.failureCode() != null) {
+            LOG.warn("MFA completion metadata failed: user={}, eventId={}, code={}",
+                guard.user(), recording.eventId, completed.failureCode());
+        }
+        if (firstAttempt && completed.futureTimestamp()) {
+            LOG.warn("MFA completion stored timestamp is in the future: user={}, eventId={}", guard.user(), recording.eventId);
+        }
+        if (firstAttempt && options.auditEnabled() && !recording.auditAttempted
+                && recording.matches(expected, passwordResult, secondResult, input.getProfileId())) {
+            recording.auditAttempted = true;
+            try {
+                final String detail = GraphicalMatrixMfaCompletionAudit.detail(input, expected, completed, recording.eventId);
+                if (!GraphicalMatrixRuntime.auditLogger().logCompletion(guard.user(), detail,
+                        HttpServletRequestResponseContext.getRequest(), completed.completedAtMillis())) {
+                    LOG.warn("MFA completion audit unavailable: eventId={}, alternative=true, method={}, completedAt={}, store={}",
+                        recording.eventId, guard.expectedMethod(), completed.completedAtMillis(), completed.recordStatus());
+                }
+            } catch (Exception ex) {
+                LOG.warn("MFA completion audit unavailable: eventId={}, alternative=true, method={}, completedAt={}, store={}, type={}",
+                    recording.eventId, guard.expectedMethod(), completed.completedAtMillis(), completed.recordStatus(),
+                    ex.getClass().getSimpleName());
+            }
+        }
         LOG.info("MFA completion accepted: user={}, flow={}, stateVersion={}",
             guard.user(), guard.expectedFlow(), guard.stateVersion());
         return null;
@@ -76,21 +129,7 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
 
     static boolean validCompletion(final GraphicalMatrixMfaSettings current,
             final GraphicalMatrixMfaGuardContext guard) {
-        if (current == null || !current.isActive() || !current.hasValidStatus()
-                || current.getStateVersion() != guard.stateVersion()) {
-            return false;
-        }
-        final String method = normalizeMethod(current.getMethod());
-        if (!guard.expectedMethod().equals(method)) {
-            return false;
-        }
-        if ("TOTP".equals(method)) {
-            return current.isTotpActive();
-        }
-        if ("GRAPHICALMATRIX".equals(method)) {
-            return current.isSequenceSet();
-        }
-        return "WEBAUTHN".equals(method);
+        return GraphicalMatrixMfaSuccessRecord.Expectation.from(guard).matches(current);
     }
 
     static boolean advanceGraphicalMatrixGuard(final ProfileRequestContext input,
@@ -98,6 +137,7 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
         if (previousStateVersion == Long.MAX_VALUE) {
             return false;
         }
+        if (input != null) { input.removeSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class); }
         final MultiFactorAuthenticationContext mfaCtx = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
         final GraphicalMatrixMfaGuardContext guard = mfaCtx != null
             ? mfaCtx.getSubcontext(GraphicalMatrixMfaGuardContext.class) : null;
@@ -110,6 +150,22 @@ public final class GraphicalMatrixMfaCompletionStrategy implements Function<Prof
         }
         mfaCtx.addSubcontext(new GraphicalMatrixMfaGuardContext(
             guard.user(), guard.expectedFlow(), guard.expectedMethod(), previousStateVersion + 1L), true);
+        return true;
+    }
+
+    static boolean acceptVerificationTransition(final ProfileRequestContext input, final String user,
+            final GraphicalMatrixVerifyResult result) {
+        final MultiFactorAuthenticationContext mfa = GraphicalMatrixMfaSubjectSupport.mfaContext(input);
+        final GraphicalMatrixMfaGuardContext guard = mfa != null
+            ? mfa.getSubcontext(GraphicalMatrixMfaGuardContext.class) : null;
+        if (guard == null || !guard.user().equals(user) || !"authn/External".equals(guard.expectedFlow())
+                || !"GRAPHICALMATRIX".equals(guard.expectedMethod())
+                || result.beforeVersion() == null || result.afterVersion() == null
+                || guard.stateVersion() != result.beforeVersion().longValue()) {
+            return false;
+        }
+        mfa.addSubcontext(new GraphicalMatrixMfaGuardContext(user, guard.expectedFlow(),
+            guard.expectedMethod(), result.afterVersion().longValue()), true);
         return true;
     }
 

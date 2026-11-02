@@ -2212,8 +2212,100 @@ sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh webauthn-list USER
 従来どおり物理削除ではなく`DISABLED`への変更である。標準CSVの`D`はv1.3.5から拒否されるため、物理削除は
 1利用者ずつ`delete USER`で実行する。
 
+## TOTP検証成功の直後にMFA factor subject binding failedで拒否される
+
+`TOTPCredentialValidator: Login ... succeeded`の直後に`MFA factor subject binding failed`と
+`GraphicalMatrixAccessDenied`が記録される場合、初期の完了検査が公式TOTPの`TOTPPrincipal`を
+読み取れていない可能性がある。コードの検証成功と、完了時の本人一致検査は別の段階である。
+この場合は修正版JARを配備し、WAR再構築・Jetty再起動後に新しい認証セッションで試験する。
+同じv1.4.1表示でも修正前後の候補版があるため、版番号だけでなく配布物のchecksumを確認する。
+seedの再登録、DBの日時手動更新、完了guardの除去、MFAのbypassでは解決しない。
+修正後も同じメッセージが出る場合は、別利用者・複数principal・flowの不一致も調査する。
+
+## WebAuthn認証成功後にMFA factor subject binding failedで拒否される
+
+公式WebAuthnプラグイン1.4.2では、第二要素として認証した結果に`UsernamePrincipal`が
+含まれない経路がある。初期のv1.4.1候補版の完了検査では、この結果を利用者不明として拒否する。
+修正版は、公式プラグインが成功時に確定した正規化名と、その名前が今回のWebAuthn結果の
+同一Subjectへ結び付いていることを検査して利用する。第一認証の名前だけによる代用、
+WebAuthn user handleの利用者名扱い、本人一致検査の省略は行わない。
+
+修正版ソースから通常のv1.4.1パッケージを再ビルドし、既存の更新手順で配備、WAR再構築、
+Jetty再起動後に新しい認証セッションで確認する。公式WebAuthnプラグインの改変・更新や
+登録キーの削除／再登録、追加のXML・properties設定は不要である。ただし、3方式の
+CompletionStrategy接続など、共通記録機能の既存導入手順は必要である。
+認証成功後は`MFA completion accepted`、`event=MFA_COMPLETE`と`last_success`を確認する。
+後二者はそれぞれ監査・日時記録フラグがONの場合に限る。
+
+## list／showでWebAuthnの登録状態と件数を確認できるか
+
+`graphicalmatrix-db.sh list`／`show USER`の末尾に、`webauthn_status`と
+`webauthn_credential_count`を表示する。同じPostgreSQL DBの公式WebAuthn保存レコードで
+キーがあれば`REGISTERED`と件数、なければ`UNREGISTERED`と`0`、確認不能なら
+`UNKNOWN`と表示する。H2、テーブル不在、読取り権限不足やデータ不正等を未登録と決めつけない。
+
+これは登録情報の照会だけであり、GraphicalMatrix／TOTP利用中に残っているキーも数える。
+`REGISTERED`はWebAuthnが現在選択されていることや、ログインできることの保証ではない。
+別DB・LDAP等へ保存している環境は実際の保存先で確認する。追加のDB列や、公式プラグインの
+改変、キーの再登録は不要。詳細は[コマンドリファレンス](./COMMAND-REFERENCE.md#31-照会)を参照する。
+
+## TOTP／WebAuthnでもlast_successは更新されるか
+
+共通MFA成功記録を含む版では、GraphicalMatrix／TOTP／WebAuthnすべてについて、本人・方式・
+登録世代の共通完了検査に合格した日時を保存する。自己管理の再認証も対象であり、設定変更履歴や
+SPへの最終アクセス許可日時ではない。TOTPの登録だけ、単独の画像照合、MFA省略では更新しない。
+Plugin内部で認証結果が再利用された場合も、今回コードやキーを操作した証明とはならない。
+
+```bash
+sudo /opt/shibboleth-idp/bin/graphicalmatrix-db.sh show USER
+sudo grep 'event=MFA_COMPLETE ' /opt/shibboleth-idp/logs/graphicalmatrix-audit.log | tail -n 20
+```
+
+`last_success`は最新値1件、監査ログは履歴であり、どちらも認可の証拠には使用しない。
+旧版から保持した日時は一括変換しないため、導入後に新しい共通完了が起こるまでは旧意味の値も残る。
+導入前の通常TOTP／WebAuthn成功を日時欄へ遡って自動補完する機能はない。
+
+## 成功日時の集約でDB負荷が心配な場合は
+
+成功日時保存ONでは、共通完了の既存状態SELECTの接続を共用し、通常最大1回の付加UPDATEを行う。
+TOTP／WebAuthnだけでなく、従来の照合UPDATEが残るGraphicalMatrixでも書込み回数が増える。
+登録人数よりもピーク成功認証数・同一利用者への集中・DB待機時間を測定することが重要である。
+
+ログだけ残して日時の追加書込みを止める場合は、IdP側の`graphicalmatrix.properties`へ次を設定する。
+
+```properties
+graphicalmatrix.mfa.successRecord.enabled = false
+graphicalmatrix.mfa.completionAudit.enabled = true
+```
+
+必須状態SELECT、失敗回数やロックの更新、TOTP登録等は止まらない。日時の旧更新経路も復活しない。
+既存日時は保持し、ONへ戻してもOFF期間を補完しない。ログには`store=DISABLED`と記録する。
+日時保存だけの失敗は`store=FAILED`とWARNで知らせ、認証は継続する。状態lookup失敗や
+登録世代不一致は別問題なので従来どおり拒否する。設定の詳細は[CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)を参照する。
+
 ## 関連文書
 
 - [CONFIG-REFERENCE.md](./CONFIG-REFERENCE.md)
 - [INSTALL.md](./INSTALL.md)
 - [SECURITY.md](./SECURITY.md)
+
+
+## CLIの新規登録で初期パスワードも設定されるか
+
+`add USER A B C D`で未登録ユーザーを作成すると、入力画像列を初期値にも設定する。
+alias設定がある場合は`initial_sequence=A,B,C,D`となり、現在の`sequence`はhash／暗号等の
+設定方式で別に保存する。`set-sequence`で未登録ユーザーを作る場合も同じである。
+初回変更フラグは`1`になる。変更画面を利用する全体設定`graphicalmatrix.force_sequence_change=1`も必要となる。
+
+既存ユーザーへの再実行では初期値を上書きしない。以前から`[unset]`のユーザーにも自動補充しないため、
+管理者が把握する初期値を`set-initial-sequence USER --stdin`で明示する。これは現在画像列を変更しない。
+API／CSVの初期値省略時の扱いは今回変更しない。初期値は平文でDB・backup・show／listへ出るため、
+初期値と現在値が同じ間のDB読取りリスクが残る。管理者権限とbackupのアクセス管理を徹底する。
+
+## v1.4.1でRESET／自己管理／SP初期化が停止する場合
+
+CLIの`USER RESET`（別名`reset-user USER`）は、対象ユーザーを表示してYES/NO確認を行う。
+YESで実行、NOまたは空入力で中止する。自動実行では`USER RESET -y`または`--yes`を使用する。
+入力がEOFになった場合はDBを変更せず非ゼロ終了する。`--apply`はRESETの確認省略オプションではない。
+
+初期パスワードはDB・show／listで平文確認でき、現在画像列は保護を維持する。初期値なしのRESETは、新しい初期値を明示してから行う。旧候補版のhash初期値は復元できないので `set-initial-sequence USER --stdin` で再入力する。この操作だけでは現在画像列は変わらない。管理変更後や更新前の自己管理画面は再認証する。値制限付きadoptや既存Condition付きaccess initは、条件の喪失を防ぐため停止する。条件だけ削除して続行しない。[v1.4.1リリースノート](./release-notes/v1.4.1-RELEASE-NOTES.md)を参照する。

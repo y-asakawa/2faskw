@@ -21,6 +21,8 @@ import jakarta.servlet.http.HttpSession;
 /** One-time handoff between the authenticated IdP profile and the change servlet. */
 public final class GraphicalMatrixSelfServiceSession {
     private static final String PREFIX = "graphicalmatrixSelfService.";
+    private static final String VERSION = PREFIX + "stateVersion";
+    private static final String FORMAT = PREFIX + "authorizationFormat";
     private static final String USER = PREFIX + "user";
     private static final String EXPIRES_AT = PREFIX + "expiresAt";
     private static final String NONCE = PREFIX + "nonce";
@@ -29,54 +31,74 @@ public final class GraphicalMatrixSelfServiceSession {
     private GraphicalMatrixSelfServiceSession() {
     }
 
-    public static void initialize(final HttpSession session, final String user, final long expiresAt) {
-        clear(session);
-        session.setAttribute(USER, user);
-        session.setAttribute(EXPIRES_AT, Long.valueOf(expiresAt));
-        session.setAttribute(NONCE, GraphicalMatrixSupport.token());
-        session.setAttribute(PROFILE, GraphicalMatrixSelfServiceAuthentication.PROFILE_ID);
+    public static void initialize(final HttpSession session, final String user, final long stateVersion, final long expiresAt) {
+        if (stateVersion < 0 || user == null || user.isBlank()) {
+            throw new IllegalArgumentException("Invalid self-service binding");
+        }
+        synchronized (session) {
+            clear(session);
+            session.setAttribute(VERSION, Long.valueOf(stateVersion));
+            session.setAttribute(FORMAT, Integer.valueOf(2));
+            session.setAttribute(USER, user);
+            session.setAttribute(EXPIRES_AT, Long.valueOf(expiresAt));
+            session.setAttribute(NONCE, GraphicalMatrixSupport.token());
+            session.setAttribute(PROFILE, GraphicalMatrixSelfServiceAuthentication.PROFILE_ID);
+        }
     }
 
     public static Handoff consume(final HttpSession session, final long now) {
         if (session == null) {
             return null;
         }
-        final Object user = session.getAttribute(USER);
-        final Object expiresAt = session.getAttribute(EXPIRES_AT);
-        final Object nonce = session.getAttribute(NONCE);
-        final Object profile = session.getAttribute(PROFILE);
-        clear(session);
+        synchronized (session) {
+            final Object version = session.getAttribute(VERSION);
+            final Object format = session.getAttribute(FORMAT);
+            final Object user = session.getAttribute(USER);
+            final Object expiresAt = session.getAttribute(EXPIRES_AT);
+            final Object nonce = session.getAttribute(NONCE);
+            final Object profile = session.getAttribute(PROFILE);
+            clear(session);
 
-        if (!(user instanceof String)
-                || !(expiresAt instanceof Long)
-                || !(nonce instanceof String)
-                || !GraphicalMatrixSelfServiceAuthentication.PROFILE_ID.equals(profile)
-                || ((String) user).isBlank()
-                || ((String) nonce).isBlank()
-                || ((Long) expiresAt).longValue() < now) {
-            return null;
+            if (!Integer.valueOf(2).equals(format) || !(version instanceof Long)
+                    || ((Long) version).longValue() < 0 || !(user instanceof String)
+                    || !(expiresAt instanceof Long)
+                    || !(nonce instanceof String)
+                    || !GraphicalMatrixSelfServiceAuthentication.PROFILE_ID.equals(profile)
+                    || ((String) user).isBlank()
+                    || ((String) nonce).isBlank()
+                    || ((Long) expiresAt).longValue() <= now) {
+                return null;
+            }
+            return new Handoff((String) user, ((Long) expiresAt).longValue(), ((Long) version).longValue());
         }
-        return new Handoff((String) user, ((Long) expiresAt).longValue());
     }
 
     public static void clear(final HttpSession session) {
         if (session == null) {
             return;
         }
-        session.removeAttribute(USER);
-        session.removeAttribute(EXPIRES_AT);
-        session.removeAttribute(NONCE);
-        session.removeAttribute(PROFILE);
+        synchronized (session) {
+            session.removeAttribute(VERSION);
+            session.removeAttribute(FORMAT);
+            session.removeAttribute(USER);
+            session.removeAttribute(EXPIRES_AT);
+            session.removeAttribute(NONCE);
+            session.removeAttribute(PROFILE);
+        }
     }
 
     public static final class Handoff {
         private final String user;
         private final long expiresAt;
+        private final long stateVersion;
 
-        private Handoff(final String user, final long expiresAt) {
+        private Handoff(final String user, final long expiresAt, final long stateVersion) {
+            this.stateVersion = stateVersion;
             this.user = user;
             this.expiresAt = expiresAt;
         }
+
+        public long getStateVersion() { return stateVersion; }
 
         public String getUser() {
             return user;

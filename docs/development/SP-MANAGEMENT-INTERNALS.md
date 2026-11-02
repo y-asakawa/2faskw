@@ -264,3 +264,8 @@ registryとのdriftになります。`mfa show`と`mfa reconcile`はこの差分
 
 SP管理変更ではunit testに加え、`scripts/tests/package-regression.sh`で配布物にCLI、依存JAR、
 template、documentationが含まれることを確認します。
+
+
+## v1.4.1の更新
+
+v1.4.1のadoptはAdoptionAttributePlanで単純Requester＋ANYの同等性と元XMLを固定する。値制限・deny・未知構成は変更前に拒否する。access initは既存Conditionを削除せず、全XML変換を計画してから適用する。Spring p:postAuthenticationFlows-ref等の参照形式は停止する。

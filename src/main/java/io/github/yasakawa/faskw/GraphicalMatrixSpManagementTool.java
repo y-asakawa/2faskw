@@ -861,14 +861,14 @@ public final class GraphicalMatrixSpManagementTool {
         final GraphicalMatrixSpXmlConfig.Inventory inventory = matches.get(0);
         final GraphicalMatrixSpMetadata.Parsed metadata =
             GraphicalMatrixSpMetadata.parseExisting(config, inventory.metadataFile());
-        final String attributeProfile = GraphicalMatrixSpXmlConfig.inferAttributeProfile(
-            config.attributeFilterPath(), entityId);
+        final GraphicalMatrixSpXmlConfig.AdoptionAttributePlan attributePlan =
+            GraphicalMatrixSpXmlConfig.planAttributeAdoption(config.attributeFilterPath(), entityId);
+        final String attributeProfile = attributePlan.profile();
         final String mfaProfile = GraphicalMatrixSpMfaConfig.inferProfile(config.mfaPolicyPath(), entityId);
         final List<String> cidrs = GraphicalMatrixSpMfaConfig.inferCidrs(config.mfaPolicyPath(), entityId);
         final String providerXml = GraphicalMatrixSpXmlConfig.providerXml(
             config.metadataProvidersPath(), inventory.sourceId());
-        final String attributeXml = GraphicalMatrixSpXmlConfig.extractLegacyAttributePolicies(
-            config.attributeFilterPath(), entityId, false);
+        final String attributeXml = attributePlan.fragment();
         System.out.println("mode=" + mode(options));
         System.out.println("action=ADOPT");
         System.out.println("name=" + name);
@@ -895,9 +895,12 @@ public final class GraphicalMatrixSpManagementTool {
         final Snapshot snapshot = snapshot(config.metadataProvidersPath(), config.attributeFilterPath(),
             config.mfaPolicyPath(), config.registryPath(), managedMetadataPath(entityId, true),
             inventory.metadataFile());
+        if (!GraphicalMatrixSpXmlConfig.planAttributeAdoption(config.attributeFilterPath(), entityId).equals(attributePlan)) {
+            throw new IllegalStateException("CONFIG_CHANGED");
+        }
         try {
+            GraphicalMatrixSpXmlConfig.removePlannedAttributePolicy(config.attributeFilterPath(), entityId, attributePlan);
             GraphicalMatrixSpXmlConfig.removeProvider(config.metadataProvidersPath(), inventory.sourceId());
-            GraphicalMatrixSpXmlConfig.extractLegacyAttributePolicies(config.attributeFilterPath(), entityId, true);
             Files.deleteIfExists(inventory.metadataFile());
             applyEntryInternal("SP_ADOPT", oldRegistry, entry, metadata.bytes(), null);
         } catch (Exception ex) {

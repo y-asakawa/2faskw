@@ -234,8 +234,18 @@ final class GraphicalMatrixSpGovernanceTool {
                     "an existing non-2FAS-KW ContextCheck function or condition is configured");
             }
         } else {
-            System.out.println("context_check_module=NOT_ENABLED_OR_CONFIG_MISSING");
+            System.out.println("state=CONTEXT_CHECK_MODULE_REQUIRED");
+            System.out.println("result=NO_CHANGE");
+            throw new IllegalStateException("Enable and review the ContextCheck module before access init");
         }
+        final Map<Path, byte[]> originals = new LinkedHashMap<>();
+        for (final Path path : List.of(config.contextCheckConfigPath(), config.relyingPartyPath(),
+                config.configPath(), config.accessPolicyPath(), config.attributeCatalogPath())) {
+            if (Files.isSymbolicLink(path)) { throw new IllegalStateException("Unsafe configuration path: " + path); }
+            originals.put(path, Files.exists(path) ? Files.readAllBytes(path) : null);
+        }
+        final byte[] contextPlan = GraphicalMatrixSpAccessXmlConfig.planContextCheck(config.contextCheckConfigPath());
+        final byte[] relyingPlan = GraphicalMatrixSpAccessXmlConfig.planRelyingParty(config.relyingPartyPath());
         if (!options.apply()) {
             System.out.println("next_command=sudo " + executable + " access init --apply");
             return;
@@ -243,31 +253,26 @@ final class GraphicalMatrixSpGovernanceTool {
 
         requireRuntimeGroup();
 
-        final boolean enableModule = !Files.isRegularFile(config.contextCheckConfigPath());
+        for (final var original : originals.entrySet()) {
+            final byte[] current = Files.exists(original.getKey()) ? Files.readAllBytes(original.getKey()) : null;
+            if (!java.util.Arrays.equals(original.getValue(), current)) { throw new IllegalStateException("CONFIG_CHANGED"); }
+        }
         final Snapshot snapshot = snapshot(config.contextCheckConfigPath(),
             config.relyingPartyPath(), config.configPath(), config.accessPolicyPath(),
             config.attributeCatalogPath());
+        snapshot.guarded = true;
         try {
-            if (enableModule) {
-                runRequired(List.of(config.idpHome().resolve("bin/module.sh").toString(),
-                    "-e", "idp.intercept.ContextCheck"));
-            }
-            final GraphicalMatrixSpAccessXmlConfig.Inspection inspection =
-                GraphicalMatrixSpAccessXmlConfig.inspect(config.contextCheckConfigPath(),
-                    config.relyingPartyPath());
-            if (inspection.conflict()) {
-                throw new IllegalStateException(
-                    "an existing non-2FAS-KW ContextCheck function or condition is configured");
-            }
-            GraphicalMatrixSpAccessXmlConfig.initializeContextCheck(
-                config.contextCheckConfigPath());
-            GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(
-                config.relyingPartyPath());
+            GraphicalMatrixSpFiles.atomicWrite(config.contextCheckConfigPath(), contextPlan);
+            snapshot.recordWrite(config.contextCheckConfigPath());
+            GraphicalMatrixSpFiles.atomicWrite(config.relyingPartyPath(), relyingPlan);
+            snapshot.recordWrite(config.relyingPartyPath());
             if (!Files.exists(config.accessPolicyPath())) {
                 GraphicalMatrixSpAccessPolicy.empty().save(config.accessPolicyPath());
+                snapshot.recordWrite(config.accessPolicyPath());
             }
             if (!Files.exists(config.attributeCatalogPath())) {
                 GraphicalMatrixAttributeCatalog.defaults().save(config.attributeCatalogPath());
+                snapshot.recordWrite(config.attributeCatalogPath());
             }
             updateProperties(Map.of(
                 "graphicalmatrix.sp.access.enabled", "true",
@@ -275,18 +280,17 @@ final class GraphicalMatrixSpGovernanceTool {
                     Integer.toString(config.accessReloadIntervalSeconds()),
                 "graphicalmatrix.sp.access.auditDecisions",
                     Boolean.toString(config.accessAuditDecisions())));
-            secureGovernanceFiles();
+            snapshot.recordWrite(config.configPath());
+            snapshot.recordWrite(config.accessPolicyPath());
+            snapshot.recordWrite(config.attributeCatalogPath());
+            secureRuntimeFile(config.accessPolicyPath());
+            secureRuntimeFile(config.attributeCatalogPath());
             validateConsistency();
             audit("ACCESS_INIT", "-", "-", "OK", "PENDING_RESTART");
         } catch (Exception ex) {
-            snapshot.restore();
-            if (enableModule) {
-                try {
-                    runRequired(List.of(config.idpHome().resolve("bin/module.sh").toString(),
-                        "-d", "idp.intercept.ContextCheck"));
-                } catch (Exception moduleFailure) {
-                    ex.addSuppressed(moduleFailure);
-                }
+            try { snapshot.restore(); } catch (Exception recovery) {
+                recovery.addSuppressed(ex);
+                throw new IOException("RECOVERY_REQUIRED: inspect transaction backup before retrying", recovery);
             }
             audit("ACCESS_INIT", "-", "-", "FAILED", rootMessage(ex));
             throw ex;
@@ -1212,7 +1216,7 @@ final class GraphicalMatrixSpGovernanceTool {
         System.out.println("context_function_configured=" + value.functionConfigured());
         System.out.println("context_function_managed=" + value.managedFunction());
         System.out.println("context_condition_configured=" + value.conditionConfigured());
-        System.out.println("context_condition_stock=" + value.stockCondition());
+        System.out.println("context_condition_action=PRESERVE");
         System.out.println("saml2_sso_profiles=" + value.saml2Profiles());
         System.out.println("context_check_profiles=" + value.contextCheckProfiles());
     }
@@ -1412,12 +1416,29 @@ final class GraphicalMatrixSpGovernanceTool {
     private static final class Snapshot {
         private final Map<Path, byte[]> originals = new LinkedHashMap<>();
         private final Set<Path> missing = new LinkedHashSet<>();
+        private final Map<Path, java.nio.file.attribute.PosixFileAttributes> attributes = new LinkedHashMap<>();
+        private final Map<Path, byte[]> written = new LinkedHashMap<>();
+        private boolean guarded;
+
+        void recordWrite(final Path path) throws IOException {
+            written.put(path.toAbsolutePath().normalize(), Files.readAllBytes(path));
+        }
+
+        void checkRestore(final Path path) throws IOException {
+            if (guarded && (!Files.isRegularFile(path) || Files.isSymbolicLink(path)
+                    || !java.util.Arrays.equals(written.get(path), Files.readAllBytes(path)))) {
+                throw new IOException("RECOVERY_REQUIRED: configuration changed outside this operation: " + path);
+            }
+        }
 
         Snapshot(final Path... paths) throws IOException {
             for (final Path path : paths) {
                 final Path normalized = path.toAbsolutePath().normalize();
                 if (Files.isRegularFile(normalized)) {
                     originals.put(normalized, Files.readAllBytes(normalized));
+                    if (Files.getFileAttributeView(normalized, java.nio.file.attribute.PosixFileAttributeView.class) != null) {
+                        attributes.put(normalized, Files.readAttributes(normalized, java.nio.file.attribute.PosixFileAttributes.class));
+                    }
                 } else {
                     missing.add(normalized);
                 }
@@ -1441,13 +1462,24 @@ final class GraphicalMatrixSpGovernanceTool {
             IOException failure = null;
             for (final Map.Entry<Path, byte[]> entry : originals.entrySet()) {
                 try {
+                    if (guarded && !written.containsKey(entry.getKey())) { continue; }
+                    checkRestore(entry.getKey());
                     GraphicalMatrixSpFiles.atomicWrite(entry.getKey(), entry.getValue());
+                    final var original = attributes.get(entry.getKey());
+                    if (original != null) {
+                        final var view = Files.getFileAttributeView(entry.getKey(), java.nio.file.attribute.PosixFileAttributeView.class);
+                        view.setOwner(original.owner());
+                        view.setGroup(original.group());
+                        view.setPermissions(original.permissions());
+                    }
                 } catch (IOException ex) {
                     failure = ex;
                 }
             }
             for (final Path path : missing) {
                 try {
+                    if (guarded && !written.containsKey(path)) { continue; }
+                    checkRestore(path);
                     Files.deleteIfExists(path);
                 } catch (IOException ex) {
                     failure = ex;

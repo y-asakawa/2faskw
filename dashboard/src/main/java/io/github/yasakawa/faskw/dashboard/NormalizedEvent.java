@@ -32,5 +32,13 @@ public record NormalizedEvent(
         String parseStatus,
         String sourceGeneration,
         long sourceOffset,
-        String lineDigest) {
+        String lineDigest,
+        MfaCompletionInfo mfaCompletion) {
+    public NormalizedEvent(final int schemaVersion, final String eventId, final Instant occurredAt,
+            final Instant receivedAt, final String nodeId, final String event, final String result,
+            final String reason, final String userRef, final String sourceNetwork, final Long lockedUntil,
+            final String parseStatus, final String sourceGeneration, final long sourceOffset, final String lineDigest) {
+        this(schemaVersion, eventId, occurredAt, receivedAt, nodeId, event, result, reason, userRef,
+            sourceNetwork, lockedUntil, parseStatus, sourceGeneration, sourceOffset, lineDigest, null);
+    }
 }

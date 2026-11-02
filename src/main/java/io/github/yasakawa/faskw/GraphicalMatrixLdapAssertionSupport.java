@@ -13,6 +13,7 @@ package io.github.yasakawa.faskw;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 
 import javax.naming.NamingException;
 import javax.naming.directory.ModificationItem;
@@ -28,7 +29,11 @@ final class GraphicalMatrixLdapAssertionSupport {
     }
 
     static Control control(final Map<String, String> equalities) {
-        if (equalities == null || equalities.isEmpty()) {
+        return control(equalities, Set.of());
+    }
+
+    static Control control(final Map<String, String> equalities, final Set<String> absent) {
+        if (equalities == null || absent == null || (equalities.isEmpty() && absent.isEmpty())) {
             throw new IllegalArgumentException("LDAP assertion requires at least one equality.");
         }
         final ByteArrayOutputStream filters = new ByteArrayOutputStream();
@@ -40,6 +45,12 @@ final class GraphicalMatrixLdapAssertionSupport {
             writeTlv(content, 0x04, value);
             writeTlv(filters, 0xa3, content.toByteArray());
         }
+        for (final String name : absent) {
+            if (equalities.containsKey(name)) { throw new IllegalArgumentException("Conflicting LDAP assertion"); }
+            final ByteArrayOutputStream present = new ByteArrayOutputStream();
+            writeTlv(present, 0x87, required(name, "attribute"));
+            writeTlv(filters, 0xa2, present.toByteArray());
+        }
         final ByteArrayOutputStream assertion = new ByteArrayOutputStream();
         writeTlv(assertion, 0xa0, filters.toByteArray());
         return new BasicControl(ASSERTION_CONTROL_OID, true, assertion.toByteArray());
@@ -48,8 +59,14 @@ final class GraphicalMatrixLdapAssertionSupport {
     static void modify(final LdapContext context, final String dn,
             final Map<String, String> equalities, final ModificationItem... items)
             throws NamingException {
+        modify(context, dn, equalities, Set.of(), items);
+    }
+
+    static void modify(final LdapContext context, final String dn,
+            final Map<String, String> equalities, final Set<String> absent,
+            final ModificationItem... items) throws NamingException {
         final Control[] previous = context.getRequestControls();
-        context.setRequestControls(append(previous, control(equalities)));
+        context.setRequestControls(append(previous, control(equalities, absent)));
         try {
             context.modifyAttributes(dn, items);
         } finally {

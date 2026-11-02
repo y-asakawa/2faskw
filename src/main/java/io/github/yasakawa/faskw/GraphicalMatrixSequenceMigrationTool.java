@@ -61,76 +61,51 @@ public final class GraphicalMatrixSequenceMigrationTool {
                 initSchema(conn);
             }
 
-            final List<Row> rows = loadRows(conn);
-            final List<Migration> migrations = new ArrayList<>();
-            final Summary summary = new Summary(rows.size());
-
-            for (final Row row : rows) {
-                final String sourceMode = storage.storedMode(row.sequence);
-                final String initialSourceMode = storage.storedMode(row.initialSequence);
-                if ("empty".equals(sourceMode)) {
-                    summary.skippedEmpty++;
-                    System.out.println("SKIP user=" + row.userId + " reason=empty");
-                    continue;
-                }
-                if ("empty".equals(initialSourceMode)) {
-                    summary.errors++;
-                    System.out.println("ERROR user=" + row.userId + " initial_sequence=empty");
-                    continue;
-                }
-
-                try {
-                    final List<String> decodedInitial =
-                        initialTokens(row.initialSequence, initialSourceMode, storage, graphicalConfig);
-                    final String plainInitial = String.join(",",
-                        graphicalConfig.normalizeInitialSequence(decodedInitial));
-                    final boolean sequenceNeedsMigration = !targetMode.equals(sourceMode);
-                    final boolean initialNeedsMigration = !plainInitial.equals(row.initialSequence);
-                    if (!sequenceNeedsMigration && !initialNeedsMigration) {
-                        summary.already++;
-                        System.out.println("OK user=" + row.userId + " storage=" + sourceMode
-                            + " initial_storage=plaintext");
-                        continue;
-                    }
-
-                    String encoded = row.sequence;
-                    int count = decodedInitial.size();
-                    if (sequenceNeedsMigration) {
-                        if (!storage.recoverable(row.sequence)) {
-                            summary.skippedHash++;
-                            System.out.println("SKIP user=" + row.userId
-                                + " from=" + sourceMode + " to=" + targetMode
-                                + " reason=not_recoverable");
+            final Summary summary = new Summary(0);
+            String afterUser = null;
+            while (true) {
+                final List<Row> rows = loadRows(conn, afterUser);
+                if (rows.isEmpty()) { break; }
+                summary.total += rows.size();
+                final List<Migration> migrations = new ArrayList<>();
+                for (final Row row : rows) {
+                    afterUser = row.userId;
+                    final String sourceMode = storage.storedMode(row.sequence);
+                    try {
+                        if ("empty".equals(sourceMode)) { throw new IllegalArgumentException("Current sequence is empty"); }
+                        String encoded = row.sequence;
+                        if (!targetMode.equals(sourceMode)) {
+                            if (!storage.recoverable(row.sequence)) {
+                                throw new IllegalArgumentException("Current hash is not convertible");
+                            }
+                            final List<String> decoded = graphicalConfig.resolveSequenceToGraphicals(storage.displayTokens(row.sequence));
+                            graphicalConfig.validateSequence(decoded);
+                            encoded = storage.encode(decoded, graphicalConfig.isOrderedSelectionRequired(), graphicalConfig.isDuplicateSelectionsAllowed());
+                        }
+                        storage.validateStored(encoded, graphicalConfig);
+                        final String initial = storage.normalizeInitial(row.initialSequence, graphicalConfig);
+                        if (encoded.equals(row.sequence) && initial.equals(row.initialSequence)) {
+                            summary.already++;
                             continue;
                         }
-                        final List<String> decoded = storage.displayTokens(row.sequence);
-                        graphicalConfig.validateSequence(decoded);
-                        encoded = storage.encode(decoded,
-                            graphicalConfig.isOrderedSelectionRequired(),
-                            graphicalConfig.isDuplicateSelectionsAllowed());
-                        count = decoded.size();
+                        migrations.add(new Migration(row.userId, sourceMode, targetMode,
+                            storage.count(encoded), encoded, initial, row.sequence, row.initialSequence, row.stateVersion));
+                        summary.planned++;
+                        System.out.println((apply ? "APPLY" : "PLAN") + " user=" + row.userId
+                            + " from=" + sourceMode + " to=" + targetMode);
+                    } catch (Exception ex) {
+                        summary.errors++;
+                        System.out.println("ERROR user=" + row.userId + " reason="
+                            + ("hash".equals(storage.storedMode(row.initialSequence))
+                                ? "INITIAL_SEQUENCE_REENTRY_REQUIRED" : "MIGRATION_REQUIRED"));
                     }
-                    migrations.add(new Migration(row.userId, sourceMode, targetMode,
-                        count, encoded, plainInitial, row.sequence, row.initialSequence,
-                        row.stateVersion));
-                    summary.planned++;
-                    System.out.println((apply ? "APPLY" : "PLAN") + " user=" + row.userId
-                        + " from=" + sourceMode + " to=" + targetMode
-                        + " count=" + count);
-                } catch (Exception ex) {
-                    summary.errors++;
-                    System.out.println("ERROR user=" + row.userId
-                        + " from=" + sourceMode + " to=" + targetMode
-                        + " detail=" + safeDetail(ex));
                 }
-            }
-
-            if (apply && summary.errors == 0) {
-                applyMigrations(conn, migrations);
-                summary.applied = migrations.size();
-                conn.commit();
-            } else {
-                conn.rollback();
+                if (summary.errors > 0) { conn.rollback(); break; }
+                if (apply) {
+                    applyMigrations(conn, migrations);
+                    conn.commit();
+                    summary.applied += migrations.size();
+                } else { conn.rollback(); }
             }
 
             printSummary(apply, targetMode, summary);
@@ -138,7 +113,7 @@ public final class GraphicalMatrixSequenceMigrationTool {
         }
     }
 
-    private static void initSchema(final Connection conn) throws Exception {
+    static void initSchema(final Connection conn) throws Exception {
         try (Statement st = conn.createStatement()) {
             st.execute("CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment ("
                 + "user_id VARCHAR(255) PRIMARY KEY,"
@@ -182,16 +157,19 @@ public final class GraphicalMatrixSequenceMigrationTool {
         }
     }
 
-    private static List<Row> loadRows(final Connection conn) throws Exception {
+    private static List<Row> loadRows(final Connection conn, final String afterUser) throws Exception {
         final List<Row> rows = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT user_id, sequence, initial_sequence, state_version "
-                + "FROM graphicalmatrix_enrollment ORDER BY user_id");
-             ResultSet rs = ps.executeQuery()) {
+                + "FROM graphicalmatrix_enrollment "
+                + (afterUser == null ? "" : "WHERE user_id > ? ") + "ORDER BY user_id LIMIT 200")) {
+            if (afterUser != null) { ps.setString(1, afterUser); }
+            try (ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 rows.add(new Row(rs.getString("user_id"), rs.getString("sequence"),
                     rs.getString("initial_sequence"), rs.getLong("state_version")));
             }
+        }
         }
         return rows;
     }
@@ -207,7 +185,7 @@ public final class GraphicalMatrixSequenceMigrationTool {
             final long now = System.currentTimeMillis();
             for (final Migration migration : migrations) {
                 ps.setString(1, migration.encodedSequence);
-                ps.setString(2, migration.plainInitialSequence);
+                ps.setString(2, migration.encodedInitialSequence);
                 ps.setLong(3, now);
                 ps.setString(4, migration.userId);
                 ps.setLong(5, migration.stateVersion);
@@ -219,22 +197,6 @@ public final class GraphicalMatrixSequenceMigrationTool {
                 }
             }
         }
-    }
-
-    private static List<String> initialTokens(final String initialSequence,
-            final String initialSourceMode, final GraphicalMatrixSequenceStorage storage,
-            final GraphicalMatrixConfig config) {
-        final List<String> tokens;
-        if ("keyword".equals(initialSourceMode) || "aes-gcm".equals(initialSourceMode)) {
-            tokens = storage.displayTokens(initialSequence);
-        } else if ("hash".equals(initialSourceMode)) {
-            throw new IllegalStateException("initial_sequence must be plaintext, not hash");
-        } else {
-            tokens = GraphicalMatrixSupport.csv(initialSequence);
-        }
-        final List<String> graphicals = config.resolveSequenceToGraphicals(tokens);
-        config.validateSequence(graphicals);
-        return graphicals;
     }
 
     private static void printSummary(final boolean apply, final String targetMode,
@@ -282,21 +244,21 @@ public final class GraphicalMatrixSequenceMigrationTool {
         private final String targetMode;
         private final int count;
         private final String encodedSequence;
-        private final String plainInitialSequence;
+        private final String encodedInitialSequence;
         private final String originalSequence;
         private final String originalInitialSequence;
         private final long stateVersion;
 
         private Migration(final String userId, final String sourceMode,
                 final String targetMode, final int count, final String encodedSequence,
-                final String plainInitialSequence, final String originalSequence,
+                final String encodedInitialSequence, final String originalSequence,
                 final String originalInitialSequence, final long stateVersion) {
             this.userId = userId;
             this.sourceMode = sourceMode;
             this.targetMode = targetMode;
             this.count = count;
             this.encodedSequence = encodedSequence;
-            this.plainInitialSequence = plainInitialSequence;
+            this.encodedInitialSequence = encodedInitialSequence;
             this.originalSequence = originalSequence;
             this.originalInitialSequence = originalInitialSequence;
             this.stateVersion = stateVersion;
@@ -304,7 +266,7 @@ public final class GraphicalMatrixSequenceMigrationTool {
     }
 
     private static final class Summary {
-        private final int total;
+        private int total;
         private int already;
         private int planned;
         private int applied;

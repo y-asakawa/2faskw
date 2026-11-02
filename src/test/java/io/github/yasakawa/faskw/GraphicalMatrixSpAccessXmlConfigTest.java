@@ -21,7 +21,7 @@ final class GraphicalMatrixSpAccessXmlConfigTest {
     private Path temporary;
 
     @Test
-    void replacesStockConditionAndPreservesExistingPostAuthenticationFlows()
+    void preservesStockLookingConditionAndExistingPostAuthenticationFlows()
             throws Exception {
         final Path context = temporary.resolve("context-check-intercept-config.xml");
         final Path relying = temporary.resolve("relying-party.xml");
@@ -51,6 +51,12 @@ final class GraphicalMatrixSpAccessXmlConfigTest {
             </bean>
             """));
 
+        final String original = Files.readString(context);
+        assertTrue(GraphicalMatrixSpAccessXmlConfig.inspect(context, relying).conflict());
+        assertThrows(IllegalStateException.class,
+            () -> GraphicalMatrixSpAccessXmlConfig.initializeContextCheck(context));
+        assertEquals(original, Files.readString(context));
+        Files.writeString(context, contextConfig(""));
         GraphicalMatrixSpAccessXmlConfig.initializeContextCheck(context);
         GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(relying);
         GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(relying);
@@ -60,7 +66,11 @@ final class GraphicalMatrixSpAccessXmlConfigTest {
         assertTrue(inspection.managedFunction());
         assertEquals(2, inspection.saml2Profiles());
         assertEquals(2, inspection.contextCheckProfiles());
-        assertTrue(Files.readString(relying).contains("terms-of-use"));
+        final String updated = Files.readString(relying);
+        assertTrue(updated.contains("terms-of-use"));
+        assertTrue(updated.indexOf("terms-of-use") < updated.lastIndexOf("context-check"));
+        GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(relying);
+        assertEquals(updated, Files.readString(relying));
     }
 
     @Test
@@ -73,6 +83,33 @@ final class GraphicalMatrixSpAccessXmlConfigTest {
         Files.writeString(relying, contextConfig("<ref bean=\"SAML2.SSO\"/>"));
         assertThrows(IllegalStateException.class,
             () -> GraphicalMatrixSpAccessXmlConfig.initializeContextCheck(context));
+    }
+
+    @Test
+    void rejectsImportsAliasesAndUnknownFlowChildrenWithoutWriting() throws Exception {
+        final Path context = temporary.resolve("context.xml");
+        for (final String body : java.util.List.of("<import resource='other.xml'/>",
+                "<alias name='hidden' alias='shibboleth.context-check.Condition'/>",
+                "<bean name='shibboleth.context-check.Condition' class='example.Condition'/>")) {
+            Files.writeString(context, contextConfig(body));
+            final String before = Files.readString(context);
+            assertThrows(IllegalStateException.class, () -> GraphicalMatrixSpAccessXmlConfig.initializeContextCheck(context));
+            assertEquals(before, Files.readString(context));
+        }
+        final Path relying = temporary.resolve("relying.xml");
+        Files.writeString(relying, contextConfig("<bean parent='SAML2.SSO'><property name='postAuthenticationFlows'><list><ref bean='customFlow'/></list></property></bean>"));
+        final String before = Files.readString(relying);
+        assertThrows(IllegalStateException.class, () -> GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(relying));
+        assertEquals(before, Files.readString(relying));
+    }
+
+    @Test
+    void refusesSpringPReferenceThatWouldOverrideAddedFlowProperty() throws Exception {
+        final Path relying = temporary.resolve("relying-ref.xml");
+        Files.writeString(relying, contextConfig("<bean parent='SAML2.SSO' p:postAuthenticationFlows-ref='existingFlows'/>"));
+        final String before = Files.readString(relying);
+        assertThrows(IllegalStateException.class, () -> GraphicalMatrixSpAccessXmlConfig.initializeRelyingParty(relying));
+        assertEquals(before, Files.readString(relying));
     }
 
     private static String contextConfig(final String body) {

@@ -44,6 +44,8 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
 
     @Override
     public String apply(final ProfileRequestContext input) {
+        if (input != null) { input.removeSubcontext(GraphicalMatrixSelfServiceAuthorizationContext.class); }
+        if (input != null) { input.removeSubcontext(GraphicalMatrixMfaCompletionRecordContext.class); }
         final Properties policy = loadPolicy();
         final String relyingPartyId = relyingPartyId(input);
         final String clientIp = clientIp(policy);
@@ -145,6 +147,7 @@ public final class GraphicalMatrixMfaDecisionStrategy implements Function<Profil
         }
         mfaCtx.addSubcontext(new GraphicalMatrixMfaGuardContext(
             user, flow, normalized, settings.getStateVersion()), true);
+        input.addSubcontext(new GraphicalMatrixMfaCompletionRecordContext(), true);
         LOG.info("MFA method decision: user={}, sp={}, ip={}, method={}, flow={}, stateVersion={}",
             user, relyingPartyId, clientIp, normalized, flow, settings.getStateVersion());
         return flow;

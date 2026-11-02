@@ -31,6 +31,9 @@ GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制�
 | `graphicalmatrix.order` | integer | `1` | sequence照合方式。 | `1`: 順番通り、`2`: 順不同で一致可。 |
 | `graphicalmatrix.challenge.seconds` | integer seconds | `180` | challenge有効期限。 | 30-900秒を想定。長すぎる値は再利用リスクが上がる。 |
 | `graphicalmatrix.totp.registrationTtlSeconds` | integer seconds | `180` | TOTP自己登録の開始から確認・取消までの固定期限。 | 30-900秒。誤コード再試行では延長されない。通常ログイン時のTOTP windowには影響しない。 |
+| `graphicalmatrix.mfa.successRecord.enabled` | boolean | `true` | GraphicalMatrix／TOTP／WebAuthnの共通MFA完了検査後に最新日時をDB／LDAPへ保存する。 | `false`でも必須の利用者・方式・登録世代検査は行う。日時保存だけを停止し、既存のカウンター・登録更新は停止しない。 |
+| `graphicalmatrix.mfa.successRecord.queryTimeoutSeconds` | integer seconds | `1` | 成功日時の付加SQL UPDATEに指定するtimeout。 | `1`～`5`。接続取得・必須SELECT・LDAPのtimeoutは変更しない。応答時間全体の上限を保証する値ではない。 |
+| `graphicalmatrix.mfa.completionAudit.enabled` | boolean | `true` | 共通MFA完了時に`MFA_COMPLETE/OK`を既存監査ログへ記録する。 | 日時保存とは独立。保存OFFなら`store=DISABLED`、保存失敗なら`store=FAILED`となる。 |
 | `graphicalmatrix.allow_duplicates` | integer/bool | `0` | 同じ画像の複数選択を許可するか。 | `1` の場合 `img01,img01,img01,img01` のようなsequenceを許可。 |
 | `graphicalmatrix.force_sequence_change` | integer/bool | `1` | 初回/RESET後の強制sequence変更。 | DB利用時に有効。変更完了後はユーザー行のforce値を解除する。 |
 | `graphicalmatrix.lockout.failureLimit` | integer | `5` | 通常ロックを開始する保存済み失敗回数。 | `1`から`100`。成功または管理者リセットで0へ戻る。 |
@@ -151,7 +154,7 @@ WebAuthn credentialのLDAP StorageService化は別機能であり、このファ
 | `graphicalmatrix.ldap.attr.totp_seed` | LDAP attr | `ldap_totp_seed` | TOTP seed保存属性。 | `totpaesgcm1:` または `totpkw1:` 形式を推奨。 |
 | `graphicalmatrix.ldap.attr.totp_status` | LDAP attr | `ldap_totp_status` | TOTP登録状態。 | `UNREGISTERED`, `PENDING`, `ACTIVE`。 |
 | `graphicalmatrix.ldap.attr.totp_registered_at` | LDAP attr | `ldap_totp_registered_at` | TOTP登録完了時刻。 | Unix epoch milliseconds。 |
-| `graphicalmatrix.ldap.attr.last_success_at` | LDAP attr | `ldap_last_success_at` | 最終成功時刻。 | Unix epoch milliseconds。 |
+| `graphicalmatrix.ldap.attr.last_success_at` | LDAP attr | `ldap_last_success_at` | 共通MFA完了検査に合格した最新日時。 | Unix epoch milliseconds。日時保存ON時に条件付き更新し、登録世代は進めない。 |
 | `graphicalmatrix.ldap.attr.force_sequence_change` | LDAP attr | `ldap_force_sequence_change` | sequence変更強制フラグ。 | `0` または `1`。 |
 | `graphicalmatrix.ldap.attr.state_version` | LDAP attr | `ldap_state_version` | 楽観ロック用世代番号。 | 変更完了時の古い画面からの上書きを防ぐ。 |
 | `graphicalmatrix.ldap.attr.created_at` | LDAP attr | `ldap_created_at` | 作成時刻。 | 移行/管理用途。 |

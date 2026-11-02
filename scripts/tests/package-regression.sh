@@ -63,6 +63,21 @@ cmp -s "$SP_IMPORT_VERSIONED" "$SP_IMPORT_FIXED" \
   || fail "fixed-name and versioned SP Import ZIP files differ"
 "$PYTHON" "$ROOT/scripts/check-sp-import-package.py" "$SP_IMPORT_FIXED" "$SP_IMPORT_ROOT" "$VERSION"
 
+# Compatibility-test dependencies must not become runtime dependencies in any distribution.
+"$PYTHON" - "$PLUGIN_DIST/2faskw-idp-plugin.zip" "$ADMIN_FIXED" "$DASHBOARD_FIXED" "$SP_IMPORT_FIXED" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+test_only = ("idp-plugin-webauthn-", "idp-authn-impl-", "webauthn-server-", "yubico-util-")
+for archive in sys.argv[1:]:
+    with zipfile.ZipFile(archive) as package:
+        for entry in package.namelist():
+            name = pathlib.PurePosixPath(entry).name
+            if name.endswith(".jar") and name.startswith(test_only):
+                raise SystemExit(f"test-only WebAuthn dependency is bundled: {archive}: {entry}")
+PY
+
 # Exercise managed JSON loading through the extracted launcher's packaged classpath.
 unzip -q "$SP_IMPORT_FIXED" -d "$TMP/sp-import-runtime"
 SP_IMPORT_LAUNCHER="$TMP/sp-import-runtime/$SP_IMPORT_ROOT/graphicalmatrix-sp-import.sh"

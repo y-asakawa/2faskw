@@ -21,7 +21,7 @@
 
   <nav class="tabs" aria-label="Dashboard views">
     <button class="tab active" data-view="overview">運用概要</button>
-    <button class="tab" data-view="authentication">GraphicalMatrix認証</button>
+    <button class="tab" data-view="authentication">MFA認証</button>
     <button class="tab" data-view="self-service">登録・自己管理</button>
     <button class="tab" data-view="admin-api">管理API</button>
     <button class="tab" data-view="ingest">収集状態</button>
@@ -118,7 +118,11 @@
 
     <section id="view-authentication" class="view">
       <section class="panel">
-        <div class="panel-heading"><h2>GraphicalMatrix認証イベント</h2></div>
+        <div class="panel-heading"><h2>MFA完了内訳</h2><span>個別イベント保持分</span></div>
+        <div id="mfa-completion-table"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><h2>MFA認証イベント</h2></div>
         <div id="authentication-table"></div>
       </section>
     </section>
@@ -176,8 +180,8 @@
     </section>
 
     <p class="scope-note">
-      現行2FAS-KW監査ログのみを対象とします。通常TOTP/WebAuthn認証、SP別集計、
-      IdP Passwordを含む全SAML認証件数は取得対象外です。
+      現行2FAS-KW監査ログのみを対象とします。共通MFA完了は記録有効化後の履歴が対象です。
+      SP別集計、IdP Passwordを含む全SAML認証件数は取得対象外です。
     </p>
   </main>
 </body>

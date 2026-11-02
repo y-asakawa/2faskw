@@ -104,6 +104,15 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
             );
         }
 
+        try {
+            if ((result.isSuccess() || result.beforeVersion() != null)
+                    && !GraphicalMatrixMfaCompletionStrategy.acceptVerificationTransition(
+                        ExternalAuthentication.getProfileRequestContext(key, request), user, result)) {
+                result = GraphicalMatrixVerifyResult.enrollRequired("enrollment_changed_during_verification");
+            }
+        } catch (Exception ex) {
+            result = GraphicalMatrixVerifyResult.enrollRequired("verification_context_unavailable");
+        }
         audit.log("VERIFY", user, result.getAuditResult(), challengeId, result.getAuditDetail(), request);
 
         try {
@@ -111,7 +120,9 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                 if (config.isForceSequenceChangeEnabled()
                         && repository.isForceSequenceChangeRequired(user)) {
                     final GraphicalMatrixEnrollment verifiedEnrollment = repository.findEnrollment(user);
-                    if (verifiedEnrollment == null || !verifiedEnrollment.isActive()
+                    if (verifiedEnrollment == null || result.afterVersion() == null
+                            || verifiedEnrollment.getStateVersion() != result.afterVersion().longValue()
+                            || !verifiedEnrollment.isActive()
                             || verifiedEnrollment.getLockedUntil() > now) {
                         clearChallenge(session);
                         request.setAttribute(ExternalAuthentication.AUTHENTICATION_EVENT_KEY,
@@ -128,7 +139,7 @@ public final class GraphicalMatrixVerifyServlet extends HttpServlet {
                     session.setAttribute("forceSequence.displayOrder", forceDisplayOrder);
                     session.setAttribute("forceSequence.config", config);
                     session.setAttribute("forceSequence.stateVersion",
-                        Long.valueOf(verifiedEnrollment.getStateVersion()));
+                        result.afterVersion());
                     audit.log("FORCE_SEQUENCE_CHANGE_START", user, "OK", challengeId,
                         "graphicals=" + forceDisplayOrder.size() + ",choice=" + config.getChoiceCount(), request);
                     clearChallenge(session);

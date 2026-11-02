@@ -20,6 +20,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.sql.SQLException;
+import java.time.Clock;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -32,8 +34,14 @@ public final class GraphicalMatrixRepository {
     private final GraphicalMatrixSequenceStorage sequenceStorage;
     private final GraphicalMatrixTotpSeedStorage totpSeedStorage;
     private final GraphicalMatrixLdapEnrollmentStore ldapStore;
+    private final Clock completionClock;
 
     public GraphicalMatrixRepository(final String idpHome) {
+        this(idpHome, Clock.systemUTC());
+    }
+
+    GraphicalMatrixRepository(final String idpHome, final Clock clock) {
+        this.completionClock = clock;
         this.sequenceStorage = GraphicalMatrixSequenceStorage.load(idpHome);
         this.totpSeedStorage = GraphicalMatrixTotpSeedStorage.load(idpHome);
         if (GraphicalMatrixSaveDataConfig.load(idpHome).isLdap()) {
@@ -106,6 +114,89 @@ public final class GraphicalMatrixRepository {
             }
         }
         return null;
+    }
+
+    GraphicalMatrixMfaSuccessRecord.Result checkAndRecordMfaCompletion(
+            final GraphicalMatrixMfaSuccessRecord.Expectation expected,
+            final GraphicalMatrixMfaSuccessRecordOptions options) throws Exception {
+        if (ldapStore != null) {
+            return ldapStore.checkAndRecordMfaCompletion(expected, options, completionClock);
+        }
+        GraphicalMatrixMfaSuccessRecord.Result completed = null;
+        try (Connection c = db()) {
+            initDbIfEnabled(c);
+            completed = GraphicalMatrixMfaSuccessRecord.checkAndRecord(expected, options, completionClock,
+                new GraphicalMatrixMfaSuccessRecord.Store() {
+                    @Override public GraphicalMatrixMfaSuccessRecord.Snapshot read(final boolean timestamps)
+                            throws Exception {
+                        return completionSnapshot(c, expected.user(), timestamps);
+                    }
+                    @Override public boolean update(final GraphicalMatrixMfaSuccessRecord.Snapshot snapshot,
+                            final long now, final int timeout) throws Exception {
+                        return updateCompletionTimestamp(c, expected, snapshot, now, timeout);
+                    }
+                });
+            return completed;
+        } catch (Exception ex) {
+            if (completed != null) { return completed.failed("connection_close_failed"); }
+            throw ex;
+        }
+    }
+
+    private GraphicalMatrixMfaSuccessRecord.Snapshot completionSnapshot(final Connection c,
+            final String user, final boolean timestamps) throws SQLException {
+        final String columns = "status, mfa_method, totp_status, totp_seed, sequence, state_version";
+        try (PreparedStatement ps = c.prepareStatement("SELECT " + columns
+                + (timestamps ? ", last_success_at, updated_at" : "")
+                + " FROM graphicalmatrix_enrollment WHERE user_id = ?")) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) { return null; }
+                final String seed = rs.getString("totp_seed");
+                final String sequence = rs.getString("sequence");
+                final GraphicalMatrixMfaSettings settings = new GraphicalMatrixMfaSettings(
+                    trim(rs.getString("status")), rs.getString("mfa_method"), rs.getString("totp_status"),
+                    seed != null && !seed.trim().isEmpty(), sequence != null && !sequence.trim().isEmpty(),
+                    rs.getLong("state_version"));
+                return new GraphicalMatrixMfaSuccessRecord.Snapshot(settings, user, rs.getString("status"),
+                    rs.getString("state_version"), timestamps ? rs.getString("last_success_at") : "unavailable",
+                    timestamps ? rs.getString("updated_at") : "unavailable", true);
+            }
+        } catch (SQLException ex) {
+            // A legacy/malformed timestamp schema must not turn metadata recording into an auth requirement.
+            if (timestamps && ("42703".equals(ex.getSQLState()) || "42S22".equals(ex.getSQLState()))) {
+                return completionSnapshot(c, user, false);
+            }
+            throw ex;
+        }
+    }
+
+    private boolean updateCompletionTimestamp(final Connection c,
+            final GraphicalMatrixMfaSuccessRecord.Expectation expected,
+            final GraphicalMatrixMfaSuccessRecord.Snapshot snapshot, final long now, final int timeout)
+            throws SQLException {
+        if (!c.getAutoCommit()) { throw new SQLException("Completion metadata requires a short autocommit update"); }
+        final String readiness = switch (expected.method()) {
+            case "TOTP" -> " AND totp_status = ? AND TRIM(totp_seed) <> ''";
+            case "GRAPHICALMATRIX" -> " AND TRIM(sequence) <> ''";
+            default -> "";
+        };
+        try (PreparedStatement ps = c.prepareStatement("UPDATE graphicalmatrix_enrollment "
+                + "SET last_success_at = ?, updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END "
+                + "WHERE user_id = ? AND status = ? AND state_version = ? AND mfa_method = ? "
+                + "AND last_success_at < ?" + readiness)) {
+            ps.setQueryTimeout(timeout);
+            ps.setLong(1, now);
+            ps.setLong(2, now);
+            ps.setLong(3, now);
+            ps.setString(4, expected.user());
+            ps.setString(5, snapshot.rawStatus());
+            ps.setLong(6, expected.stateVersion());
+            ps.setString(7, snapshot.settings().getMethod());
+            ps.setLong(8, now);
+            if ("TOTP".equals(expected.method())) { ps.setString(9, snapshot.settings().getTotpStatus()); }
+            return ps.executeUpdate() == 1;
+        }
     }
 
     public GraphicalMatrixTotpEnrollmentResult beginTotpRegistration(final String user,
@@ -258,17 +349,16 @@ public final class GraphicalMatrixRepository {
                         "UPDATE graphicalmatrix_enrollment "
                         + "SET totp_status = 'ACTIVE', totp_registered_at = ?, "
                         + "totp_registration_id = NULL, totp_registration_expires_at = 0, "
-                        + "last_success_at = ?, updated_at = ?, "
+                        + "updated_at = ?, "
                         + "state_version = state_version + 1 "
                         + "WHERE user_id = ? AND state_version = ? "
                         + "AND totp_registration_id = ? AND totp_registration_expires_at = ?")) {
                     up.setLong(1, now);
                     up.setLong(2, now);
-                    up.setLong(3, now);
-                    up.setString(4, binding.user());
-                    up.setLong(5, binding.stateVersion());
-                    up.setString(6, binding.registrationId());
-                    up.setLong(7, binding.expiresAt());
+                    up.setString(3, binding.user());
+                    up.setLong(4, binding.stateVersion());
+                    up.setString(5, binding.registrationId());
+                    up.setLong(6, binding.expiresAt());
                     if (up.executeUpdate() != 1) {
                         return GraphicalMatrixTotpEnrollmentResult.stale(
                             "totp_state_changed_during_activation");
@@ -602,7 +692,7 @@ public final class GraphicalMatrixRepository {
             final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
             throws Exception {
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT sequence, status, failed_count, locked_until, mfa_method "
+                "SELECT sequence, status, failed_count, locked_until, mfa_method, state_version "
                 + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
@@ -610,91 +700,7 @@ public final class GraphicalMatrixRepository {
                     return GraphicalMatrixVerifyResult.enrollRequired("missing_enrollment");
                 }
 
-                final String sequence = rs.getString("sequence");
-                final String status = rs.getString("status");
-                final int failedCount = rs.getInt("failed_count");
-                final long lockedUntil = rs.getLong("locked_until");
-
-                if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
-                }
-                if (!"GRAPHICALMATRIX".equals(normalizeMethod(rs.getString("mfa_method")))) {
-                    return GraphicalMatrixVerifyResult.enrollRequired(
-                        "not_graphicalmatrix_method");
-                }
-                if (!sequenceStorage.acceptedForRuntime(sequence)) {
-                    return GraphicalMatrixVerifyResult.enrollRequired(
-                        "sequence_storage_migration_required");
-                }
-                if (lockedUntil > now) {
-                    return GraphicalMatrixVerifyResult.locked(
-                        "locked_until=" + lockedUntil, lockedUntil);
-                }
-
-                final int expectedCount = sequenceStorage.count(sequence);
-                final Set<String> unique = new HashSet<>(selected);
-                final boolean selectedShapeOk =
-                    selected.size() == expectedCount
-                    && (duplicateSelectionsAllowed || unique.size() == selected.size())
-                    && displayOrder.containsAll(selected);
-
-                if (selectedShapeOk && sequenceStorage.matches(sequence, selected, orderedSelectionRequired,
-                        duplicateSelectionsAllowed)) {
-                    try (PreparedStatement up = c.prepareStatement(
-                            "UPDATE graphicalmatrix_enrollment "
-                            + "SET failed_count = 0, locked_until = 0, last_success_at = ?, updated_at = ? "
-                            + "WHERE user_id = ?")) {
-                        up.setLong(1, now);
-                        up.setLong(2, now);
-                        up.setString(3, user);
-                        up.executeUpdate();
-                    }
-                    return GraphicalMatrixVerifyResult.success();
-                }
-
-                final int failed = incrementFailureCount(failedCount);
-                final GraphicalMatrixLockoutPolicy.LockDecision lockDecision =
-                    lockoutPolicy.afterFailure(failed);
-                final long newLockedUntil = lockDecision.isLocked()
-                    ? now + lockDecision.getLockMillis()
-                    : 0L;
-                try (PreparedStatement up = c.prepareStatement(
-                        "UPDATE graphicalmatrix_enrollment "
-                        + "SET failed_count = ?, locked_until = ?, updated_at = ? "
-                        + "WHERE user_id = ?")) {
-                    up.setInt(1, failed);
-                    up.setLong(2, newLockedUntil);
-                    up.setLong(3, now);
-                    up.setString(4, user);
-                    up.executeUpdate();
-                }
-
-                final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
-                    + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
-                    + ",lock_level=" + lockDecision.getLevel().getAuditValue()
-                    + ",lock_seconds=" + lockDecision.getLockSeconds()
-                    + ",locked_until=" + newLockedUntil;
-                return lockDecision.isLocked()
-                    ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
-                    : GraphicalMatrixVerifyResult.failed(detail);
-            }
-        }
-    }
-
-    private GraphicalMatrixVerifyResult verifyForSequenceChangeInTransaction(final Connection c,
-            final String user, final List<String> selected, final List<String> displayOrder,
-            final long now, final GraphicalMatrixLockoutPolicy lockoutPolicy,
-            final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
-            throws Exception {
-        try (PreparedStatement ps = c.prepareStatement(
-                "SELECT sequence, status, failed_count, locked_until, mfa_method "
-                + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
-            ps.setString(1, user);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return GraphicalMatrixVerifyResult.enrollRequired("missing_enrollment");
-                }
-
+                final long version = rs.getLong("state_version");
                 final String sequence = rs.getString("sequence");
                 final String status = rs.getString("status");
                 final int failedCount = rs.getInt("failed_count");
@@ -733,7 +739,92 @@ public final class GraphicalMatrixRepository {
                         up.setString(2, user);
                         up.executeUpdate();
                     }
-                    return GraphicalMatrixVerifyResult.success("sequence_change_verified");
+                    return GraphicalMatrixVerifyResult.success().withStateTransition(version, version);
+                }
+
+                final int failed = incrementFailureCount(failedCount);
+                final GraphicalMatrixLockoutPolicy.LockDecision lockDecision =
+                    lockoutPolicy.afterFailure(failed);
+                final long newLockedUntil = lockDecision.isLocked()
+                    ? now + lockDecision.getLockMillis()
+                    : 0L;
+                try (PreparedStatement up = c.prepareStatement(
+                        "UPDATE graphicalmatrix_enrollment "
+                        + "SET failed_count = ?, locked_until = ?, updated_at = ? "
+                        + "WHERE user_id = ?")) {
+                    up.setInt(1, failed);
+                    up.setLong(2, newLockedUntil);
+                    up.setLong(3, now);
+                    up.setString(4, user);
+                    up.executeUpdate();
+                }
+
+                final String detail = "failed_count=" + failed + ",selected_count=" + selected.size()
+                    + ",order_mode=" + (orderedSelectionRequired ? "ordered" : "unordered")
+                    + ",lock_level=" + lockDecision.getLevel().getAuditValue()
+                    + ",lock_seconds=" + lockDecision.getLockSeconds()
+                    + ",locked_until=" + newLockedUntil;
+                return (lockDecision.isLocked()
+                    ? GraphicalMatrixVerifyResult.locked(detail, newLockedUntil)
+                    : GraphicalMatrixVerifyResult.failed(detail)).withStateTransition(version, version);
+            }
+        }
+    }
+
+    private GraphicalMatrixVerifyResult verifyForSequenceChangeInTransaction(final Connection c,
+            final String user, final List<String> selected, final List<String> displayOrder,
+            final long now, final GraphicalMatrixLockoutPolicy lockoutPolicy,
+            final boolean orderedSelectionRequired, final boolean duplicateSelectionsAllowed)
+            throws Exception {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT sequence, status, failed_count, locked_until, mfa_method, state_version "
+                + "FROM graphicalmatrix_enrollment WHERE user_id = ? FOR UPDATE")) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return GraphicalMatrixVerifyResult.enrollRequired("missing_enrollment");
+                }
+
+                final long version = rs.getLong("state_version");
+                final String sequence = rs.getString("sequence");
+                final String status = rs.getString("status");
+                final int failedCount = rs.getInt("failed_count");
+                final long lockedUntil = rs.getLong("locked_until");
+
+                if (sequence == null || sequence.trim().isEmpty() || !"ACTIVE".equals(status)) {
+                    return GraphicalMatrixVerifyResult.enrollRequired("inactive_or_empty_sequence");
+                }
+                if (!"GRAPHICALMATRIX".equals(normalizeMethod(rs.getString("mfa_method")))) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "not_graphicalmatrix_method");
+                }
+                if (!sequenceStorage.acceptedForRuntime(sequence)) {
+                    return GraphicalMatrixVerifyResult.enrollRequired(
+                        "sequence_storage_migration_required");
+                }
+                if (lockedUntil > now) {
+                    return GraphicalMatrixVerifyResult.locked(
+                        "locked_until=" + lockedUntil, lockedUntil);
+                }
+
+                final int expectedCount = sequenceStorage.count(sequence);
+                final Set<String> unique = new HashSet<>(selected);
+                final boolean selectedShapeOk =
+                    selected.size() == expectedCount
+                    && (duplicateSelectionsAllowed || unique.size() == selected.size())
+                    && displayOrder.containsAll(selected);
+
+                if (selectedShapeOk && sequenceStorage.matches(sequence, selected, orderedSelectionRequired,
+                        duplicateSelectionsAllowed)) {
+                    try (PreparedStatement up = c.prepareStatement(
+                            "UPDATE graphicalmatrix_enrollment "
+                            + "SET failed_count = 0, locked_until = 0, updated_at = ? "
+                            + "WHERE user_id = ?")) {
+                        up.setLong(1, now);
+                        up.setString(2, user);
+                        up.executeUpdate();
+                    }
+                    return GraphicalMatrixVerifyResult.success("sequence_change_verified").withStateTransition(version, version);
                 }
 
                 final int failed = incrementFailureCount(failedCount);

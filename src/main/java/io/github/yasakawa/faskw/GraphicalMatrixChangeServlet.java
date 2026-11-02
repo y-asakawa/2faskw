@@ -169,6 +169,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             if (session != null) {
                 clearChange(session);
             }
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "自己管理画面を開始できません。",
                 "認証の有効期限が切れた可能性があります。最初からやり直してください。");
@@ -183,6 +184,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
             audit.log("SELF_SERVICE_HANDOFF", user, "DB_ERROR", null,
                 ex.getClass().getSimpleName(), request);
             clearChange(session);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "登録情報を確認できません。",
                 "時間をおいて再度試すか、管理者に連絡してください。");
@@ -190,17 +192,19 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         }
 
         final long now = System.currentTimeMillis();
-        if (enrollment == null || !enrollment.isActive() || enrollment.getLockedUntil() > now) {
+        if (enrollment == null || !enrollment.isActive() || enrollment.getLockedUntil() > now
+                || enrollment.getStateVersion() != handoff.getStateVersion()) {
             audit.log("SELF_SERVICE_HANDOFF", user, "ENROLL_REQUIRED", null,
-                "missing_inactive_or_locked", request);
+                "missing_inactive_locked_or_state_changed", request);
             clearChange(session);
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             GraphicalMatrixStartServlet.renderUnavailable(request, response,
                 "GraphicalMatrixを変更できません。",
                 "このアカウントの登録状態を確認できません。管理者に連絡してください。");
             return;
         }
 
-        initializeVerifiedSession(session, config, user, enrollment, now);
+        initializeVerifiedSession(session, config, user, enrollment, handoff.getStateVersion(), now);
         audit.log("SELF_SERVICE_HANDOFF", user, "OK", null, "one_time_handoff_consumed", request);
         renderMenu(request, response, config, user,
             (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken"), null);
@@ -421,7 +425,9 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
                     "時間をおいて再度試すか、管理者に連絡してください。");
                 return;
             }
-            if (verifiedEnrollment == null || !verifiedEnrollment.isActive()
+            if (verifiedEnrollment == null || result.afterVersion() == null
+                        || verifiedEnrollment.getStateVersion() != result.afterVersion().longValue()
+                        || !verifiedEnrollment.isActive()
                     || verifiedEnrollment.getLockedUntil() > now) {
                 audit.log("CHANGE_VERIFY", user, "ENROLL_REQUIRED", challengeId,
                     "state_changed_after_verification", request);
@@ -431,7 +437,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
                     "登録状態が変更されました。最初からやり直してください。");
                 return;
             }
-            initializeVerifiedSession(session, config, user, verifiedEnrollment, now);
+            initializeVerifiedSession(session, config, user, verifiedEnrollment, result.afterVersion().longValue(), now);
             final String saveCsrfToken =
                 (String) session.getAttribute("graphicalmatrixChange.saveCsrfToken");
             renderMenu(request, response, config, user, saveCsrfToken, null);
@@ -596,6 +602,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         final long now = System.currentTimeMillis();
         if (user == null
                 || !user.equals(trim(request.getParameter("user")))
+                || !Integer.valueOf(2).equals(session.getAttribute("graphicalmatrixChange.authorizationFormat"))
                 || !Boolean.TRUE.equals(verified)
                 || stateVersion == null
                 || !String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
@@ -979,6 +986,7 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
         session.removeAttribute("graphicalmatrixChange.newDisplayOrder");
         session.removeAttribute("graphicalmatrixChange.config");
         session.removeAttribute("graphicalmatrixChange.used");
+        session.removeAttribute("graphicalmatrixChange.authorizationFormat");
         session.removeAttribute("graphicalmatrixChange.verified");
         session.removeAttribute("graphicalmatrixChange.stateVersion");
         session.removeAttribute("graphicalmatrixChange.saveCsrfToken");
@@ -988,13 +996,17 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
     private static void initializeVerifiedSession(final HttpSession session,
             final GraphicalMatrixConfig config, final String user,
-            final GraphicalMatrixEnrollment enrollment, final long now) {
+            final GraphicalMatrixEnrollment enrollment, final long expectedVersion, final long now) {
+        if (enrollment.getStateVersion() != expectedVersion) {
+            throw new IllegalArgumentException("Enrollment generation changed");
+        }
         clearChange(session);
+        session.setAttribute("graphicalmatrixChange.authorizationFormat", Integer.valueOf(2));
         session.setAttribute("graphicalmatrixChange.user", user);
         session.setAttribute("graphicalmatrixChange.config", config);
         session.setAttribute("graphicalmatrixChange.verified", Boolean.TRUE);
         session.setAttribute("graphicalmatrixChange.stateVersion",
-            Long.valueOf(enrollment.getStateVersion()));
+            Long.valueOf(expectedVersion));
         session.setAttribute("graphicalmatrixChange.saveCsrfToken", GraphicalMatrixSupport.token());
         session.setAttribute("graphicalmatrixChange.forceSequenceRequired",
             Boolean.valueOf(enrollment.isForceSequenceChange()));
@@ -1005,7 +1017,9 @@ public final class GraphicalMatrixChangeServlet extends HttpServlet {
 
     private static boolean validVerifiedSession(final String user, final Boolean verified,
             final String csrfToken, final Long expiresAt, final HttpServletRequest request, final long now) {
-        return user != null
+        final HttpSession session = request.getSession(false);
+        return session != null && Integer.valueOf(2).equals(session.getAttribute("graphicalmatrixChange.authorizationFormat"))
+            && user != null
             && user.equals(trim(request.getParameter("user")))
             && Boolean.TRUE.equals(verified)
             && String.valueOf(csrfToken).equals(String.valueOf(request.getParameter("csrfToken")))
