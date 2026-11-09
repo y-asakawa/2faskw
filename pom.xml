@@ -35,7 +35,7 @@
         <shibboleth.shared.version>9.2.3</shibboleth.shared.version>
         <opensaml.version>5.2.3</opensaml.version>
         <totp.plugin.version>2.3.2</totp.plugin.version>
-        <webauthn.test.version>1.4.2</webauthn.test.version>
+        <webauthn.test.version>1.4.3</webauthn.test.version>
         <yubico.webauthn.test.version>2.9.0</yubico.webauthn.test.version>
         <jakarta.servlet.version>6.1.0</jakarta.servlet.version>
         <spring.framework.version>7.0.10</spring.framework.version>
