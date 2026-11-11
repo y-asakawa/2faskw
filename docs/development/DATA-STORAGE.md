@@ -22,6 +22,20 @@ GraphicalMatrixRepository
 上位層は`findEnrollment()`、`verify()`、`updateSequence()`、`findMfaSettings()`などの同じAPIを
 使います。新しい保存backendを追加する場合も、この状態契約を維持します。
 
+## CLI Administrative History (v1.4.2)
+
+No enrollment history table or new credential column is added. Current state remains in the existing
+database; administrative operation history is stored in `/var/log/2faskw/admin-audit.log` on the CLI host.
+The parent process persists START before writes, and workers supply typed evidence only after commit.
+`changes` contains safe post-state and operation flags, not a complete before/after snapshot.
+CSV transactions publish per-user success only after the whole transaction commits. Sequence migration
+retains its 200-row commits; physical deletion retains disable, credential cleanup and enrollment deletion stages.
+Database and filesystem persistence are not atomic. Missing receipts remain UNKNOWN rather than assumed rollback.
+The audit sink is shared by IdP and standalone tools on a host, distinguished by deployment identity.
+Direct SQL, direct Java helpers, external LDAP administration and full database restore are outside this boundary.
+For `deployment_id`, `db_target_id`, operation/parent IDs and the limits of cross-host/database
+correlation, see [LOGGING.md](./LOGGING.md).
+
 ## Enrollment schema
 
 PostgreSQLの正規schemaは`postgresql-schema.sql`です。

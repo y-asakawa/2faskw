@@ -41,6 +41,9 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
             if (errors > 0) {
                 System.exit(1);
             }
+        } catch (GraphicalMatrixAdminAuditClient.AuditAfterCommitException ex) {
+            System.err.println("DB committed; audit incomplete. Do not rerun blindly.");
+            System.exit(74);
         } catch (Exception ex) {
             System.err.println("ERROR: " + safeDetail(ex));
             System.exit(1);
@@ -94,11 +97,20 @@ public final class GraphicalMatrixTotpSeedMigrationTool {
             }
 
             if (apply && summary.errors == 0) {
-                applyMigrations(conn, migrations);
+                try (var audit = GraphicalMatrixAdminAuditClient.transaction(conn, "MIGRATE_TOTP_SEEDS")) {
+                    applyMigrations(conn, migrations);
+                    audit.commit(migrations.stream().map(m -> GraphicalMatrixCliOperationReport.changed(m.userId, 1,
+                        java.util.Map.of(GraphicalMatrixCliOperationReport.Field.STORAGE_MODE, targetMode,
+                            GraphicalMatrixCliOperationReport.Field.SEED_SET, "true"))).toList());
+                }
                 summary.applied = migrations.size();
-                conn.commit();
             } else {
                 conn.rollback();
+                if (!apply && summary.errors == 0) {
+                    GraphicalMatrixAdminAuditClient.send("PLAN", "MIGRATE_TOTP_SEEDS", "NOT_ATTEMPTED",
+                        migrations.stream().map(m -> GraphicalMatrixCliOperationReport.changed(m.userId, 0,
+                            java.util.Map.of(GraphicalMatrixCliOperationReport.Field.STORAGE_MODE, targetMode))).toList());
+                }
             }
 
             printSummary(apply, targetMode, summary);

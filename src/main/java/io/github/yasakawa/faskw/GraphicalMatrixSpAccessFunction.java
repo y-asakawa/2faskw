@@ -21,7 +21,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,7 +111,7 @@ public final class GraphicalMatrixSpAccessFunction
         final SubjectContext subject = input.getSubcontext(SubjectContext.class);
         final String principal = subject == null || subject.getPrincipalName() == null
             ? "-" : sanitize(subject.getPrincipalName());
-        final String line = "ts=" + Instant.now() + " event=ACCESS_POLICY_" + result
+        final String line = "ts=" + GraphicalMatrixLogTimestamp.now() + " event=ACCESS_POLICY_" + result
             + " user=" + principal + " sp=" + sanitize(policy.entityId())
             + " policy_revision=" + policy.revision() + " reason=" + reason
             + System.lineSeparator();

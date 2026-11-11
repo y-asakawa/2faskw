@@ -41,6 +41,7 @@ CONFIGS=(
   webauthn-ldap.properties
   api.properties
   mfa-policy.properties
+  admin-audit.properties
   sp-management.properties
 )
 

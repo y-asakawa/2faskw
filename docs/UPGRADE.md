@@ -17,6 +17,7 @@
 - v1.3.3 から v1.3.4 への更新
 - v1.3.4 から v1.3.5 への更新
 - v1.4.0 から v1.4.1 への更新
+- v1.4.1 から v1.4.2 への更新
 
 別バージョンへ更新する場合は、JAR名と配布物のバージョンを読み替えること。
 
@@ -2213,6 +2214,90 @@ API／CSVの初期値省略時の動作は変更しない。
 旧keyword／AES-GCM初期値は元鍵があれば移行で平文化する。平文／空の初期値は正常で、hash初期値は再入力が必要として移行を停止する。初期値移行はbackup後、管理書込と自己管理操作を停止した状態でdry-run→apply→再dry-runの順に行う。200行ごとの部分確定と再開を考慮する。過去の平文backupやCSVは自動消去されず、必要な画像列の再設定も別途行う。通常SSOとTOTP／WebAuthnの動作確認後に自己管理を再開する。
 
 値制限付きSPのadopt、既存Condition付きのaccess initは停止する。条件を消して回避せず、既存ルールを保持して移行を設計する。旧処理で削除済みの条件はbackup／legacy XMLから別途復旧・検証する。
+
+## v1.4.1からv1.4.2への更新
+
+この節を実施してから、次の「設定検査」へ進む。v1.4.1で統合したMFA完了strategyと失敗eventは
+引き続き維持する。今回のCLI監査のために公式TOTP／WebAuthn、認証XML、利用者credential、
+DB schemaを変更・再登録する必要はない。全IdPノードと使用中のStandalone Admin Toolsを更新する。
+
+### 1. CLI監査領域を準備する
+
+通常の配布物更新を済ませ、展開したv1.4.2パッケージで実行する。
+
+```bash
+sudo bash ./bin/graphicalmatrix-admin-audit-prepare.sh --apply
+sudo ls -ld /var/log/2faskw
+sudo ls -l /var/log/2faskw/admin-audit.log /var/log/2faskw/admin-audit.lock
+```
+
+既存logはtruncateしない。保存先と先祖はroot管理、監査ディレクトリは0750、log/lockは
+`root:graphicalmatrix-admin 0660`とする。先祖のgroup/other書込み等がある環境では停止するため、
+root管理の別ディレクトリを選び、準備の`--directory`と下記設定を一致させる。
+`jetty`を監査グループへ追加せず、親CLIをrootまたは信頼済み管理アカウントで実行する。
+
+```bash
+if sudo test ! -e /opt/shibboleth-idp/conf/graphicalmatrix/admin-audit.properties; then
+  sudo install -o root -g graphicalmatrix-admin -m 0640 \
+    ./conf/graphicalmatrix/admin-audit.properties.idpnew \
+    /opt/shibboleth-idp/conf/graphicalmatrix/admin-audit.properties
+fi
+```
+
+既存設定は上書きせず差分確認する。独自パスを使う場合はlogとlockを同一のroot管理先へ合わせる。
+Admin Toolsのインストーラーは既定領域を自動準備し、既存設定を保持して`.adminnew.*`を置く。
+CLI監査の設定変更だけならJetty再起動は不要である。
+
+### 2. CSV serviceとrotationを統合する
+
+標準CSV serviceの実行アカウントを`graphicalmatrix-admin`グループで動かす。既存の独自unitは
+丸ごと上書きせず、配布例の`ReadWritePaths`に追加された`/var/log/2faskw`等を統合し、
+変更した場合は`sudo systemctl daemon-reload`を実行する。SSH uploadアカウントへ監査権限を
+付与する必要はない。service主体をCSV送信者本人と見なさない。
+
+```bash
+sudo install -o root -g root -m 0644 ./examples/logrotate/graphicalmatrix-admin-audit \
+  /etc/logrotate.d/graphicalmatrix-admin-audit
+sudo logrotate -d /etc/logrotate.d/graphicalmatrix-admin-audit
+```
+
+専用logはrename/create方式と`delaycompress`を使い、`copytruncate`を指定しない。
+lockはrotationしない。SELinuxを使う環境では新しい保存先のlabelとAVCも確認する。
+
+### 3. 隔離した試験利用者で確認する
+
+`list`／`show`だけでは、`autoInit=false`時の書込み監査を試験したことにはならない。
+承認済みの試験利用者だけで変更操作を行い、START、COMMITTEDのCHANGE、ENDを確認する。
+本番利用者を監査確認のためだけにRESETしない。
+
+```bash
+sudo tail -n 30 /var/log/2faskw/admin-audit.log
+```
+
+終了`73`は更新前の監査準備失敗、`74`は更新済みまたは確定確認不能な状態での監査不完全である。
+後者をCSV自動再投入等で再実行せず、対象DBの現在状態と`op_id`を確認する。従来のRESET確認と
+`-y`、CSVのdry-run／`--apply`は変わらない。CLIだけ旧版へ戻すと専用監査を迂回するため、
+rollback時も管理書込みを止めて監査方針を確認する。専用履歴DBの追加・削除は不要である。
+
+### 4. ログ日時のシステムタイムゾーン統一
+
+v1.4.2では2FAS-KW独自の認証・SP管理・アクセス制御・管理CLI・CSV処理ログを、実行環境の
+システムタイムゾーンで出力する。UTCなら`Z`、JSTなら`+09:00`を付ける。
+新しい設定項目やDB移行、TOTP／WebAuthnの再登録は不要である。
+JARとCSV runnerを含む更新後の配布物を適用し、IdPは通常手順でWARを再構築してJettyを再起動する。
+設定だけで旧JARの出力が変わるわけではない。
+
+```bash
+timedatectl show --property=Timezone --value
+date -Is
+```
+
+Javaの`-Duser.timezone`や`TZ`でOSと異なる設定を強制していないか、JettyとCLI／CSV serviceの
+両方を確認する。OS設定を変更したときもJetty等の長時間実行JVMは再起動する。
+既存のUTC行やrotation済みログは変換・再投入しない。新旧表記の混在は既存Dashboardで読み込める。
+DBの成功日時、MFA完了detailのepoch、TOTPの判定、APIや移行用IDの日時は変更しない。
+IdP標準logbackやOS journalの独自設定は上書きしない。詳細は
+[LOG-REFERENCE.md](./LOG-REFERENCE.md#log-timezone)を参照する。
 
 ## 設定検査
 

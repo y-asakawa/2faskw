@@ -1541,7 +1541,7 @@ public final class GraphicalMatrixSpManagementTool {
         try {
             final String actor = System.getenv().getOrDefault("SUDO_USER",
                 System.getenv().getOrDefault("USER", "unknown"));
-            final String line = "ts=" + Instant.now() + " event=" + token(event)
+            final String line = "ts=" + GraphicalMatrixLogTimestamp.now() + " event=" + token(event)
                 + " actor=" + token(actor) + " name=" + token(name)
                 + " entity_id=" + token(entityId) + " result=" + token(result)
                 + " detail=" + token(detail) + System.lineSeparator();

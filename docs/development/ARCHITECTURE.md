@@ -151,4 +151,5 @@ Dashboardは認証経路の必須要素ではありません。監査イベン�
 - [AUTHENTICATION-FLOW.md](./AUTHENTICATION-FLOW.md): 認証・自己管理の呼出関係
 - [SP-MANAGEMENT-INTERNALS.md](./SP-MANAGEMENT-INTERNALS.md): SP管理CLI内部設計
 - [DATA-STORAGE.md](./DATA-STORAGE.md): DB、LDAP、秘密情報、状態遷移
+- [LOGGING.md](./LOGGING.md): Log producers, administrative identity fields, correlation and evidence boundaries
 

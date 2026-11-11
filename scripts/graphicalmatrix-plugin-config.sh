@@ -351,6 +351,8 @@ install_template "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/api.properties"
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/mfa-policy.properties"
+install_template "$PACKAGE_DIR/conf/graphicalmatrix/admin-audit.properties.idpnew" \
+  "$IDP_HOME/conf/graphicalmatrix/admin-audit.properties"
 install_template "$PACKAGE_DIR/conf/graphicalmatrix/sp-management.properties.idpnew" \
   "$IDP_HOME/conf/graphicalmatrix/sp-management.properties"
 install_copy "$PACKAGE_DIR/conf/graphicalmatrix/postgresql-schema.sql" \
@@ -375,6 +377,7 @@ for src in "$PACKAGE_DIR"/conf/graphicalmatrix/graphicals/*; do
 done
 
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-db.sh" "$IDP_HOME/bin/graphicalmatrix-db.sh"
+install_executable "$PACKAGE_DIR/bin/graphicalmatrix-admin-audit-prepare.sh" "$IDP_HOME/bin/graphicalmatrix-admin-audit-prepare.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-sp.sh" "$IDP_HOME/bin/graphicalmatrix-sp.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh" "$IDP_HOME/bin/graphicalmatrix-db-migration.sh"
 install_executable "$PACKAGE_DIR/bin/graphicalmatrix-api-token.sh" "$IDP_HOME/bin/graphicalmatrix-api-token.sh"

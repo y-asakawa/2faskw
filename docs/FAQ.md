@@ -2302,6 +2302,43 @@ alias設定がある場合は`initial_sequence=A,B,C,D`となり、現在の`seq
 API／CSVの初期値省略時の扱いは今回変更しない。初期値は平文でDB・backup・show／listへ出るため、
 初期値と現在値が同じ間のDB読取りリスクが残る。管理者権限とbackupのアクセス管理を徹底する。
 
+## 監査ログの時刻をOSのタイムゾーンに合わせるには？
+
+v1.4.2以降の2FAS-KW独自ログは、通常はOSのタイムゾーンに自動で合わせる。
+UTC環境では`2026-11-05T01:43:30.518Z`、JST環境では同じ瞬間を
+`2026-11-05T10:43:30.518+09:00`と記録する。日時の表示だけの変更で、認証やDBの時刻計算は変えない。
+対象は認証・自己管理、SP管理、SPアクセス制御、管理CLI、CSV処理のログである。
+
+Java起動オプション`-Duser.timezone`や`TZ`、containerの設定で上書きしている場合は、その設定が優先される。
+OSの設定を変更した後はJetty等の長時間実行JVMを再起動し、CLI／CSV serviceも次の実行で確認する。
+時刻表記のためにDB schema、MFA方式、seed、WebAuthnキーを変更する必要はない。
+過去のUTCログは変換せず、そのまま保持する。DashboardはUTCと数値オフセットを同じ絶対時刻へ正規化する。
+IdP標準ログ、journal、Apache等は製品・OS側の設定を別途確認する。
+[ログ日時の共通ルール](./LOG-REFERENCE.md#log-timezone)も参照する。
+
+## 管理者がCLIでRESETした履歴はどこに残る？
+
+v1.4.2から`/var/log/2faskw/admin-audit.log`へ記録する。IdPとStandalone Admin Toolsの両方が対象で、
+`RESET`、対象ユーザー、実OS実行主体、いつ確定したか、成否が残る。DBに変更履歴テーブルは作らない。
+
+```bash
+sudo grep 'target_user=user001 ' /var/log/2faskw/admin-audit.log | tail -n 20
+```
+
+同じ`op_id`のSTART・CHANGE・ENDを確認する。`result`だけでなく`db_result`も見る。
+`COMMITTED`はDB確定、`PARTIAL`は途中まで確定、`UNKNOWN`は確定確認不能を意味する。
+`PLANNED`や`CANCELLED`を変更成功として数えない。初期画像列やTOTP seedは専用監査へ記録しない。
+CSVも利用者ごとの確定結果を同じ監査へ記録し、既存の`csv-import.log`はファイル処理ログとして残る。
+通常の`list`／`show`は既定で対象外だが、autoInitのDDLには別のSCHEMA_INITが残る。
+
+導入時は`graphicalmatrix-admin-audit-prepare.sh --apply`でroot管理の保存先を準備する。
+更新前に記録不能なら終了73で停止する。更新後の監査不完全は74なので、同じRESETやCSVを
+無条件に再実行せずDBとlogを確認する。Jettyに監査書込み権限を追加する必要はない。
+syslog転送は既定OFF。直接SQL、別の復元ツール、公式WebAuthn画面まで捕捉するログではなく、
+共有serviceユーザーからCSV送信者本人も特定できない。rootや監査書込権限者による改変を防ぐ
+台帳ではないため、必要なら集中ログ基盤でも保管する。
+[ADMIN-TOOLS.md](./ADMIN-TOOLS.md#63-cli監査ログ)と[LOG-REFERENCE.md](./LOG-REFERENCE.md)も参照する。
+
 ## v1.4.1でRESET／自己管理／SP初期化が停止する場合
 
 CLIの`USER RESET`（別名`reset-user USER`）は、対象ユーザーを表示してYES/NO確認を行う。

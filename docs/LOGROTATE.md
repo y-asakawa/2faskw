@@ -28,6 +28,7 @@ GraphicalMatrix監査ログ:
 | ログ種別 | 既定パスまたは設定先 | サンプルまたは調整方法 |
 | --- | --- | --- |
 | GraphicalMatrix監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-audit.log` | `examples/logrotate/graphicalmatrix-audit` |
+| 管理CLI操作監査ログ | `/var/log/2faskw/admin-audit.log` | `examples/logrotate/graphicalmatrix-admin-audit`。v1.4.2から。rename/create方式で、他のcopytruncate設定へ含めない。 |
 | SP管理監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-sp-management-audit.log` | `examples/logrotate/graphicalmatrix-sp-management-audit`。SP管理CLIを使用する場合に適用する。 |
 | SP別アクセス制御監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-access-audit.log` | `examples/logrotate/graphicalmatrix-access-audit`。アクセス制御とdecision監査を有効化する場合に適用する。 |
 | CSVプロビジョニングログ | `graphicalmatrix.admin.csv.logFile`、既定 `/opt/graphicalmatrix-admin/logs/csv-import.log` | `examples/logrotate/graphicalmatrix-csv-import`。Admin Toolsを使用する場合に適用する。 |
@@ -48,6 +49,7 @@ examples/logrotate/graphicalmatrix-audit
 examples/logrotate/graphicalmatrix-sp-management-audit
 examples/logrotate/graphicalmatrix-access-audit
 examples/logrotate/graphicalmatrix-csv-import
+examples/logrotate/graphicalmatrix-admin-audit
 ```
 
 内容:
@@ -67,6 +69,25 @@ examples/logrotate/graphicalmatrix-csv-import
 ```
 
 ## 設定項目の意味
+
+### 管理CLI監査はrename/createで処理する
+
+`graphicalmatrix-admin-audit`だけは`copytruncate`を使用しない。CLIの親プロセスがbatchごとに
+logを開き、専用lockを取得してappend・fsync・closeするため、rename後は次回の書込みで開き直す。
+`create 0660 root graphicalmatrix-admin`と`delaycompress`を維持する。監査ディレクトリは0750、
+同じ場所の`admin-audit.lock`は安定したまま保持し、rotationの対象にしない。
+rename/create間の短いENOENTは最大1秒再試行する。旧inodeへ記録済みのeventはrotation済み側にある。
+日付境界の調査は現行・直近の両方を確認する。保持期間は例では180世代である。
+
+```bash
+sudo install -m 0644 examples/logrotate/graphicalmatrix-admin-audit \
+  /etc/logrotate.d/graphicalmatrix-admin-audit
+sudo logrotate -d /etc/logrotate.d/graphicalmatrix-admin-audit
+```
+
+監査logとlockの初回作成は`graphicalmatrix-admin-audit-prepare.sh --apply`で行い、既存logへ
+`install /dev/null`やtruncateを実行しない。書込み不能になると次のCLI更新を停止するため、
+所有者、0660、SELinux label、空き容量を確認する。他のログ用サンプルは以下のcopytruncate方式である。
 
 - `daily`: 1日ごとにローテーション
 - `rotate 180`: 180世代を保持

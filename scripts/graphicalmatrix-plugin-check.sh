@@ -358,6 +358,8 @@ check_package() {
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/api.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/mfa-policy.properties.idpnew"
+  need_file "$PACKAGE_DIR/conf/graphicalmatrix/admin-audit.properties.idpnew"
+  need_file "$PACKAGE_DIR/bin/graphicalmatrix-admin-audit-prepare.sh"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/sp-management.properties.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew"
   need_file "$PACKAGE_DIR/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew"
