@@ -33,7 +33,15 @@ bool_true() {
 }
 
 timestamp() {
-  date -Is 2>/dev/null || date -u '+%Y-%m-%dT%H:%M:%SZ'
+  local value offset
+  value="$(date '+%Y-%m-%dT%H:%M:%S%z')" || return 1
+  [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4}$ ]] || return 1
+  offset="${value:19:5}"
+  if [[ "$offset" == +0000 || "$offset" == -0000 ]]; then
+    printf '%sZ' "${value:0:19}"
+  else
+    printf '%s%s:%s' "${value:0:19}" "${offset:0:3}" "${offset:3:2}"
+  fi
 }
 
 sha256_file() {
@@ -51,7 +59,9 @@ mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$LOCK_FILE")"
 chmod 0600 "$LOG_FILE"
 
 log() {
-  printf 'ts=%s %s\n' "$(timestamp)" "$*" >> "$LOG_FILE"
+  local timestamp_value
+  timestamp_value="$(timestamp)" || { echo 'ERROR: cannot format CSV log timestamp' >&2; return 1; }
+  printf 'ts=%s %s\n' "$timestamp_value" "$*" >> "$LOG_FILE"
 }
 
 fail() {

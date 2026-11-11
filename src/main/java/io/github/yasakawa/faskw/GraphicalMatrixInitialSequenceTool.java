@@ -26,7 +26,15 @@ public final class GraphicalMatrixInitialSequenceTool {
     public static void main(final String[] args) {
         if (args.length != 3) { throw new IllegalArgumentException("Expected operation IDP_HOME USER"); }
         try { run(args[0], args[1], args[2]); }
-        catch (Exception ex) { System.err.println("Enrollment update failed: " + ex.getMessage()); System.exit(1); }
+        catch (GraphicalMatrixAdminAuditClient.AuditAfterCommitException ex) {
+            System.err.println("DB committed; audit incomplete. Do not rerun blindly."); System.exit(74);
+        }
+        catch (Exception ex) {
+            final String candidate = java.util.Objects.toString(ex.getMessage(), "").split(":", 2)[0];
+            final String reason = java.util.Set.of("USER_NOT_FOUND", "INITIAL_SEQUENCE_REQUIRED", "INITIAL_CHANGE_REQUIRED", "ENROLLMENT_CHANGED").contains(candidate)
+                ? candidate : "ENROLLMENT_UPDATE_FAILED";
+            System.err.println("Enrollment update failed: " + reason); System.exit(1);
+        }
     }
 
     static void run(final String operation, final String home, final String user) throws Exception {
@@ -45,8 +53,8 @@ public final class GraphicalMatrixInitialSequenceTool {
         Class.forName(db.getDriver());
         try (Connection c = DriverManager.getConnection(db.getUrl(), db.getUser(), db.getPassword())) {
             c.setAutoCommit(false);
-            try {
-                if (db.isAutoInit()) { GraphicalMatrixSequenceMigrationTool.initSchema(c); }
+            if (db.isAutoInit()) { GraphicalMatrixSequenceMigrationTool.initSchema(c); }
+            try (var audit = GraphicalMatrixAdminAuditClient.transaction(c, "ENROLLMENT_WRITE")) {
                 String initial = null;
                 String current = null;
                 long version = -1;
@@ -67,6 +75,7 @@ public final class GraphicalMatrixInitialSequenceTool {
                     try (PreparedStatement ps = c.prepareStatement("INSERT INTO graphicalmatrix_enrollment (user_id,sequence,initial_sequence,force_sequence_change,status,created_at,updated_at,state_version) VALUES (?,?,?,1,'ACTIVE',?,?,1)")) {
                         ps.setString(1, user); ps.setString(2, encoded); ps.setString(3, bootstrap);
                         ps.setLong(4, now); ps.setLong(5, now); ps.executeUpdate();
+                        force = 1;
                     }
                 } else {
                     Math.addExact(version, 1L);
@@ -100,8 +109,19 @@ public final class GraphicalMatrixInitialSequenceTool {
                         if (ps.executeUpdate() != 1) { throw new IllegalStateException("ENROLLMENT_CHANGED"); }
                     }
                 }
-                c.commit();
-            } catch (Exception ex) { c.rollback(); throw ex; }
+                final var changes = new java.util.EnumMap<GraphicalMatrixCliOperationReport.Field, String>(GraphicalMatrixCliOperationReport.Field.class);
+                changes.put(GraphicalMatrixCliOperationReport.Field.STATE_VERSION, Long.toString(version < 0 ? 1 : version + 1));
+                changes.put(GraphicalMatrixCliOperationReport.Field.FORCE_SEQUENCE_CHANGE, Integer.toString(force));
+                if (List.of("current", "reset").contains(operation)) { changes.put(GraphicalMatrixCliOperationReport.Field.SEQUENCE_CHANGED, "true"); }
+                if (operation.equals("initial") || version < 0) { changes.put(GraphicalMatrixCliOperationReport.Field.INITIAL_SEQUENCE_CHANGED, "true"); }
+                if (List.of("current", "reset").contains(operation)) { changes.put(GraphicalMatrixCliOperationReport.Field.STATUS, "ACTIVE"); }
+                if (operation.equals("reset")) {
+                    changes.put(GraphicalMatrixCliOperationReport.Field.MFA_METHOD, "GraphicalMatrix");
+                    changes.put(GraphicalMatrixCliOperationReport.Field.SEED_SET, "false");
+                    changes.put(GraphicalMatrixCliOperationReport.Field.LOCKED_UNTIL, "0");
+                }
+                audit.commit(List.of(GraphicalMatrixCliOperationReport.changed(user, 1, changes)));
+            }
         }
     }
 }

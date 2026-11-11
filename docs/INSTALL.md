@@ -993,6 +993,21 @@ graphicalsフォルダにあるイメージファイルは公開用のもので�
 
 
 ## 8. DB設定
+
+### 管理CLI監査の準備（v1.4.2以降）
+
+利用者をCLIで追加・変更する前に、展開済み配布物から実行する。
+
+```bash
+sudo bash ./bin/graphicalmatrix-admin-audit-prepare.sh --apply
+```
+
+既存logを消さず、`/var/log/2faskw/admin-audit.log`と安定したlockを
+`root:graphicalmatrix-admin 0660`で準備する。以後、管理CLIの親はrootまたは信頼済み管理アカウントで
+実行する。H2内部workerを動かすJettyへ、この監査グループを付与しない。
+専用設定は`conf/graphicalmatrix/admin-audit.properties`、詳細は
+[ADMIN-TOOLS.md](./ADMIN-TOOLS.md#63-cli監査ログ)を参照する。未準備なら更新は停止するが、
+このlogの書込み権限をJetty起動や通常SSOの条件に追加する変更ではない。
 [DBのインストールはINSTALL_DB.mdを参照してください。](./INSTALL_DB.md)
 
 PostgreSQLを利用する場合は、先に [INSTALL_DB.md](./INSTALL_DB.md) のDB構築、VIP、

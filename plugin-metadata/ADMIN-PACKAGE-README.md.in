@@ -23,6 +23,14 @@ sudo ./bin/graphicalmatrix-admin-install.sh \
 
 導入後、DB接続情報、credential、`admin.properties`を環境に合わせて設定してください。
 
+v1.4.2以降はインストーラーが`/var/log/2faskw/admin-audit.log`と安定したlockを非破壊で準備します。
+管理CLI更新とCSV exportの専用監査は必須です。親CLIをrootまたは信頼済み管理アカウントで
+実行し、service運用では`graphicalmatrix-admin`グループとDB／鍵の読取り権限を確認してください。
+H2 worker用のJettyへ監査権限を追加する必要はありません。
+終了73は更新前の監査不能、74はDB更新済み／不明な状態での監査不完全です。
+74を受けたCSVを無条件に再投入しないでください。専用logrotateサンプルはrename/create方式で、
+`copytruncate`を使用しません。詳細は公式文書を参照してください。
+
 ## 詳細文書
 
 - 導入・運用: https://github.com/y-asakawa/2faskw/blob/main/docs/ADMIN-TOOLS.md

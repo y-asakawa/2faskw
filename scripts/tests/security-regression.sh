@@ -24,6 +24,16 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
+# Mandatory audit is exercised against an owner-injected TEST fixture, never disabled in production.
+export GM_REAL_JAVA="${JAVA:-$(command -v java)}"
+pg_jar="$(find "$HOME/.m2/repository/org/postgresql/postgresql" -name 'postgresql-*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | tail -n 1)"
+export GM_AUDIT_RUNTIME_CP="$ROOT/target/test-classes:$pg_jar"
+[[ -f "$ROOT/target/test-classes/io/github/yasakawa/faskw/GraphicalMatrixAdminAuditFixture.class" ]] \
+  || { echo 'ERROR: run mvn test-compile before security regressions' >&2; exit 1; }
+mkdir -p "$TMP/audit-java"
+ln -s "$ROOT/scripts/tests/audit-java-fixture.sh" "$TMP/audit-java/java"
+export PATH="$TMP/audit-java:$PATH"
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -176,7 +186,7 @@ EOF
 
   local output
   output="$(GRAPHICALMATRIX_HOME="$home" SEQUENCE_TOOL_CP="$ROOT/target/classes" \
-    PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
+    PATH="$TMP/audit-java:$PATH" \
     bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" --provisioning)"
   grep -q 'initial_sequence=\[protected-or-unset\]' <<< "$output" \
     || fail "CSV preview did not mask the initial sequence: $output"
@@ -195,7 +205,7 @@ test_csv_sequence_is_not_forwarded_in_process_arguments() {
   local secret_sequence="img01,img02,img03,img04"
   local h2_jar="$HOME/.m2/repository/com/h2database/h2/2.3.232/h2-2.3.232.jar"
   local real_java
-  real_java="$(PATH="/opt/homebrew/opt/openjdk/bin:$PATH" command -v java)"
+  real_java="$GM_REAL_JAVA"
   [[ -n "$real_java" ]] || fail "Java is required for CSV argument isolation test"
   [[ -f "$h2_jar" ]] || fail "H2 test jar is missing: $h2_jar"
   mkdir -p "$home/conf/graphicalmatrix" "$home/credentials" "$test_bin"
@@ -230,7 +240,7 @@ if [[ " $* " == *" io.github.yasakawa.faskw.GraphicalMatrixSequenceTool encode-s
   builtin printf '%s\n' 'kw1:test-only-encoded-value'
   exit 0
 fi
-exec "$GM_REAL_JAVA" "$@"
+exec "$GM_AUDIT_JAVA_BRIDGE" "$@"
 EOF
   cat > "$test_bin/id" <<'EOF'
 #!/usr/bin/env bash
@@ -247,6 +257,7 @@ EOF
   SEQUENCE_TOOL_CP="$ROOT/target/classes" \
   H2_JAR="$h2_jar" \
   GM_REAL_JAVA="$real_java" \
+  GM_AUDIT_JAVA_BRIDGE="$ROOT/scripts/tests/audit-java-fixture.sh" \
   GM_JAVA_ARGS_LOG="$args_log" \
   GM_JAVA_STDIN_LOG="$stdin_log" \
   PATH="$test_bin:/opt/homebrew/opt/openjdk/bin:$PATH" \
@@ -256,6 +267,7 @@ EOF
   SEQUENCE_TOOL_CP="$ROOT/target/classes" \
   H2_JAR="$h2_jar" \
   GM_REAL_JAVA="$real_java" \
+  GM_AUDIT_JAVA_BRIDGE="$ROOT/scripts/tests/audit-java-fixture.sh" \
   GM_JAVA_ARGS_LOG="$args_log" \
   GM_JAVA_STDIN_LOG="$stdin_log" \
   PATH="$test_bin:/opt/homebrew/opt/openjdk/bin:$PATH" \
@@ -293,7 +305,7 @@ action,user_id,mfa_method,force_sequence_change,initial_sequence,sequence
 A,alice,GraphicalMatrix,off,"img01,img02,img03,img04","img04,img03,img02,img01"
 EOF
   if GRAPHICALMATRIX_HOME="$home" SEQUENCE_TOOL_CP="$ROOT/target/classes" \
-      PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
+      PATH="$TMP/audit-java:$PATH" \
       bash "$ROOT/graphicalmatrix-db.sh" csv "$csv" > "$TMP/unordered.out" 2>&1; then
     fail "unordered-equivalent bootstrap was accepted without forced change"
   fi
@@ -335,7 +347,7 @@ graphicalmatrix.sequence.storage=keyword
 graphicalmatrix.sequence.keyword=test-only-keyword
 EOF
 
-  PATH="/opt/homebrew/opt/openjdk/bin:$test_bin:$PATH"
+  PATH="$TMP/audit-java:$test_bin:$PATH"
   local cp="$ROOT/target/classes:$h2_jar"
   GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$PATH" \
     bash "$ROOT/graphicalmatrix-db.sh" add alice A B C D >/dev/null
@@ -425,7 +437,7 @@ graphicalmatrix.sequence.keyword=test-only-keyword
 EOF
 
   local path cp dry_run row
-  path="/opt/homebrew/opt/openjdk/bin:$test_bin:$PATH"
+  path="$TMP/audit-java:$test_bin:$PATH"
   cp="$ROOT/target/classes:$h2_jar"
   GRAPHICALMATRIX_HOME="$home" H2_JAR="$h2_jar" SEQUENCE_TOOL_CP="$cp" PATH="$path" \
     bash "$ROOT/graphicalmatrix-db.sh" add pending-user img01,img02,img03,img04 >/dev/null
@@ -550,6 +562,7 @@ test_csv_sequence_is_not_forwarded_in_process_arguments
 test_csv_rejects_equivalent_unordered_bootstrap_without_force
 bash "$ROOT/scripts/tests/db-reset-confirmation-regression.sh"
 bash "$ROOT/scripts/tests/db-webauthn-display-regression.sh"
+bash "$ROOT/scripts/tests/log-timezone-regression.sh"
 test_management_reset_restores_plaintext_initial_factor
 test_pending_totp_invalidation_requires_apply_and_clears_binding
 test_h2_password_is_not_forwarded_in_process_arguments

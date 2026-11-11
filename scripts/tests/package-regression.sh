@@ -76,7 +76,37 @@ for archive in sys.argv[1:]:
             name = pathlib.PurePosixPath(entry).name
             if name.endswith(".jar") and name.startswith(test_only):
                 raise SystemExit(f"test-only WebAuthn dependency is bundled: {archive}: {entry}")
+            if name.startswith("2faskw-idp-plugin-") and name.endswith(".jar"):
+                import io
+                with zipfile.ZipFile(io.BytesIO(package.read(entry))) as jar:
+                    entries = set(jar.namelist())
+                    for component in ("AdminAuditWriter", "AdminAuditTool", "AdminAuditClient", "CliOperationReport", "CliSqlCommand", "LogTimestamp"):
+                        required = f"io/github/yasakawa/faskw/GraphicalMatrix{component}.class"
+                        if required not in entries:
+                            raise SystemExit(f"administrative audit class is missing: {archive}: {required}")
+                    if "io/github/yasakawa/faskw/GraphicalMatrixAdminAuditFixture.class" in entries:
+                        raise SystemExit("test-only audit ownership fixture is bundled")
 PY
+
+# The extracted CLI must fail closed before attempting a database write with invalid audit configuration.
+unzip -q "$ADMIN_FIXED" -d "$TMP/admin-audit-runtime"
+AUDIT_HOME="$TMP/admin-audit-runtime/$ADMIN_ROOT"
+printf '%s\n' 'graphicalmatrix.admin.audit.logFile=relative-audit.log' \
+  'graphicalmatrix.admin.audit.lockFile=relative-audit.lock' > "$AUDIT_HOME/conf/graphicalmatrix/admin-audit.properties"
+printf '%s\n' 'graphicalmatrix.db.driver=org.postgresql.Driver' \
+  'graphicalmatrix.db.url=jdbc:postgresql://127.0.0.1:1/not-a-real-database' \
+  'graphicalmatrix.db.user=audit-probe' 'graphicalmatrix.db.autoInit=false' \
+  > "$AUDIT_HOME/conf/graphicalmatrix/db.properties"
+audit_rc=0
+audit_java="${JAVA:-$(command -v java)}"
+GRAPHICALMATRIX_HOME="$AUDIT_HOME" DB_PROPERTIES="$AUDIT_HOME/conf/graphicalmatrix/db.properties" \
+  GRAPHICAL_PROPERTIES="$AUDIT_HOME/conf/graphicalmatrix/graphicalmatrix.properties.adminnew" \
+  PATH="$(dirname "$audit_java"):$PATH" \
+  bash "$AUDIT_HOME/bin/graphicalmatrix-db.sh" disable audit-probe > "$TMP/admin-audit-preflight.txt" 2>&1 || audit_rc=$?
+if [[ "$audit_rc" != 73 ]]; then
+  cat "$TMP/admin-audit-preflight.txt" >&2
+  fail "extracted CLI did not reject invalid audit configuration before DB access, rc=$audit_rc"
+fi
 
 # Exercise managed JSON loading through the extracted launcher's packaged classpath.
 unzip -q "$SP_IMPORT_FIXED" -d "$TMP/sp-import-runtime"
@@ -136,6 +166,8 @@ archive = pathlib.Path(sys.argv[1])
 expected_root = sys.argv[2]
 required = {
     f"{expected_root}/bin/graphicalmatrix-sp.sh",
+    f"{expected_root}/bin/graphicalmatrix-admin-audit-prepare.sh",
+    f"{expected_root}/conf/graphicalmatrix/admin-audit.properties.idpnew",
     f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew",
     f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.css.idpnew",
     f"{expected_root}/conf/graphicalmatrix/assets/graphicalmatrix.js.idpnew",
@@ -146,6 +178,7 @@ required = {
     f"{expected_root}/examples/logrotate/graphicalmatrix-sp-management-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-access-audit",
     f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-admin-audit",
     f"{expected_root}/examples/authn-events-flow.xml",
     f"{expected_root}/examples/mfa-authn-config.xml",
     f"{expected_root}/views/webauthn/webauthn-authn.vm.idpnew",
@@ -158,6 +191,12 @@ with zipfile.ZipFile(archive) as zf:
     mode = (zf.getinfo(f"{expected_root}/bin/graphicalmatrix-sp.sh").external_attr >> 16) & 0xFFFF
     if not mode & stat.S_IXUSR:
         raise SystemExit("SP management CLI is not executable")
+    audit_mode = (zf.getinfo(f"{expected_root}/bin/graphicalmatrix-admin-audit-prepare.sh").external_attr >> 16) & 0xFFFF
+    if not audit_mode & stat.S_IXUSR:
+        raise SystemExit("audit preparation helper is not executable")
+    rotation = zf.read(f"{expected_root}/examples/logrotate/graphicalmatrix-admin-audit").decode("utf-8")
+    if any(line.strip() == "copytruncate" for line in rotation.splitlines()) or "create 0660 root graphicalmatrix-admin" not in rotation:
+        raise SystemExit("CLI audit must use rename/create with protected ownership")
     config = zf.read(
         f"{expected_root}/conf/graphicalmatrix/sp-management.properties.idpnew"
     ).decode("utf-8")
@@ -283,12 +322,15 @@ required = {
     f"{expected_root}/THIRD-PARTY-NOTICES.md",
     f"{expected_root}/bin/graphicalmatrix-db.sh",
     f"{expected_root}/bin/graphicalmatrix-admin-install.sh",
+    f"{expected_root}/bin/graphicalmatrix-admin-audit-prepare.sh",
     f"{expected_root}/bin/graphicalmatrix-csv-import-runner.sh",
     f"{expected_root}/conf/graphicalmatrix/graphicalmatrix.properties.adminnew",
+    f"{expected_root}/conf/graphicalmatrix/admin-audit.properties.adminnew",
     f"{expected_root}/conf/graphicalmatrix/ldap.properties.adminnew",
     f"{expected_root}/conf/graphicalmatrix/postgresql-schema.sql",
     f"{expected_root}/examples/logrotate/README.md",
     f"{expected_root}/examples/logrotate/graphicalmatrix-csv-import",
+    f"{expected_root}/examples/logrotate/graphicalmatrix-admin-audit",
     f"{expected_root}/package-metadata/PACKAGE-CONTENTS.txt",
     f"{expected_root}/package-metadata/PACKAGE-MANIFEST.sha256",
 }

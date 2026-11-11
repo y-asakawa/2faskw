@@ -41,6 +41,9 @@ public final class GraphicalMatrixSequenceMigrationTool {
             if (errors > 0) {
                 System.exit(1);
             }
+        } catch (GraphicalMatrixAdminAuditClient.AuditAfterCommitException ex) {
+            System.err.println("DB committed; audit incomplete. Do not rerun blindly.");
+            System.exit(74);
         } catch (Exception ex) {
             System.err.println("ERROR: " + ex.getMessage());
             System.exit(1);
@@ -102,10 +105,19 @@ public final class GraphicalMatrixSequenceMigrationTool {
                 }
                 if (summary.errors > 0) { conn.rollback(); break; }
                 if (apply) {
-                    applyMigrations(conn, migrations);
-                    conn.commit();
+                    try (var audit = GraphicalMatrixAdminAuditClient.transaction(conn, "MIGRATE_SEQUENCE_BATCH")) {
+                        applyMigrations(conn, migrations);
+                        audit.commit(migrations.stream().map(m -> GraphicalMatrixCliOperationReport.changed(m.userId, 1,
+                            java.util.Map.of(GraphicalMatrixCliOperationReport.Field.STORAGE_MODE, targetMode,
+                                GraphicalMatrixCliOperationReport.Field.SEQUENCE_CHANGED, "true"))).toList());
+                    }
                     summary.applied += migrations.size();
-                } else { conn.rollback(); }
+                } else {
+                    conn.rollback();
+                    GraphicalMatrixAdminAuditClient.send("PLAN", "MIGRATE_SEQUENCE_BATCH", "NOT_ATTEMPTED",
+                        migrations.stream().map(m -> GraphicalMatrixCliOperationReport.changed(m.userId, 0,
+                            java.util.Map.of(GraphicalMatrixCliOperationReport.Field.STORAGE_MODE, targetMode))).toList());
+                }
             }
 
             printSummary(apply, targetMode, summary);
@@ -114,6 +126,15 @@ public final class GraphicalMatrixSequenceMigrationTool {
     }
 
     static void initSchema(final Connection conn) throws Exception {
+        if (GraphicalMatrixAdminAuditClient.active()) {
+            try (var audit = GraphicalMatrixAdminAuditClient.transaction(conn, "SCHEMA_INIT")) {
+                ensureSchema(conn);
+                audit.commit(List.of());
+            }
+        } else { ensureSchema(conn); }
+    }
+
+    private static void ensureSchema(final Connection conn) throws Exception {
         try (Statement st = conn.createStatement()) {
             st.execute("CREATE TABLE IF NOT EXISTS graphicalmatrix_enrollment ("
                 + "user_id VARCHAR(255) PRIMARY KEY,"

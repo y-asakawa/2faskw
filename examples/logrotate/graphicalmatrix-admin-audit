@@ -1,0 +1,13 @@
+# This stable lock is not rotated: /var/log/2faskw/admin-audit.lock
+# The CLI opens and closes the log for every durable batch. Do not use copytruncate.
+/var/log/2faskw/admin-audit.log {
+    daily
+    rotate 180
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d
+    create 0660 root graphicalmatrix-admin
+}

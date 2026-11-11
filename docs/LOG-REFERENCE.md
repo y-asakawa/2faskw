@@ -8,11 +8,45 @@
 パスワード、GraphicalMatrix sequence、TOTP seed、API bearer token、WebAuthnの秘密鍵は
 ログに記録してはならない。
 
+<a id="log-timezone"></a>
+
+## 日時の共通ルール（v1.4.2以降）
+
+2FAS-KW独自ログの`ts`は、実行環境のシステムタイムゾーンを使うISO-8601日時へ統一する。
+対象は`graphicalmatrix-audit.log`、`graphicalmatrix-sp-management-audit.log`、
+`graphicalmatrix-access-audit.log`、`admin-audit.log`、`csv-import.log`である。
+Java側は共通の`GraphicalMatrixLogTimestamp`で`ZoneId.systemDefault()`を使用し、
+CSV runnerはOSの`date`で同じオフセット表記を出力する。
+
+```text
+OSがUTC: ts=2026-11-05T01:43:30.518Z
+OSがJST: ts=2026-11-05T10:43:30.518+09:00
+```
+
+上の2つは同じ瞬間である。`Z`または数値オフセットを必ず残し、タイムゾーン不明のローカル日時や
+`JST`という略称だけにはしない。Java側は元の小数秒精度を維持し、CSV runnerは秒精度で記録する。
+監査の書込み条件、秘密値の除外、ログの保持・rotationは変更しない。
+
+- 通常はOSの設定に追随するが、Javaの`-Duser.timezone`、環境変数`TZ`、container内の設定が
+  ある場合は、その実行環境の設定が使われる。IdP、CLI、CSV serviceで意図しない上書きがないか確認する。
+- OSのタイムゾーン変更後はJettyと長時間実行するJavaサービスを再起動する。CLIは次回起動時、
+  CSV runnerは次の実行から確認する。実行中JVMがOS設定変更を即座に再読込みするとは限らない。
+- 既存のUTCログは書き換えない。同じファイルに旧UTC行と新しいオフセット行が混在してもDashboardは
+  同じ絶対時刻として読み込む。文字列だけで時刻順を比較せず、オフセットを解釈する。
+- DBのepoch値、MFA完了detail、TOTPの時刻計算、API／索引のUTC日時、移行run IDやmetadataの日時は
+  表示ログとは別の契約なので変更しない。Dashboard画面の表示は従来どおりブラウザのタイムゾーンによる。
+- `graphicalmatrix-db.sh`の`GRAPHICALMATRIX_TIME_ZONE`は一覧等の表示用であり、監査ログの設定ではない。
+
+IdP標準ログはIdPのlogback、Jetty／Dashboard等のjournalはOS、Apache／PHP等は各製品の設定が
+時刻表記を管理する。2FAS-KWから既存設定を無条件に上書きしない。これらにUTC固定の設定がある場合は
+別途確認する。監査ログの形式変更とは別に、NTPによるOS時計の同期は引き続き必要である。
+
 ## 1. ログ一覧
 
 | ログまたは出力先 | 既定パス・確認方法 | 出力元 | 主な用途 |
 | --- | --- | --- | --- |
 | GraphicalMatrix監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-audit.log` | GraphicalMatrix認証、自己管理、変更画面、管理API | MFA challenge、照合、ロック、自己管理、API操作の追跡。Dashboardの入力正本。 |
+| 管理CLI操作監査ログ | `/var/log/2faskw/admin-audit.log` | v1.4.2の`graphicalmatrix-db.sh`、同じCLIを使うCSV runner | 管理者の操作、対象、DB確定結果。IdPとAdmin Toolsをdeployment_idで区別する。 |
 | SP管理監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-sp-management-audit.log` | `graphicalmatrix-sp.sh` | SP追加、更新、adopt、rollback、削除などの管理操作の追跡。 |
 | SP別アクセス制御監査ログ | `/opt/shibboleth-idp/logs/graphicalmatrix-access-audit.log` | IdPのSP別属性アクセス制御 | SP別アクセス許可・拒否の判定確認。 |
 | CSVプロビジョニングログ | `/opt/graphicalmatrix-admin/logs/csv-import.log` | Admin Tools CSV runner | CSVの受信、dry-run、反映、失敗、SHA-256の追跡。Admin Tools導入時のみ。 |
@@ -25,11 +59,50 @@
 別ログであり、Dashboardは既定で`graphicalmatrix-audit.log`だけを取り込む。SP管理ログやCSVログを
 Dashboardへ自動的に取り込む機能は、現時点ではない。
 
+## 管理CLI操作監査（v1.4.2）
+
+更新前の`ADMIN_CLI_START`、確定後の利用者別`ADMIN_CLI_CHANGE`、最終`ADMIN_CLI_END`を
+`op_id`で関連付ける。オフセット付きの`ts`、順序`seq`、host、deployment_id、action、mode、target_user、
+実OS UID/EUID、db_result、matched_rows／changed_rows、安全な変更項目を記録する。
+空白、改行、`=`、`%`等の値はUTF-8 byte単位でpercent-encodeする。例は省略したフィールドを含む。
+
+| 識別項目 | 意味・生成方法 | 注意点 |
+| --- | --- | --- |
+| `host`、`deployment_id` | 実行ホスト名と、導入先の実パスをSHA-256にした値。 | 別ホストでも同じ実パスなら同じdeployment IDになる。両方を組み合わせる。 |
+| `db_target_id` | 設定上のDB接続先から生成するSHA-256。PostgreSQLはhost・port・DB pathを使い、認証情報やquery parameterを含めない。 | 実DB固有IDではない。IP／名前、port省略／明示で値が変わり得る一方、同じproxy接続先ならbackend変更後も同じ値になり得る。 |
+| `op_id` | CLIの実行ごとに生成するUUID。START・CHANGE・ENDを関連付ける。 | 再実行は別IDになる。二重実行の防止やDB更新成功を保証しない。 |
+| `parent_op_id` | `SCHEMA_INIT`等の子処理から親CLIへの参照。親なしは`none`。 | 子処理は別`op_id`で追う。CSVのdry-runとapplyは別実行なので別IDとなる。 |
+| `seq` | 親CLIの監査状態が割り当てる増加番号。 | 子処理とも共有するため、1つの`op_id`で絞ると欠番になり得る。DB世代番号ではない。 |
+
+これらは追跡用の識別値であり、署名や処理の整合性を保証する値ではない。
+確定結果は`result`と`db_result`を確認する。H2の生成規則、設定表記の違い、fallback、検索例は
+[開発者向けログ設計](./development/LOGGING.md)を参照する。
+
+```text
+format=1 ts=2026-11-02T01:00:00Z op_id=example action=RESET mode=APPLY target_user=user001 event=ADMIN_CLI_CHANGE stage=ENROLLMENT_WRITE result=SUCCESS db_result=COMMITTED matched_rows=1 changed_rows=1 changes=sequence_changed:true,seed_set:false
+```
+
+`SUDO_USER`は`invoker_source=unverified_environment`のclaimであり、実行者本人を保証しない。
+`NO_MATCH`は対象0件、`PLANNED`は未適用、`CANCELLED`は確認で中止、`PARTIAL`は一部段階まで確定、
+`UNKNOWN`はcommit応答不明／完了receipt欠落である。`FAILED`でも`db_result=COMMITTED`なら、
+後続表示等で失敗しただけでDB変更済みである。CSV成功は全行commit後にだけ記録する。
+CSV SHA-256は同一snapshotの相関用であり、ファイルの真正性の証明ではない。
+`SCHEMA_INIT`は独立op_idで親opへ関連付け、照会・PLANでもDDLを行えば記録する。
+初期画像列、保護済み画像列、seed、鍵、SQL、raw argv、stdout／stderrは転記しない。
+
+終了73なら更新前の監査準備を確認する。74ならDB更新済みまたは不明なので、同じCSVやRESETを
+無条件に再実行しない。STARTだけでENDがない場合も成功／rollbackを推測しない。
+既定は専用ローカルファイルで、syslog複送は明示設定時のみ。直接SQL、内部Java直接呼出し、
+DB全体復元、LDAP外部操作、公式WebAuthn画面の監査を代替しない。書込み権限者による改変耐性も保証しない。
+導入とrotationは[ADMIN-TOOLS.md](./ADMIN-TOOLS.md#63-cli監査ログ)、[LOGROTATE.md](./LOGROTATE.md)を参照する。
+Dashboardの既存parserへ自動取込する変更はない。
+
 ## 2. GraphicalMatrix監査ログ
 
 ### 2.1 形式とフィールド
 
-1行に1 eventを記録するkey=value形式である。時刻はUTCのISO-8601形式である。
+1行に1 eventを記録するkey=value形式である。v1.4.2以降の時刻は上記の共通ルールに従う。
+以下の`Z`付き例はUTC環境、または従来版の出力例である。
 
 ```text
 ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 session=node0... challenge=abc123 detail=matched
@@ -37,7 +110,7 @@ ts=2026-08-05T01:23:45.678Z event=VERIFY user=user001 result=OK ip=192.0.2.10 se
 
 | フィールド | 意味 | 注意 |
 | --- | --- | --- |
-| `ts` | eventを記録したUTC時刻 | OSのローカル時刻とは異なる場合がある。Dashboardはこの値を集計時刻に使う。 |
+| `ts` | eventの瞬間をシステムタイムゾーンで表した日時 | `Z`または数値オフセット付き。Dashboardは絶対時刻へ正規化して集計する。 |
 | `event` | 操作種別 | 下表を参照。 |
 | `user` | 認証・操作対象のユーザーID | 不明な場合は`-`。 |
 | `result` | 操作結果または拒否理由の分類 | eventごとに取り得る値が異なる。 |
@@ -293,7 +366,7 @@ Dashboardのイベント保持期間は、元ログの保存期間とは別設�
 - IdP nodeごとにファイル・host・node IDを区別し、複数ノードのeventを混在させない。
 - ログ閲覧者にTOTP seed、password、API tokenを出力する運用を作らない。
 - 送信元IPとユーザーIDのマスキング・hash化は、インシデント調査とのトレードオフを合意してから行う。
-- ログ書込み失敗は認証を停止させない設計である。監査ログの欠落を監視し、書込み権限・容量・rotation後の所有者を定期確認する。
+- 認証用ログの書込み失敗は認証を停止させない。管理CLIの必須監査は別契約で、更新前は停止、確定後は監査不完全を明示する。書込み権限・容量・rotation後の所有者を定期確認する。
 
 ## 8. Dashboardとの関係
 

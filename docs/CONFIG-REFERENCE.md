@@ -13,6 +13,11 @@ Shibboleth IdPへ統合する主要な認証Flow設定ファイルのリファ�
 - パスは、IdP側では `/opt/shibboleth-idp`、Admin Tools側では `/opt/graphicalmatrix-admin` を基準にする。
 - LDAPやIdP attribute resolverで取得できる氏名などの表示属性は、MFA DBへ重複保存しない設計を優先する。
 
+v1.4.2以降の独自ログは、JavaのシステムタイムゾーンまたはCSV runnerのOS設定に従い、
+ISO-8601の`Z`／数値オフセットを付ける。専用のtimezoneプロパティは追加しない。
+Javaの`-Duser.timezone`や`TZ`による上書き、OS変更後の再起動、第三者製品ログとの違いは
+[LOG-REFERENCE.md](./LOG-REFERENCE.md#log-timezone)を参照する。
+
 ## graphicalmatrix.properties
 
 GraphicalMatrixの画面、画像、sequence保存方式、View外部化を制御する。
@@ -269,6 +274,24 @@ MFA状態検査の拒否理由をShibboleth WebFlowで処理するため、次�
 既存のcustom event、end-state、global transitionを削除してはならない。配布物の
 `examples/authn-events-flow.xml`を参照し、上記2イベントだけを既存ファイルへ統合する。
 `local-unattended-install.sh`は既存要素を保持し、不足する2イベントだけを自動マージする。
+
+## admin-audit.properties
+
+v1.4.2の管理CLI専用。IdPは`/opt/shibboleth-idp/conf/graphicalmatrix/admin-audit.properties`、
+Admin Toolsは`/opt/graphicalmatrix-admin/conf/graphicalmatrix/admin-audit.properties`へ配置する。
+設定ファイルはroot所有でgroup/other書込み不可とする。ファイル省略時も下記の既定監査を行い、
+無効化にはならない。CLIの次回実行から読む。Jetty認証用設定検査に監査ファイルの書込みを要求しない。
+
+| Property | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `graphicalmatrix.admin.audit.logFile` | absolute path | `/var/log/2faskw/admin-audit.log` | 通常ファイル、root:graphicalmatrix-admin、0660。symlink/hardlink不可。 |
+| `graphicalmatrix.admin.audit.lockFile` | absolute path | `/var/log/2faskw/admin-audit.lock` | logと同じroot管理ディレクトリ。別ファイルで、rotationしない。 |
+| `graphicalmatrix.admin.audit.lockTimeoutMillis` | integer | `3000` | 100〜10000ms。ファイルlockの待ち時間であり、DBやfsync全体のtimeoutではない。 |
+| `graphicalmatrix.admin.audit.mirrorSyslog` | boolean | `false` | `true`時に安全な同一metadataをloggerで複送する。ローカル必須監査の代替ではなく、遠隔永続化の保証でもない。大量CSVでは転送処理の時間も評価する。 |
+
+`enabled=false`、`--no-audit`、環境変数による監査保存先変更は提供しない。
+IdP、Standalone双方で同じ既定logを使用し、`deployment_id`で導入先を識別する。
+準備・終了コード・権限の境界は[ADMIN-TOOLS.md](./ADMIN-TOOLS.md#63-cli監査ログ)を参照する。
 
 ## admin.properties
 
