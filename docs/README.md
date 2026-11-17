@@ -106,7 +106,7 @@ plugin metadata、OpenAPI、配布物内ドキュメントへ同じバージョ�
 | [ADMIN-TOOLS.md](./ADMIN-TOOLS.md) | 管理CLI、Admin Tools 単体導入、CSV import/export、監査ログの運用説明。 |
 | [release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md](./release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md) | v1.4.2の管理CLI監査ログ詳細設計・実装記録。RESET等の対象・実行主体・確定結果、CSV／migration、秘密値除外とログ障害時の契約。 |
 | [release-notes/v1.4.1-RELEASE-NOTES.md](./release-notes/v1.4.1-RELEASE-NOTES.md) | v1.4.1統合リリースノート。N1〜N4の仕様・詳細設計、移行・切戻し、性能影響、ローカル／テスト環境検証結果と未確認範囲。テスト環境適用済み・未公開。 |
-| [release-notes/v1.5-MFA-SUCCESS-RECORD.md](./release-notes/v1.5-MFA-SUCCESS-RECORD.md) | 共通MFA成功日時・監査・Dashboard集約のローカル実装ノート。正式リリース番号未確定。 |
+| [release-notes/v1.4.1-MFA-SUCCESS-RECORD.md](./release-notes/v1.4.1-MFA-SUCCESS-RECORD.md) | v1.4.1の共通MFA成功日時・監査・Dashboard集約。v1.4.2のCLI監査との境界、ログ時刻の継続仕様も説明する。 |
 | [release-notes/v1.4.0-SP-IMPORT-TOOLS.md](./release-notes/v1.4.0-SP-IMPORT-TOOLS.md) | SP Import Toolsの実装構成、対応範囲、失敗・再実行、配布・ビルド。 |
 | [BACKUP-RESTORE.md](./BACKUP-RESTORE.md) | DB/LDAP、storage-format secret、IdP設定、SP管理情報を同一世代で保存・検証復元する手順。 |
 | [OPERATIONS-RUNBOOK.md](./OPERATIONS-RUNBOOK.md) | 日常点検、変更作業、障害切り分け、security incident初動、復旧完了判定。 |
