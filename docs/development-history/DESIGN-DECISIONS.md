@@ -8,6 +8,70 @@ implementation**. They should not be represented as records written when the ori
 design decisions were first made unless Git history independently establishes that
 fact.
 
+## DD-CLI-AUDIT-001: Keep administrative audit ownership in the CLI parent
+
+- **Status:** Implemented for v1.4.2; unpublished development branch
+- **Area:** Administrative CLI, standalone tools, CSV provisioning
+
+### Decision
+
+Persist a mandatory root-controlled administrative audit outside the IdP tree. The parent CLI owns
+the sink; JDBC workers send typed commit receipts through a short-lived local Unix domain socket.
+H2 workers may run as Jetty without gaining audit write permissions. Existing authentication auditing
+and official factor plugins are unchanged. Audit events exclude credentials and raw SQL/output.
+
+### Rationale and boundaries
+
+A command exit status is not a commit receipt: display or connection close can fail after commit.
+Stage receipts preserve partial physical deletion and migration batches, while an unacknowledged commit
+remains UNKNOWN. CSV per-user success is published only after its transaction commits. Primary audit
+failure stops unstarted writes, or reports incomplete auditing after known/possible commit; there is no
+database/filesystem atomic transaction. The root/administrative writer trust boundary is explicit:
+direct SQL, direct Java execution and malicious writers cannot be made tamper-proof by this log.
+
+### Evidence
+
+`GraphicalMatrixAdminAuditTool`, `GraphicalMatrixAdminAuditWriter`, `GraphicalMatrixAdminAuditClient`,
+`GraphicalMatrixCliOperationReport`, `GraphicalMatrixCliSqlCommand`, and their writer/state/CLI/SQL tests.
+See [v1.4.2 implementation design](../release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md).
+
+### Patent-review impact
+
+NO: no change to image selection, credential derivation or authentication algorithms.
+
+## DD-LOG-TIME-001: Use the execution environment's timezone for log presentation
+
+- **Status:** Implemented for v1.4.2; unpublished development branch
+- **Area:** Authentication, SP management, access control, administrative CLI and CSV logs
+
+### Decision
+
+Use `GraphicalMatrixLogTimestamp` for Java audit timestamps and the local `date` offset for
+CSV runner logs. Emit ISO-8601 with `Z` or a numeric offset. Preserve each event's instant and
+Java fractional precision; calculate daylight-saving offsets at that instant. Do not add a
+separate timezone property. JVM/TZ overrides remain effective; restart long-lived JVMs after
+changing the OS timezone.
+
+### Rationale and boundaries
+
+Operators can correlate logs with the host clock without losing unambiguous timestamps.
+Existing UTC lines remain valid alongside offset lines. Dashboard parsers normalize both to
+an instant and retain MFA completion epoch checks. DB values, TOTP calculations, API timestamps,
+registry/metadata and migration IDs are unchanged. IdP logback and other products' logging
+configuration remain administrator-controlled. CSV timestamp failures stop rather than emit
+an empty timestamp or silently fall back to UTC.
+
+### Evidence
+
+`GraphicalMatrixLogTimestampTest`, management/governance audit integration tests,
+`scripts/tests/log-timezone-regression.sh`, and Dashboard parser/completion tests cover UTC,
+JST, fractional/negative offsets, local date boundaries, DST overlap and mixed historical logs.
+See [log timestamp rules](../LOG-REFERENCE.md#log-timezone).
+
+### Patent-review impact
+
+NO: only log presentation changes; authentication algorithms and credential models are unchanged.
+
 ## DD-GM-001: Use image IDs rather than display positions as credential elements
 
 - **Status:** Implemented in v1.3.4

@@ -101,6 +101,8 @@ install -d -m 0755 "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/conf/graphicalmatrix" "$
 install -d -m 0750 "$PREFIX/incoming" "$PREFIX/processing" "$PREFIX/processed" "$PREFIX/failed" "$PREFIX/logs"
 
 install -m 0755 "$PACKAGE_DIR/bin/graphicalmatrix-db.sh" "$PREFIX/bin/graphicalmatrix-db.sh"
+install -m 0755 "$PACKAGE_DIR/bin/graphicalmatrix-admin-audit-prepare.sh" "$PREFIX/bin/graphicalmatrix-admin-audit-prepare.sh"
+"$PREFIX/bin/graphicalmatrix-admin-audit-prepare.sh" --apply
 if [[ -f "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh" ]]; then
   install -m 0755 "$PACKAGE_DIR/bin/graphicalmatrix-db-migration.sh" "$PREFIX/bin/graphicalmatrix-db-migration.sh"
 fi
@@ -153,6 +155,17 @@ fi
 if [[ -d "$PACKAGE_DIR/examples/systemd" ]]; then
   cp -a "$PACKAGE_DIR"/examples/systemd/. "$PREFIX/examples/systemd/"
 fi
+
+audit_template="$PACKAGE_DIR/conf/graphicalmatrix/admin-audit.properties.adminnew"
+if [[ -f "$PREFIX/conf/graphicalmatrix/admin-audit.properties" ]]; then
+  install -o root -g graphicalmatrix-admin -m 0640 "$audit_template" \
+    "$PREFIX/conf/graphicalmatrix/admin-audit.properties.adminnew.${timestamp}"
+else
+  install -o root -g graphicalmatrix-admin -m 0640 "$audit_template" \
+    "$PREFIX/conf/graphicalmatrix/admin-audit.properties"
+fi
+install -d -m 0755 "$PREFIX/examples/logrotate"
+cp -a "$PACKAGE_DIR/examples/logrotate/." "$PREFIX/examples/logrotate/"
 
 echo
 echo "Installed."

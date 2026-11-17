@@ -46,7 +46,7 @@ public final class GraphicalMatrixAuditLogger {
             final String challengeId, final String detail, final HttpServletRequest request, final Instant timestamp) {
         final HttpSession session = request != null ? request.getSession(false) : null;
         final String line =
-            "ts=" + timestamp
+            "ts=" + GraphicalMatrixLogTimestamp.format(timestamp)
             + " event=" + value(event)
             + " user=" + value(user)
             + " result=" + value(result)

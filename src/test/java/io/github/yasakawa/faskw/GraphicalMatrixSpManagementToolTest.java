@@ -33,6 +33,20 @@ class GraphicalMatrixSpManagementToolTest {
     Path temporary;
 
     @Test
+    void managementAndGovernanceAuditUseTheSystemTimezone() throws Exception {
+        prepareIdp();
+        invoke("init", "--apply");
+        invoke("attributes", "resolver", "add", "employeeType", "--apply", "--confirm", "employeeType");
+        final var lines = Files.readAllLines(GraphicalMatrixSpManagementConfig.load(temporary.toString()).auditLogPath());
+        assertTrue(lines.stream().anyMatch(line -> line.contains(" event=SP_INIT ")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains(" event=LDAP_RESOLVER_ATTRIBUTE_ADD ")));
+        for (String line : lines) {
+            final var timestamp = java.time.OffsetDateTime.parse(line.substring(3, line.indexOf(' ')));
+            assertEquals(java.time.ZoneId.systemDefault().getRules().getOffset(timestamp.toInstant()), timestamp.getOffset());
+        }
+    }
+
+    @Test
     void rejectsProfileCreationWhenAnAttributeIsNotCurrentlySamlMapped() throws Exception {
         prepareIdp();
         invoke("init", "--apply");

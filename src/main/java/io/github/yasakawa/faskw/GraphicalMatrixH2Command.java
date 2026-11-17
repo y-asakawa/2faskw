@@ -27,14 +27,18 @@ public final class GraphicalMatrixH2Command {
     }
 
     public static void main(final String[] args) throws Exception {
-        if (args.length != 4 || !("sql".equals(args[0]) || "script".equals(args[0]))) {
+        if (args.length != 4 || !("sql".equals(args[0]) || "script".equals(args[0]) || "scalar".equals(args[0]))) {
             throw new IllegalArgumentException(
-                "usage: GraphicalMatrixH2Command sql|script JDBC_URL USER SQL_OR_FILE");
+                "usage: GraphicalMatrixH2Command sql|script|scalar JDBC_URL USER SQL_OR_FILE");
         }
         final String password = readPassword();
         Class.forName("org.h2.Driver");
         try (Connection connection = DriverManager.getConnection(args[1], args[2], password)) {
-            if ("sql".equals(args[0])) {
+            if ("scalar".equals(args[0])) {
+                try (var statement = connection.createStatement(); var result = statement.executeQuery(args[3])) {
+                    if (result.next()) { System.out.println(java.util.Objects.toString(result.getString(1), "")); }
+                }
+            } else if ("sql".equals(args[0])) {
                 runSql(connection, args[3]);
             } else {
                 runScript(connection, Path.of(args[3]));

@@ -73,6 +73,17 @@ class MfaCompletionTest {
             fixture().replace("2023-11-14T22:13:20.123Z", Instant.MIN.toString())));
     }
 
+    @Test void offsetTimestampKeepsMfaCompletionEpochAndRejectsAChangedInstant() throws Exception {
+        final String fixture = fixture();
+        final int timestampEnd = fixture.indexOf(' ');
+        final String line = "ts=2023-11-15T07:13:20.123+09:00" + fixture.substring(timestampEnd);
+        final RawAuditEvent parsed = new AuditLogParser(CLOCK).parse(line);
+        assertEquals(TIME, parsed.occurredAt());
+        assertEquals(TIME.toEpochMilli(), MfaCompletionInfo.decode(parsed.detail()).completedAt());
+        assertThrows(AuditLogParser.ParseException.class, () -> new AuditLogParser(CLOCK).parse(
+            line.replace("07:13:20.123+09:00", "07:13:20.124+09:00")));
+    }
+
     @Test void outerEscapeIsDecodedOnlyOnceBeforeBasicBase64AndForm() throws Exception {
         final String encoded = encode(form().replace("scope=sso", "scope=other"));
         final String line = fixture().substring(0, fixture().indexOf("detail=")) + "detail=" + encoded.replace("=", "\\=");

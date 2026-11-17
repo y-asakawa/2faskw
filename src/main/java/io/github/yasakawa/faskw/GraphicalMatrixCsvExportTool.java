@@ -42,6 +42,10 @@ public final class GraphicalMatrixCsvExportTool {
             for (final String line : lines) {
                 System.out.println(line);
             }
+            if (System.out.checkError()) { throw new java.io.IOException("EXPORT_OUTPUT_FAILED"); }
+            GraphicalMatrixAdminAuditClient.send("READ_RESULT", "EXPORT_READ", "NOT_ATTEMPTED",
+                List.of(GraphicalMatrixCliOperationReport.changed("*", 0,
+                    java.util.Map.of(GraphicalMatrixCliOperationReport.Field.EXPORTED_ROWS, Integer.toString(lines.size())))));
             System.err.println("CSV export completed: rows=" + lines.size());
         } catch (Exception ex) {
             System.err.println("ERROR: " + safeDetail(ex));

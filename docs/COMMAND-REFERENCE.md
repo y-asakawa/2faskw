@@ -17,6 +17,14 @@
 - SP管理CLIはroot実行が必要である。DB管理CLIはIdP上では`sudo`で実行する。
 - パスワード、sequence、TOTP seed、bearer token、秘密鍵を端末履歴・画面・通常ログへ出力しない。
 
+v1.4.2の管理CLI更新・CSV exportでは専用監査が必須である。IdPへ初めて導入する場合は、
+配布物を展開した場所で`sudo bash ./bin/graphicalmatrix-admin-audit-prepare.sh --apply`を実行する。
+通常は親CLIをrootで実行し、H2 worker用にJettyへ監査権限を与えない。
+準備コマンドは既存logを消さない。終了73は更新前の監査不能、74は確定済み／不明のため監査を
+確認してから判断する状態である。74で同じコマンドを無条件に再実行しない。
+`sudo tail -n 30 /var/log/2faskw/admin-audit.log`で対象とop_id、db_resultを確認できる。
+RESETの確認や`-y`、各コマンドの即時更新／`--apply`の区別は変更しない。
+
 ### 1.1 例中の置換値
 
 | 表記 | 指定する値 | 例・注意 |

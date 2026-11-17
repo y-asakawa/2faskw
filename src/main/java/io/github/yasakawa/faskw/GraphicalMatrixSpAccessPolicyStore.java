@@ -24,7 +24,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -86,7 +85,7 @@ final class GraphicalMatrixSpAccessPolicyStore {
                 snapshot = candidate;
                 modifiedMillis = attributes.lastModifiedTime().toMillis();
                 fileKey = attributes.fileKey();
-                LOG.info("Reloaded 2FAS-KW SP access policy at {}", Instant.now());
+                LOG.info("Reloaded 2FAS-KW SP access policy at {}", GraphicalMatrixLogTimestamp.now());
             } catch (Exception ex) {
                 LOG.error("Unable to reload 2FAS-KW SP access policy; retaining last known good "
                     + "snapshot", ex);
