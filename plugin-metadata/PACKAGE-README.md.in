@@ -27,9 +27,15 @@ sudo ./bin/graphicalmatrix-plugin-config.sh \
   --idp-home /opt/shibboleth-idp \
   --apply
 
+sudo bash ./bin/graphicalmatrix-admin-audit-prepare.sh --apply
+
 sudo /opt/shibboleth-idp/bin/build.sh
 sudo systemctl restart jetty-idp.service
 ```
+
+v1.4.2以降の管理CLI更新は`/var/log/2faskw/admin-audit.log`へ必須監査を記録します。
+上の準備は既存logを空にしません。親CLIはrootまたは信頼済み管理者で実行し、Jettyへ
+監査書込み権限を与えません。終了74は更新済み／不明のため、同じ操作を無条件に再実行しないでください。
 
 ## 詳細文書
 

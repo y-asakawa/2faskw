@@ -13,6 +13,7 @@
 | Class | Main methods | Responsibility |
 | --- | --- | --- |
 | `GraphicalMatrixRuntime` | `idpHome()`, `repository()`, `auditLogger()` | IdP runtimeの共有入口 |
+| `GraphicalMatrixLogTimestamp` | `now()`, `format()` | Shared log presentation in the JVM system zone, with a numeric offset and unchanged instant/precision. Not for DB/API timestamps or migration IDs. |
 | `GraphicalMatrixConfig` | `load()`, `resolveGraphicalToken()`, `validateSequence()` | 画像行列・challenge・表示・lockout設定の読込と検証 |
 | `GraphicalMatrixSaveDataConfig` | `load()`, `isLdap()` | DB/LDAP保存先の選択 |
 | `GraphicalMatrixDbConfig` | `load()`, pool getters | JDBC設定の検証 |
@@ -186,6 +187,26 @@ Dashboardは別Maven moduleです。plugin本体のunit testだけでは検証�
 | SP access | AccessPolicy/Evaluator | ContextCheck XML、audit、runtime reload |
 | Admin API | ApiServlet | ApiConfig、OpenAPI、curl/security tests |
 | responsive UI | AssetServlet、CSS | Config、template、desktop/mobile tests |
+
+## Administrative CLI Audit (v1.4.2)
+
+The shell CLI is supervised by `GraphicalMatrixAdminAuditTool.run()` / `State.accept()` / `State.finish()`.
+Only the parent opens the mandatory audit sink. `GraphicalMatrixAdminAuditClient.Transaction` tracks
+statement execution, commit acknowledgement and rollback separately, including H2 workers launched via sudo.
+`GraphicalMatrixAdminAuditWriter.append()` validates ownership, permissions and links, then locks, appends,
+forces and closes the sink. `GraphicalMatrixCliOperationReport` limits accepted metadata.
+`GraphicalMatrixCliSqlCommand.execute()` handles generated write SQL, JDBC counts and RETURNING targets;
+human-readable output is not used as commit evidence. `rowReport()` reads safe post-state in that same transaction.
+
+For log producers, `deployment_id` / `db_target_id` / `op_id` / `parent_op_id` generation,
+sequence allocation, result interpretation and read-only tracing examples, see
+[LOGGING.md](./LOGGING.md). These fields correlate records; they are not signatures,
+idempotency keys, physical database identifiers or guarantees of successful execution.
+
+Primary tests: `GraphicalMatrixAdminAuditWriterTest`, `GraphicalMatrixAdminAuditStateTest`,
+`GraphicalMatrixAdminAuditCliTest`, `GraphicalMatrixCliSqlCommandTest`, plus existing shell regressions.
+`GraphicalMatrixAdminAuditFixture` and `scripts/tests/audit-java-fixture.sh` are test-only ownership adapters;
+neither belongs in a runtime distribution. Production provides no ownership override or audit-disable switch.
 
 ## Test mapping
 

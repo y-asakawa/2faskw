@@ -53,6 +53,21 @@ class AuditLogParserTest {
     }
 
     @Test
+    void mixedUtcAndOffsetLogsPreserveTheSameInstantAndPrecision() throws Exception {
+        final Instant expected = Instant.parse("2026-07-29T23:59:00.123456789Z");
+        for (String timestamp : new String[]{"2026-07-29T23:59:00.123456789Z",
+                "2026-07-30T08:59:00.123456789+09:00", "2026-07-30T05:44:00.123456789+05:45",
+                "2026-07-29T19:59:00.123456789-04:00"}) {
+            assertEquals(expected, parser.parse("ts=" + timestamp
+                + " event=VERIFY user=user001 result=OK ip=- session=- challenge=- detail=matched").occurredAt());
+        }
+        assertThrows(AuditLogParser.ParseException.class, () -> parser.parse(
+            "ts=2026-07-29T23:59:00 event=VERIFY user=user001 result=OK ip=- session=- challenge=- detail=matched"));
+        assertThrows(AuditLogParser.ParseException.class, () -> parser.parse(
+            "ts=2026-07-31T09:00:01+09:00 event=VERIFY user=user001 result=OK ip=- session=- challenge=- detail=matched"));
+    }
+
+    @Test
     void preservesUnderscoresInUserIds() throws Exception {
         final RawAuditEvent event = parser.parse(
                 "ts=2026-07-29T23:59:00Z event=VERIFY user=user_001 result=OK "

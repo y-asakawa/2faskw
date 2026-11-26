@@ -342,6 +342,7 @@ cp db.properties "$DIST_DIR/conf/graphicalmatrix/db.properties.idpnew"
 cp ldap.properties "$DIST_DIR/conf/graphicalmatrix/ldap.properties.idpnew"
 cp webauthn-ldap.properties "$DIST_DIR/conf/graphicalmatrix/webauthn-ldap.properties.idpnew"
 cp admin.properties "$DIST_DIR/conf/graphicalmatrix/admin.properties.idpnew"
+cp admin-audit.properties "$DIST_DIR/conf/graphicalmatrix/admin-audit.properties.idpnew"
 sed \
   -e 's/^[[:space:]]*graphicalmatrix[.]api[.]enabled[[:space:]]*=.*/graphicalmatrix.api.enabled = false/' \
   api.properties > "$DIST_DIR/conf/graphicalmatrix/api.properties.idpnew"
@@ -362,6 +363,8 @@ done
 cp graphicals/* "$DIST_DIR/conf/graphicalmatrix/graphicals/"
 
 cp graphicalmatrix-db.sh "$DIST_DIR/bin/graphicalmatrix-db.sh"
+cp scripts/graphicalmatrix-admin-audit-prepare.sh "$DIST_DIR/bin/graphicalmatrix-admin-audit-prepare.sh"
+chmod 0755 "$DIST_DIR/bin/graphicalmatrix-admin-audit-prepare.sh"
 cp graphicalmatrix-sp.sh "$DIST_DIR/bin/graphicalmatrix-sp.sh"
 chmod 0755 "$DIST_DIR/bin/graphicalmatrix-db.sh"
 chmod 0755 "$DIST_DIR/bin/graphicalmatrix-sp.sh"
@@ -468,21 +471,25 @@ cp target/plugin-lib/*.jar "$ADMIN_DIST_DIR/lib/"
 cp graphicalmatrix-db.sh "$ADMIN_DIST_DIR/bin/graphicalmatrix-db.sh"
 cp scripts/graphicalmatrix-db-migration.sh "$ADMIN_DIST_DIR/bin/graphicalmatrix-db-migration.sh"
 cp scripts/graphicalmatrix-admin-install.sh "$ADMIN_DIST_DIR/bin/graphicalmatrix-admin-install.sh"
+cp scripts/graphicalmatrix-admin-audit-prepare.sh "$ADMIN_DIST_DIR/bin/graphicalmatrix-admin-audit-prepare.sh"
 cp scripts/graphicalmatrix-csv-import-runner.sh "$ADMIN_DIST_DIR/bin/graphicalmatrix-csv-import-runner.sh"
 chmod 0755 \
   "$ADMIN_DIST_DIR/bin/graphicalmatrix-db.sh" \
   "$ADMIN_DIST_DIR/bin/graphicalmatrix-db-migration.sh" \
   "$ADMIN_DIST_DIR/bin/graphicalmatrix-admin-install.sh" \
+  "$ADMIN_DIST_DIR/bin/graphicalmatrix-admin-audit-prepare.sh" \
   "$ADMIN_DIST_DIR/bin/graphicalmatrix-csv-import-runner.sh"
 
 cp db.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/db.properties.adminnew"
 cp ldap.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/ldap.properties.adminnew"
 cp graphicalmatrix.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/graphicalmatrix.properties.adminnew"
 cp admin.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/admin.properties.adminnew"
+cp admin-audit.properties "$ADMIN_DIST_DIR/conf/graphicalmatrix/admin-audit.properties.adminnew"
 cp postgresql-schema.sql "$ADMIN_DIST_DIR/conf/graphicalmatrix/postgresql-schema.sql"
 cp examples/systemd/graphicalmatrix-csv-import.path "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.path"
 cp examples/systemd/graphicalmatrix-csv-import.service "$ADMIN_DIST_DIR/examples/systemd/graphicalmatrix-csv-import.service"
 cp examples/logrotate/graphicalmatrix-csv-import "$ADMIN_DIST_DIR/examples/logrotate/graphicalmatrix-csv-import"
+cp examples/logrotate/graphicalmatrix-admin-audit "$ADMIN_DIST_DIR/examples/logrotate/graphicalmatrix-admin-audit"
 cp examples/logrotate/README.md "$ADMIN_DIST_DIR/examples/logrotate/README.md"
 
 render_template plugin-metadata/ADMIN-PACKAGE-README.md.in "$ADMIN_DIST_DIR/README.md"

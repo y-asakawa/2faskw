@@ -56,6 +56,8 @@ PostgreSQL client toolsの配置を環境に合わせて読み替える必要が
     graphicalmatrix-db.sh
     graphicalmatrix-db-migration.sh
     graphicalmatrix-admin-install.sh
+    graphicalmatrix-admin-audit-prepare.sh
+    graphicalmatrix-csv-import-runner.sh
 
   lib/
     2faskw-idp-plugin-<VERSION>.jar
@@ -67,6 +69,7 @@ PostgreSQL client toolsの配置を環境に合わせて読み替える必要が
     db.properties.adminnew
     graphicalmatrix.properties.adminnew
     admin.properties.adminnew
+    admin-audit.properties.adminnew
     postgresql-schema.sql
 
   examples/systemd/
@@ -602,18 +605,54 @@ ERROR: client certificate is required.
 ERROR: plaintext sequence storage is not allowed in production mode.
 ```
 
-### 6.3 CLI監査ログ設計
+### 6.3 CLI監査ログ
 
-**現行v1.4.1のCLI直接操作には、以下の専用監査は未実装である。** sudoのcommand記録や
-端末への結果表示を、対象利用者のDB変更成功の履歴と同一視しない。
-v1.4.2で追加する詳細は[管理CLI監査ログ設計](./release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md)を参照する。
+v1.4.2から、IdP同梱CLIとAdmin Toolsの更新、RESET、CSV取込、保存方式移行、機微情報を
+出力するCSV exportを`/var/log/2faskw/admin-audit.log`へ記録する。専用DB履歴テーブルは追加しない。
+コマンド名、RESETのYES/NO・`-y`、dry-runと`--apply`は従来どおりである。
+管理CLIとCSV処理のログ日時も、v1.4.2以降は実行環境のシステムタイムゾーンに従い、
+UTCの`Z`またはJSTの`+09:00`等を付ける。Javaの`-Duser.timezone`／`TZ`で上書きしていないかも確認する。
+詳細は[ログ日時の共通ルール](./LOG-REFERENCE.md#log-timezone)を参照する。
+Admin Toolsインストーラーは監査領域を非破壊で準備する。IdPへの導入・更新時は次を実行する。
 
-設計上は`/var/log/2faskw/admin-audit.log`へ、日時、OS実行主体、対象利用者、操作、
-変更の確定結果を記録する。秘密の画像列、TOTP seed、鍵、password、raw commandは出さない。
-操作開始・dry-run・成功・中止・失敗・部分更新・commit不明を区別する。
-DB更新前の監査障害では変更を止め、DB更新後の監査障害では更新済みと明示する方針である。
-ファイルを手作業で作るだけでは現行CLIの出力は増えない。準備・権限・rotation・導入手順は
-v1.4.2の実装と検証に合わせて更新する。
+```bash
+sudo bash ./bin/graphicalmatrix-admin-audit-prepare.sh --apply
+sudo ls -ld /var/log/2faskw
+sudo ls -l /var/log/2faskw/admin-audit.log /var/log/2faskw/admin-audit.lock
+```
+
+ディレクトリは`root:graphicalmatrix-admin 0750`、logと安定したlockファイルは同じ所有者の
+`0660`とする。既存のlogを空にしない。先祖ディレクトリもroot所有かつgroup/other書込み不可が
+必要で、不適合なら準備は停止する。独自パスではroot管理の親を選び、準備コマンドの
+`--directory`と`admin-audit.properties`のlog/lock両方を合わせる。
+通常は`sudo graphicalmatrix-db.sh ...`として親CLIをrootで実行する。
+非root運用では、信頼済み管理者・CSV serviceアカウントだけを`graphicalmatrix-admin`へ追加し、
+別途DB設定と必要な鍵の読取り権限を整える。H2内部workerのためにJettyへ監査書込み権限を与えない。
+ログ書込み主体とH2 workerはUnix domain socketで連絡し、sudoの追加FD保持には依存しない。
+
+```bash
+sudo grep 'target_user=user001 ' /var/log/2faskw/admin-audit.log | tail -n 20
+sudo tail -n 30 /var/log/2faskw/admin-audit.log
+```
+
+`ADMIN_CLI_START`、確定後の`ADMIN_CLI_CHANGE`、`ADMIN_CLI_END`を同じ`op_id`で追う。
+`result`と`db_result`を両方確認する。`NO_MATCH`は対象0件、`PARTIAL`は途中段階／batchまで確定、
+`UNKNOWN`はcommit確認不能である。確定後の表示失敗は`stage=DISPLAY`、`db_result=COMMITTED`として
+成功済み更新を取り消した扱いにしない。CSVは同一snapshotのSHA-256、対象、行番号、A/M/Dを記録し、
+トランザクションのrollbackでは利用者ごとの成功を出さない。
+件数は段階・行ごとの合計であり、同じ利用者の複数操作を重複排除した人数ではない。
+snapshotのSHA-256は検証・更新前に記録するため、拒否・rollbackでも同一ファイルを追跡できる。
+
+終了`73`は監査不能による更新前の停止、`74`は更新済みまたは確定確認不能な状態での監査不完全を示す。
+`74`を受けたCSV等を無条件に再投入せず、`op_id`、DBの現在状態、既存ログを確認する。
+秘密の画像列、seed、鍵、password、raw command、SQL、端末出力は専用監査へ転記しない。
+`SUDO_USER`は未検証のclaimであり、実OS UID/EUIDと区別する。共有serviceユーザーからCSV送信者本人は
+特定できない。通常の照会は対象外だが、`autoInit=true`のDDLには独立した`SCHEMA_INIT`を記録する。
+
+rotationは[LOGROTATE.md](./LOGROTATE.md)の専用サンプルを使う。既定ではsyslog転送しない。
+root、DB管理者、監査ファイルの書込権限者による迂回・改変を防ぐ仕組みではない。
+直接SQL、直接内部Java、別CLIのDB全体復元、公式WebAuthn画面は対象外である。
+詳細は[管理CLI監査設計](./release-notes/v1.4.2-CLI-ADMIN-AUDIT-DESIGN.md)を参照する。
 
 ### 6.4 運用上の注意
 
@@ -625,7 +664,7 @@ v1.4.2の実装と検証に合わせて更新する。
 - 本番ではAdmin Tools実行OSグループを限定する。
 - 本番では `plaintext` sequence保存方式を拒否する。
 - 本番では書き込み系操作に `--apply` を必須にする。
-- 本番ではCLI操作の記録を必須にする。v1.4.1の専用監査は未実装のため、作業記録・適用結果の保存を別途用意する。
+- 本番ではCLI操作の記録を必須にする。v1.4.2の専用監査に加え、必要なら集中転送と組織の作業記録で補強する。
 - 管理CLIはDB VIPへ接続する。
 - DB直接SQL更新ではなく、Admin ToolsまたはAPI経由の管理を標準とする。
 - sequence保存方式が `hash` または暗号化の場合、直接SQL登録は避ける。

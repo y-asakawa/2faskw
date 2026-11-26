@@ -170,6 +170,21 @@ Dashboard設定も対象です。H2 indexだけを保存して監査logを失う
 
 ## 4. 整合したBackupの取得
 
+### v1.4.2の管理CLI監査も保管する
+
+`/var/log/2faskw/admin-audit.log`、rotation済みの同名log、
+`conf/graphicalmatrix/admin-audit.properties`はIdPホームの外も含めて保管対象にする。
+専用logは利用者管理の履歴であり、DBの現在状態やDashboard indexから復元できない。
+管理書込み・CSV runner・rotationと競合しない保守時間に保護済みbackupへ取得する。
+通常SSOの監査ログは別であり、この保守だけのために認証を止める要件は追加しない。
+
+復旧時も現在の監査logを古いbackupで置換・truncateしない。古い履歴は出所を保持した別の
+読取り用アーカイブとして保管し、現行のlogへ無条件に連結しない。書込先は準備コマンドで
+root:graphicalmatrix-admin、0660に整える。`admin-audit.lock`の内容は復旧対象ではなく、
+実行中CLIがある間にlockファイルを削除・差替えない。
+`74`で終了した操作はDB確定済み／不明なので、backupへのrollbackやCSV再投入を機械的に実行せず、
+現在DBとop_idの履歴から個別判断する。旧CLIへ切り戻す場合も新しい監査履歴を残す。
+
 ### 4.1 事前確認
 
 1. backup世代IDを決める。

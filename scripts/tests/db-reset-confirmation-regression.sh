@@ -22,6 +22,16 @@ EOF
 cat > "$TMP/bin/java" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$3" == io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool ]]; then
+  if [[ "$4" == run ]]; then
+    shift 4
+    home="$1"; script="$2"; shift 2
+    argv=()
+    while IFS= read -r -d '' arg <&3; do argv+=("$arg"); done
+    GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET=mock-only bash "$script" "${argv[@]}"
+  fi
+  exit 0
+fi
 [[ "$3" == io.github.yasakawa.faskw.GraphicalMatrixInitialSequenceTool ]]
 [[ "$4" == reset && "$6" == alice ]]
 printf 'RESET\n' >> "$GM_RESET_CALLS"

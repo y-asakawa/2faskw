@@ -708,6 +708,8 @@ enrollment_write() {
   if [[ "$db_type" == "h2" ]]; then cp="$(h2_tool_classpath)"; fi
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET="${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN="${GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN:-}" \
       java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixInitialSequenceTool "$operation" "$IDP_HOME" "$user"
   else
     java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixInitialSequenceTool "$operation" "$IDP_HOME" "$user"
@@ -804,6 +806,8 @@ totp_seed_storage_migrate() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET="${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN="${GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN:-}" \
       bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedMigrationTool "$1" "$IDP_HOME"' _ "$mode"
   else
     java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixTotpSeedMigrationTool "$mode" "$IDP_HOME"
@@ -818,6 +822,8 @@ sequence_storage_migrate() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET="${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN="${GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN:-}" \
       bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixSequenceMigrationTool "$1" "$IDP_HOME"' _ "$mode"
   else
     java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixSequenceMigrationTool "$mode" "$IDP_HOME"
@@ -831,6 +837,8 @@ csv_export_stream() {
   if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
     sudo -u jetty env SEQUENCE_TOOL_CP="$cp" IDP_HOME="$IDP_HOME" \
       DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET="${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN="${GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN:-}" \
       bash -c 'java -cp "$SEQUENCE_TOOL_CP" io.github.yasakawa.faskw.GraphicalMatrixCsvExportTool "$IDP_HOME"'
   else
     java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixCsvExportTool "$IDP_HOME"
@@ -909,11 +917,6 @@ db_user="$(prop 'graphicalmatrix.db.user' 'sa')"
 db_password="$(prop 'graphicalmatrix.db.password' '')"
 db_password_file="$(prop 'graphicalmatrix.db.passwordFile' '')"
 
-if [[ -z "$db_password" && -n "$db_password_file" ]]; then
-  [[ -r "$db_password_file" ]] || die "DB password file is not readable: $db_password_file"
-  db_password="$(tr -d '\r\n' < "$db_password_file")"
-fi
-
 if [[ "$db_driver" == *postgresql* || "$db_url" == jdbc:postgresql:* ]]; then
   db_type="postgresql"
 else
@@ -925,6 +928,61 @@ if [[ "$db_type" == "postgresql" ]]; then
   db_auto_init_default="false"
 fi
 db_auto_init="$(prop 'graphicalmatrix.db.autoInit' "$db_auto_init_default" | tr '[:upper:]' '[:lower:]')"
+
+audit_needed=1
+case "${1:-}" in
+  list|show)
+    case "$db_auto_init" in 1|true|yes|on) ;; *) audit_needed=0 ;; esac ;;
+  config-help|sequence-mode|totp-seed-mode|security-status|webauthn-list|-h|--help|help|"") audit_needed=0 ;;
+esac
+if [[ "${2:-}" =~ ^[Rr][Ee][Ss][Ee][Tt]$ ]]; then audit_needed=1; fi
+if [[ "$audit_needed" == "1" ]]; then
+  audit_cp="$(sequence_tool_classpath)"
+  export DB_PROPERTIES GRAPHICAL_PROPERTIES
+  export GRAPHICALMATRIX_HOME="$IDP_HOME"
+  if [[ -n "${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" ]]; then
+    java -cp "$audit_cp" io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool verify || exit 73
+  else
+    java -cp "$audit_cp" io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool \
+      run "$IDP_HOME" "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" 3< <(builtin printf '%s\0' "$@")
+    exit "$?"
+  fi
+fi
+
+if [[ -z "$db_password" && -n "$db_password_file" ]]; then
+  [[ -r "$db_password_file" ]] || die "DB password file is not readable: $db_password_file"
+  db_password="$(tr -d '\r\n' < "$db_password_file")"
+fi
+
+audit_mark() {
+  [[ -n "${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" ]] || return 0
+  java -cp "$(sequence_tool_classpath)" io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool mark "$1"
+}
+
+audit_sql() {
+  local kind="$1" stage="$2" target="$3" changes="$4" cp
+  cp="$(sequence_tool_classpath)"
+  if [[ "$db_type" == "h2" ]]; then cp="$(h2_tool_classpath)"; fi
+  if [[ "$db_type" == "h2" && "$(id -un)" != "jetty" ]]; then
+    sudo -u jetty env DB_PROPERTIES="$DB_PROPERTIES" GRAPHICAL_PROPERTIES="$GRAPHICAL_PROPERTIES" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET="${GRAPHICALMATRIX_ADMIN_AUDIT_SOCKET:-}" \
+      GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN="${GRAPHICALMATRIX_ADMIN_AUDIT_TOKEN:-}" \
+      java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixCliSqlCommand "$IDP_HOME" "$kind" "$stage" "$target" "$changes"
+  else
+    java -cp "$cp" io.github.yasakawa.faskw.GraphicalMatrixCliSqlCommand "$IDP_HOME" "$kind" "$stage" "$target" "$changes"
+  fi
+}
+
+audit_update() {
+  local sql="$1" stage="$2" target="$3" changes="${4:-}"
+  [[ -z "$init_sql" ]] || run_sql "$init_sql" >/dev/null
+  builtin printf '%s' "$sql" | audit_sql enrollment "$stage" "$target" "$changes"
+}
+
+audit_display() {
+  audit_mark DISPLAY
+  run_sql "$select_public_columns WHERE user_id = '$1';"
+}
 
 jdbc_to_psql_url() {
   local url="$1"
@@ -1018,6 +1076,10 @@ run_sql_postgresql() {
 }
 
 run_sql() {
+  if [[ -n "${init_sql:-}" && "$1" == "$init_sql" ]]; then
+    builtin printf '%s' "$1" | audit_sql schema SCHEMA_INIT '*' ''
+    return
+  fi
   if [[ "$db_type" == "postgresql" ]]; then
     run_sql_postgresql "$1"
   else
@@ -1060,8 +1122,7 @@ run_scalar_postgresql() {
 }
 
 run_scalar_h2() {
-  run_h2_tool sql "$1" \
-    | awk 'NF && $0 !~ /^initial_sequence[[:space:]]*$/ && $0 !~ /^\([0-9]+ row/ && $0 !~ /^\(Update count:/ { print; exit }'
+  run_h2_tool scalar "$1"
 }
 
 run_scalar() {
@@ -1280,9 +1341,9 @@ END
 SQL
   else
     cat <<SQL
-SELECT CASEWHEN(EXISTS (
+SELECT 1 / CASEWHEN(EXISTS (
   SELECT 1 FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'
-), 0, 1/0) AS csv_user_must_exist;
+), 1, 0) AS csv_user_must_exist;
 SQL
   fi
 }
@@ -1301,9 +1362,9 @@ END
 SQL
   else
     cat <<SQL
-SELECT CASEWHEN(EXISTS (
+SELECT 1 / CASEWHEN(EXISTS (
   SELECT 1 FROM graphicalmatrix_enrollment WHERE user_id = '$user_q'
-), 1/0, 0) AS csv_user_must_not_exist;
+), 0, 1) AS csv_user_must_not_exist;
 SQL
   fi
 }
@@ -1312,13 +1373,24 @@ csv_import() {
   local csv_file="$1"
   local apply_mode="${2:-0}"
   local provisioning_mode="${3:-0}"
-  local csv_input="$csv_file"
+  local csv_work csv_input sql_file rows_file preview_file audit_rows_file csv_sha256
+  csv_work="$(mktemp -d)"
+  chmod 0700 "$csv_work"
+  csv_input="$csv_work/source.csv"
+  sql_file="$csv_work/import.sql"
+  rows_file="$csv_work/rows.txt"
+  preview_file="$csv_work/preview.txt"
+  audit_rows_file="$csv_work/audit.tsv"
+  trap 'rm -rf "$csv_work"' RETURN
+  trap "rm -rf -- $(printf '%q' "$csv_work")" EXIT
+  umask 077
   if [[ "$csv_file" == "-" ]]; then
-    csv_input="$(mktemp)"
     cat > "$csv_input"
   else
     [[ -r "$csv_file" ]] || die "CSV file is not readable: $csv_file"
+    cat -- "$csv_file" > "$csv_input"
   fi
+  csv_sha256="$(java -cp "$(sequence_tool_classpath)" io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool file-sha256 "$csv_input")"
 
   command -v python3 >/dev/null 2>&1 || die "python3 is required for CSV import"
 
@@ -1326,15 +1398,8 @@ csv_import() {
   choice="$(config_prop 'graphicalmatrix.choice' '4')"
   [[ "$choice" =~ ^[0-9]+$ && "$choice" -gt 0 ]] || die "invalid graphicalmatrix.choice: $choice"
 
-  local sql_file rows_file preview_file
-  sql_file="$(mktemp)"
-  rows_file="$(mktemp)"
-  preview_file="$(mktemp)"
-  trap 'rm -f "$sql_file" "$rows_file" "$preview_file"; [[ "$csv_file" == "-" ]] && rm -f "$csv_input"' RETURN
-
   {
     echo "BEGIN;"
-    echo "$init_sql"
   } > "$sql_file"
 
   python3 - "$csv_input" > "$rows_file" <<'PY'
@@ -1382,7 +1447,9 @@ PY
         printf "line=%s action=D user_id=%s\n" "$line_no" "$user" >> "$preview_file"
       fi
       delete_count=$((delete_count + 1))
+      printf '%s\tD\t\t\t%s\n' "$user" "$line_no" >> "$audit_rows_file"
       {
+        echo "SELECT 'D' AS audit_csv_action, '$user_q' AS audit_target, '$line_no' AS audit_line;"
         csv_expect_exists_sql "$user_q"
         if [[ "$provisioning_mode" == "1" ]]; then
           echo "UPDATE graphicalmatrix_enrollment"
@@ -1433,6 +1500,7 @@ PY
       initial_sequence_q="$(sql_quote "$(initial_sequence_plaintext "$normalized_initial_sequence")")"
     fi
     method_q="$(sql_quote "$method")"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$user" "$action" "$method" "$force_sql" "$line_no" >> "$audit_rows_file"
     printf "line=%s action=%s user_id=%s mfa_method=%s force_sequence_change=%s initial_sequence=%s sequence=%s\n" \
       "$line_no" "$action" "$user" "$method" "$force_value" "[protected-or-unset]" "[protected]" >> "$preview_file"
     if [[ "$action" == "A" ]]; then
@@ -1441,6 +1509,7 @@ PY
       modify_count=$((modify_count + 1))
     fi
     {
+      echo "SELECT '$action' AS audit_csv_action, '$user_q' AS audit_target, '$method_q' AS audit_method, '$force_sql' AS audit_force, '$line_no' AS audit_line;"
       if [[ "$action" == "A" ]]; then
         if [[ "$provisioning_mode" != "1" ]]; then
           csv_expect_not_exists_sql "$user_q"
@@ -1538,11 +1607,14 @@ PY
   echo
 
   if [[ "$apply_mode" != "1" ]]; then
+    java -cp "$(sequence_tool_classpath)" io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool csv-plan "$csv_sha256" < "$audit_rows_file"
     echo "Dry-run only. Re-run with --apply to update the DB."
     return 0
   fi
 
-  run_sql_file "$sql_file"
+  [[ -z "$init_sql" ]] || run_sql "$init_sql" >/dev/null
+  audit_sql csv IMPORT_CSV '*' "CSV_SHA256=$csv_sha256" < "$sql_file"
+  audit_mark DISPLAY
   echo "CSV import completed: file=$csv_file rows=$imported skipped=$skipped mode=$([[ "$provisioning_mode" == "1" ]] && echo provisioning || echo standard) db=$db_type"
 }
 
@@ -1650,7 +1722,7 @@ WHERE user_id = '$user_q';"
     return
   fi
 
-  run_sql "
+  builtin printf '%s' "
 WITH expanded AS (
   SELECT
     s.context,
@@ -1688,7 +1760,7 @@ SELECT
   count(*) AS storage_rows_reset,
   COALESCE(sum(credential_count), 0) AS credentials_reset
 FROM updated;
-$method_sql"
+$method_sql" | audit_sql webauthn RESET_WEBAUTHN "$user" ''
 }
 
 webauthn_delete_credential() {
@@ -1729,7 +1801,10 @@ ORDER BY context, storage_id;"
     return
   fi
 
-  run_sql "
+  local credential_fingerprint
+  credential_fingerprint="$(builtin printf '%s' "$credential_id" | java -cp "$(sequence_tool_classpath)" \
+    io.github.yasakawa.faskw.GraphicalMatrixAdminAuditTool credential-sha256)"
+  builtin printf '%s' "
 WITH expanded AS (
   SELECT
     s.context,
@@ -1771,7 +1846,7 @@ updated AS (
 SELECT
   count(*) AS storage_rows_updated,
   COALESCE(sum(removed_count), 0) AS credentials_deleted
-FROM updated;"
+FROM updated;" | audit_sql webauthn DELETE_WEBAUTHN_CREDENTIAL "$user" "CREDENTIAL_ID_SHA256=$credential_fingerprint"
 }
 
 webauthn_delete_user_sql() {
@@ -1897,15 +1972,15 @@ physical_delete_user() {
   fi
 
   echo "Physical delete: user=$user status=$status mfa_method=$method webauthn_credentials=$credential_count missing_enrollment_policy=$policy"
-  run_sql "UPDATE graphicalmatrix_enrollment
+  audit_update "UPDATE graphicalmatrix_enrollment
 SET status = 'DISABLED', totp_registration_id = NULL,
     totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" DISABLE_BEFORE_DELETE "$user" 'STATUS=DISABLED'
   echo "Enrollment disabled before credential cleanup: user=$user"
 
   if [[ "$db_type" == "postgresql" ]]; then
     if [[ "$storage_records_present" == "1" ]]; then
-      run_sql "$(webauthn_delete_user_sql "$user_q")"
+      builtin printf '%s' "$(webauthn_delete_user_sql "$user_q")" | audit_sql webauthn CLEANUP_WEBAUTHN "$user" ''
       remaining="$(run_scalar_postgresql "$(webauthn_user_credential_count_sql "$user_q")" | tail -n 1 | trim)"
       [[ "$remaining" == "0" ]] \
         || die "WebAuthn credential cleanup verification failed; enrollment remains DISABLED"
@@ -1921,8 +1996,8 @@ WHERE user_id = '$user_q';"
     echo "WebAuthn credential cleanup is not applicable to the configured H2 enrollment database"
   fi
 
-  run_sql "DELETE FROM graphicalmatrix_enrollment
-WHERE user_id = '$user_q' AND status = 'DISABLED';"
+  audit_update "DELETE FROM graphicalmatrix_enrollment
+WHERE user_id = '$user_q' AND status = 'DISABLED';" DELETE_ENROLLMENT "$user" 'STATUS=DELETED'
   remaining="$(run_scalar "SELECT COUNT(*) FROM graphicalmatrix_enrollment WHERE user_id = '$user_q';" | tail -n 1 | trim)"
   [[ "$remaining" == "0" ]] || die "enrollment delete did not complete; user remains disabled: $user"
   echo "Physical delete completed: user=$user"
@@ -2012,7 +2087,7 @@ ORDER BY user_id;"
       echo "result=DRY_RUN"
       echo "next_command=sudo $0 invalidate-pending-totp --apply"
     else
-      run_sql "UPDATE graphicalmatrix_enrollment
+      pending_sql="UPDATE graphicalmatrix_enrollment
 SET mfa_method = 'GraphicalMatrix',
     totp_seed = NULL,
     totp_status = 'UNREGISTERED',
@@ -2025,7 +2100,13 @@ SET mfa_method = 'GraphicalMatrix',
     updated_at = $now_expr
 WHERE UPPER(totp_status) = 'PENDING'
   AND COALESCE(sequence, '') <> ''
-  AND ($pending_sequence_predicate);"
+  AND ($pending_sequence_predicate)"
+      if [[ "$db_type" == "postgresql" ]]; then
+        pending_sql="$pending_sql RETURNING user_id AS audit_target;"
+      else
+        pending_sql="SELECT user_id AS audit_target FROM FINAL TABLE ($pending_sql);"
+      fi
+      builtin printf '%s' "$pending_sql" | audit_sql targets INVALIDATE_PENDING_TOTP '*' 'MFA_METHOD=GraphicalMatrix,SEED_SET=false'
       echo "result=APPLY_OK"
       if [[ "$manual" != "0" ]]; then
         echo "warning=manual recovery remains for $manual enrollment(s)"
@@ -2044,6 +2125,7 @@ WHERE UPPER(totp_status) = 'PENDING'
     esac
     [[ "$csv_output" != "-" || "$csv_force" == "0" ]] || die "--force cannot be used with csv-export -"
     csv_export "$csv_output" "$csv_force"
+    audit_mark OUTPUT_READY
     ;;
 
   list)
@@ -2066,7 +2148,7 @@ WHERE UPPER(totp_status) = 'PENDING'
     validate_sequence "$sequence"
     user_q="$(sql_quote "$user")"
     builtin printf '%s' "$sequence" | enrollment_write current "$user"
-    run_sql "$select_public_columns WHERE user_id = '$user_q';"
+    audit_display "$user_q"
     ;;
 
   csv|provisioning-csv)
@@ -2109,7 +2191,7 @@ WHERE UPPER(totp_status) = 'PENDING'
       validate_sequence "$sequence"
       builtin printf '%s' "$sequence" | enrollment_write initial "$user"
     fi
-    run_sql "$select_public_columns WHERE user_id = '$user_q';"
+    audit_display "$user_q"
     ;;
 
   set-method)
@@ -2118,13 +2200,11 @@ WHERE UPPER(totp_status) = 'PENDING'
     validate_user "$user"
     user_q="$(sql_quote "$user")"
     method_q="$(sql_quote "$method")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET mfa_method = '$method_q', totp_registration_id = NULL,
     totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" SET_METHOD "$user" "MFA_METHOD=$method"
+    audit_display "$user_q"
     ;;
 
   set-totp-seed)
@@ -2134,31 +2214,27 @@ WHERE user_id = '$user_q';"
     validate_totp_seed "$seed"
     user_q="$(sql_quote "$user")"
     seed_q="$(sql_quote "$(totp_seed_storage_encode "$seed")")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET totp_seed = '$seed_q',
     totp_status = $totp_seed_status_expr,
     totp_registration_id = NULL,
     totp_registration_expires_at = 0,
     state_version = state_version + 1,
     updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" SET_TOTP_SEED "$user" 'SEED_SET=true'
+    audit_display "$user_q"
     ;;
 
   clear-totp-seed|reset-totp)
     user="${2:-}"
     validate_user "$user"
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET totp_seed = NULL, totp_status = 'UNREGISTERED', totp_registered_at = 0,
     totp_registration_id = NULL, totp_registration_expires_at = 0,
     state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" RESET_TOTP "$user" 'SEED_SET=false'
+    audit_display "$user_q"
     ;;
 
   webauthn-list)
@@ -2237,7 +2313,7 @@ WHERE user_id = '$user_q';"
     else
       enrollment_write allow-change-off "$user"
     fi
-    run_sql "$select_public_columns WHERE user_id = '$user_q';"
+    audit_display "$user_q"
     ;;
 
   reset-user)
@@ -2251,51 +2327,46 @@ WHERE user_id = '$user_q';"
       esac
     done
     if [[ "$reset_yes" != "1" ]] && ! confirm_user_reset "$user"; then
+      audit_mark CANCELLED
       exit 0
     fi
     user_q="$(sql_quote "$user")"
     enrollment_write reset "$user"
-    run_sql "$select_public_columns WHERE user_id = '$user_q';"
+    audit_display "$user_q"
     ;;
 
   enable)
     user="${2:-}"
     validate_user "$user"
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET status = 'ACTIVE', totp_registration_id = NULL,
     totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" ENABLE "$user" 'STATUS=ACTIVE'
+    audit_display "$user_q"
     ;;
 
   disable)
     user="${2:-}"
     validate_user "$user"
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET status = 'DISABLED', totp_registration_id = NULL,
     totp_registration_expires_at = 0, state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" DISABLE "$user" 'STATUS=DISABLED'
+    audit_display "$user_q"
     ;;
 
   unlock|reset-failures)
     user="${2:-}"
     validate_user "$user"
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET failed_count = 0, locked_until = 0,
     totp_registration_id = NULL, totp_registration_expires_at = 0,
     state_version = state_version + 1, updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" UNLOCK "$user" 'LOCKED_UNTIL=0'
+    audit_display "$user_q"
     ;;
 
   lock)
@@ -2304,16 +2375,14 @@ WHERE user_id = '$user_q';"
     validate_user "$user"
     [[ "$minutes" =~ ^[0-9]+$ ]] || die "minutes must be a non-negative integer"
     user_q="$(sql_quote "$user")"
-    run_sql "$init_sql
-UPDATE graphicalmatrix_enrollment
+    audit_update "UPDATE graphicalmatrix_enrollment
 SET locked_until = $now_expr + ($minutes * 60 * 1000),
     totp_registration_id = NULL,
     totp_registration_expires_at = 0,
     state_version = state_version + 1,
     updated_at = $now_expr
-WHERE user_id = '$user_q';
-$select_public_columns
-WHERE user_id = '$user_q';"
+WHERE user_id = '$user_q';" LOCK "$user" ''
+    audit_display "$user_q"
     ;;
 
   delete)

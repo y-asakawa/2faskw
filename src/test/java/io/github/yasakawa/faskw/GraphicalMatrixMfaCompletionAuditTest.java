@@ -17,13 +17,17 @@ class GraphicalMatrixMfaCompletionAuditTest {
         1700000000123L, null, false);
     private static final String ID = "12345678-1234-4234-8234-123456789abc";
 
-    @Test void emitterMatchesSharedDashboardFixtureExactly() throws Exception {
+    @Test void emitterPreservesSharedDashboardFixtureInstantAndPayload() throws Exception {
         Files.createDirectories(home.resolve("logs"));
         final String detail = GraphicalMatrixMfaCompletionAudit.encode(expected, result, ID, "sso",
             "https://sp.example.org/a_b?x=a+b&y=%25");
         assertTrue(new GraphicalMatrixAuditLogger(home.toString()).logCompletion("sample01", detail, null, result.completedAtMillis()));
-        assertEquals(Files.readString(Path.of("test-fixtures/mfa-completion-v1.txt")).strip(),
-            Files.readString(home.resolve("logs/graphicalmatrix-audit.log")).strip());
+        final String expectedLine = Files.readString(Path.of("test-fixtures/mfa-completion-v1.txt")).strip();
+        final String actual = Files.readString(home.resolve("logs/graphicalmatrix-audit.log")).strip();
+        final int expectedEnd = expectedLine.indexOf(' '), actualEnd = actual.indexOf(' ');
+        assertEquals(java.time.Instant.parse(expectedLine.substring(3, expectedEnd)),
+            java.time.Instant.parse(actual.substring(3, actualEnd)));
+        assertEquals(expectedLine.substring(expectedEnd), actual.substring(actualEnd));
     }
 
     @Test void writerFailureIsReportedAndOversizedDetailRejected() {
